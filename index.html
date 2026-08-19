@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.7.1">
+  <link rel="stylesheet" href="style.css?v=4.7.3">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -330,6 +330,19 @@
               <article class="panel glass">
                 <h3>Paste Tonase WhatsApp</h3>
                 <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
+                <div class="snapshot-input-meta">
+                  <label>
+                    <span>Jam Snapshot</span>
+                    <select id="tonnageSnapshotTime">
+                      <option value="">Otomatis dari header / pilih jam</option>
+                      <option value="10:00:00">10.00 WIB</option>
+                      <option value="12:00:00">12.00 WIB</option>
+                      <option value="15:00:00">15.00 WIB</option>
+                      <option value="17:00:00">17.00 WIB</option>
+                    </select>
+                  </label>
+                  <small>Jika header WhatsApp tidak ikut tercopy, tanggal memakai filter di atas dan jam memakai pilihan ini.</small>
+                </div>
                 <div class="actions">
                   <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
                   <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
@@ -606,6 +619,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.7.1"></script>
+  <script src="app.js?v=4.7.3"></script>
 </body>
 </html>
