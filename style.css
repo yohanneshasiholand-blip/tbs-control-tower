@@ -1949,3 +1949,14 @@ select option:checked{
   .master-summary-grid{grid-template-columns:repeat(2,1fr)}
   .master-directory{grid-template-columns:1fr}
 }
+
+
+/* Excel multi-file import v4.6 */
+.period-upload-info .file-btn::after{
+  content:" • multi-file";
+  opacity:.72;
+  font-size:.82em;
+}
+.compact-preview{
+  line-height:1.45;
+}
