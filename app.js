@@ -1,68 +1,123 @@
-
 const SUPABASE_URL = "https://uzakmxxdoyvioscprlpz.supabase.co";
 const SUPABASE_KEY = "sb_publishable_JyX3k5dC9RxNU1rbOsf4rA_Tdm1rwtB";
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const $ = id => document.getElementById(id);
-const rupiah = n => "Rp" + Number(n || 0).toLocaleString("id-ID", {maximumFractionDigits: 0});
-const kg = n => Number(n || 0).toLocaleString("id-ID", {maximumFractionDigits: 0}) + " kg";
-const compactKg = n => {
+const $ = (id) => document.getElementById(id);
+const rupiah = (n) =>
+  "Rp" + Number(n || 0).toLocaleString("id-ID", { maximumFractionDigits: 0 });
+const kg = (n) =>
+  Number(n || 0).toLocaleString("id-ID", { maximumFractionDigits: 0 }) + " kg";
+const compactKg = (n) => {
   n = Number(n || 0);
-  if (n >= 1_000_000) return (n/1_000_000).toLocaleString("id-ID", {maximumFractionDigits: 2}) + " jt";
-  if (n >= 1_000) return (n/1_000).toLocaleString("id-ID", {maximumFractionDigits: 0}) + " rb";
+  if (n >= 1_000_000)
+    return (
+      (n / 1_000_000).toLocaleString("id-ID", { maximumFractionDigits: 2 }) +
+      " jt"
+    );
+  if (n >= 1_000)
+    return (
+      (n / 1_000).toLocaleString("id-ID", { maximumFractionDigits: 0 }) + " rb"
+    );
   return n.toLocaleString("id-ID");
 };
-const num = s => Number(String(s || "0").replace(/[^\d]/g, "")) || 0;
-const isoDate = (d,m,y) => `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-const monthMap = {januari:1,februari:2,maret:3,april:4,mei:5,juni:6,juli:7,agustus:8,september:9,oktober:10,november:11,desember:12};
-const slots = ["10:00","12:00","15:00","17:00"];
+const num = (s) => Number(String(s || "0").replace(/[^\d]/g, "")) || 0;
+const isoDate = (d, m, y) =>
+  `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+const monthMap = {
+  januari: 1,
+  februari: 2,
+  maret: 3,
+  april: 4,
+  mei: 5,
+  juni: 6,
+  juli: 7,
+  agustus: 8,
+  september: 9,
+  oktober: 10,
+  november: 11,
+  desember: 12,
+};
+const slots = ["10:00", "12:00", "15:00", "17:00"];
 let MASTER_KP_COUNT = 0;
-let TONNAGE_PREVIEW = null, PRICE_PREVIEW = null, EXPENSE_PREVIEW = null;
-let MONTHLY_EXCEL_PREVIEW = null, ANNUAL_EXCEL_PREVIEW = null;
+let TONNAGE_PREVIEW = null,
+  PRICE_PREVIEW = null,
+  EXPENSE_PREVIEW = null;
+let MONTHLY_EXCEL_PREVIEW = null,
+  ANNUAL_EXCEL_PREVIEW = null;
 let MONITOR_MODE = "daily";
 let MASTER_DIRECTORY_DATA = [];
 let MASTER_SUPPLIER_DATA = [];
 
 const FALLBACK_KP_CODES = [
-  "ASMJ-1","ASMJ-2","BMK","BSN","BSS","FAA","GSL","GSL-INUMAN",
-  "GSS","HKBS","KIP","KS2","KWP","LBP","LSHP","MAN","MSB-2","PSM",
-  "SISL","SKA","SSL","SSM","TKWL-1","TKWL-2"
+  "ASMJ-1",
+  "ASMJ-2",
+  "BMK",
+  "BSN",
+  "BSS",
+  "FAA",
+  "GSL",
+  "GSL-INUMAN",
+  "GSS",
+  "HKBS",
+  "KIP",
+  "KS2",
+  "KWP",
+  "LBP",
+  "LSHP",
+  "MAN",
+  "MSB-2",
+  "PSM",
+  "SISL",
+  "SKA",
+  "SSL",
+  "SSM",
+  "TKWL-1",
+  "TKWL-2",
 ];
 
-
-const plotConfig = {displayModeBar:false, responsive:true};
+const plotConfig = { displayModeBar: false, responsive: true };
 const darkLayout = {
-  paper_bgcolor:"rgba(0,0,0,0)",
-  plot_bgcolor:"rgba(0,0,0,0)",
-  font:{color:"#f1ecdf", family:"Inter, Segoe UI, Arial"},
-  margin:{t:20,l:60,r:20,b:40},
-  xaxis:{gridcolor:"rgba(255,255,255,.08)", tickfont:{color:"#e5d8ca", size:13}},
-  yaxis:{gridcolor:"rgba(255,255,255,.08)", tickfont:{color:"#e5d8ca", size:13}},
-  hoverlabel:{bgcolor:"#23231f", bordercolor:"#7aff86", font:{color:"#fff"}}
+  paper_bgcolor: "rgba(0,0,0,0)",
+  plot_bgcolor: "rgba(0,0,0,0)",
+  font: { color: "#f1ecdf", family: "Inter, Segoe UI, Arial" },
+  margin: { t: 20, l: 60, r: 20, b: 40 },
+  xaxis: {
+    gridcolor: "rgba(255,255,255,.08)",
+    tickfont: { color: "#e5d8ca", size: 13 },
+  },
+  yaxis: {
+    gridcolor: "rgba(255,255,255,.08)",
+    tickfont: { color: "#e5d8ca", size: 13 },
+  },
+  hoverlabel: {
+    bgcolor: "#23231f",
+    bordercolor: "#7aff86",
+    font: { color: "#fff" },
+  },
 };
 
-function table(headers, rows, totalLast=false){
-  return `<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${
-    rows.map((r,i)=>`<tr class="${totalLast && i===rows.length-1 ? "total-row": ""}">${r.map(c=>`<td>${c ?? ""}</td>`).join("")}</tr>`).join("")
-  }</tbody></table>`;
+function table(headers, rows, totalLast = false) {
+  return `<table><thead><tr>${headers .map((h) => `<th>${h}</th>`) .join("")}</tr></thead><tbody>${rows .map( (r, i) => `<tr class="${ totalLast && i === rows.length - 1 ? "total-row" : "" }">${r.map((c) => `<td>${c ?? ""}</td>`).join("")}</tr>` ) .join("")}</tbody></table>`;
 }
 
-async function boot(){
-  const {data:{session}} = await db.auth.getSession();
-  if(session) await showApp(session.user);
+async function boot() {
+  const {
+    data: { session },
+  } = await db.auth.getSession();
+  if (session) await showApp(session.user);
 }
-async function login(){
+async function login() {
   const email = $("email").value.trim();
   const password = $("password").value;
-  const {data,error} = await db.auth.signInWithPassword({email, password});
+  const { data, error } = await db.auth.signInWithPassword({ email, password });
   $("loginMsg").textContent = error ? error.message : "";
-  if(!error) await showApp(data.user);
+  if (!error) await showApp(data.user);
 }
-async function logout(){
+async function logout() {
   await db.auth.signOut();
   location.reload();
 }
-async function showApp(user){
+async function showApp(user) {
   $("loginView").classList.add("hidden");
   $("appView").classList.remove("hidden");
   $("userLabel").textContent = user.email;
@@ -74,374 +129,573 @@ async function showApp(user){
   await loadExpenses();
   await loadHistoryFilters();
 }
-function startClock(){
+function startClock() {
   const tick = () => {
     const d = new Date();
-    $("liveDate").textContent = d.toLocaleDateString("id-ID", {day:"2-digit", month:"long", year:"numeric"});
-    $("liveClock").textContent = d.toLocaleTimeString("id-ID", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+    $("liveDate").textContent = d.toLocaleDateString("id-ID", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    });
+    $("liveClock").textContent = d.toLocaleTimeString("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
   };
-  tick(); setInterval(tick, 1000);
+  tick();
+  setInterval(tick, 1000);
 }
-function bindNav(){
-  document.querySelectorAll(".nav").forEach(btn => btn.addEventListener("click", () => goToPage(btn.dataset.page)));
+function bindNav() {
+  document
+    .querySelectorAll(".nav")
+    .forEach((btn) =>
+      btn.addEventListener("click", () => goToPage(btn.dataset.page))
+    );
 }
 
 // =========================================================
 // SIDEBAR TREE NAVIGATION
 // =========================================================
-function closeSidebarGroups(exceptId=null){
-  ["monitoringGroup","priceGroup","expenseGroup"].forEach(id=>{
-    if(id!==exceptId) $(id)?.classList.remove("open");
+function closeSidebarGroups(exceptId = null) {
+  ["monitoringGroup", "priceGroup", "expenseGroup"].forEach((id) => {
+    if (id !== exceptId) $(id)?.classList.remove("open");
   });
 }
-function toggleSidebarGroup(id){
-  const el=$(id);
-  if(!el) return;
-  const willOpen=!el.classList.contains("open");
+function toggleSidebarGroup(id) {
+  const el = $(id);
+  if (!el) return;
+  const willOpen = !el.classList.contains("open");
   closeSidebarGroups(id);
-  el.classList.toggle("open",willOpen);
+  el.classList.toggle("open", willOpen);
 }
-function setSidebarMonitoringActive(mode){
-  ["daily","monthly","yearly"].forEach(m=>{
-    const id=m==="daily"?"sideDaily":m==="monthly"?"sideMonthly":"sideYearly";
-    $(id)?.classList.toggle("active",m===mode);
+function setSidebarMonitoringActive(mode) {
+  ["daily", "monthly", "yearly"].forEach((m) => {
+    const id =
+      m === "daily"
+        ? "sideDaily"
+        : m === "monthly"
+        ? "sideMonthly"
+        : "sideYearly";
+    $(id)?.classList.toggle("active", m === mode);
   });
   $("monitoringGroup")?.classList.add("open");
 }
-async function openMonitoringSub(mode){
+async function openMonitoringSub(mode) {
   setSidebarMonitoringActive(mode);
   await goToPage("monitoring");
   setMonitorMode(mode);
 }
-async function openParentPage(page,groupId){
+async function openParentPage(page, groupId) {
   closeSidebarGroups(groupId);
   $(groupId)?.classList.add("open");
   await goToPage(page);
 }
-async function focusPageInput(page,inputId){
-  await openParentPage(page,page==="prices"?"priceGroup":"expenseGroup");
-  setTimeout(()=>{
-    const el=$(inputId);
-    if(el){
-      el.scrollIntoView({behavior:"smooth",block:"center"});
+async function focusPageInput(page, inputId) {
+  await openParentPage(page, page === "prices" ? "priceGroup" : "expenseGroup");
+  setTimeout(() => {
+    const el = $(inputId);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.focus();
     }
-  },80);
+  }, 80);
 }
 
-function goToPage(page){
-  document.querySelectorAll(".nav").forEach(x => x.classList.toggle("active", x.dataset.page===page));
-  document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
+function goToPage(page) {
+  document
+    .querySelectorAll(".nav")
+    .forEach((x) => x.classList.toggle("active", x.dataset.page === page));
+  document
+    .querySelectorAll(".page")
+    .forEach((x) => x.classList.remove("active"));
   $("page-" + page).classList.add("active");
 
-  if(page==="dashboard" || page==="master"){
+  if (page === "dashboard" || page === "master") {
     closeSidebarGroups();
   }
-  if(page==="monitoring"){
+  if (page === "monitoring") {
     $("monitoringGroup")?.classList.add("open");
     setSidebarMonitoringActive(MONITOR_MODE);
     loadKPMonitoring();
   }
-  if(page==="prices"){
+  if (page === "prices") {
     $("priceGroup")?.classList.add("open");
     loadPrices();
   }
-  if(page==="expenses"){
+  if (page === "expenses") {
     $("expenseGroup")?.classList.add("open");
     loadExpenses();
   }
-  if(page==="history") loadHistory();
-  if(page==="dashboard") loadDashboard();
+  if (page === "history") loadHistory();
+  if (page === "dashboard") loadDashboard();
 }
 
-function canonKP(k){
-  return (k || "").toUpperCase().trim()
-    .replace(/^KP[.\s]*/,"")
-    .replace(/\s*-\s*/g,"-")
-    .replace(/^ASMJ\s*([12])$/,"ASMJ-$1")
-    .replace(/^TKWL\s*([12])$/,"TKWL-$1")
-    .replace(/^MSB\s*2$/,"MSB-2")
-    .replace(/^KS\s*2$/,"KS2")
-    .replace(/^IIS$/,"SSM")
-    .replace(/^LPI$/,"LBP");
+function canonKP(k) {
+  return (k || "")
+    .toUpperCase()
+    .trim()
+    .replace(/^KP[.\s]*/, "")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/^ASMJ\s*([12])$/, "ASMJ-$1")
+    .replace(/^TKWL\s*([12])$/, "TKWL-$1")
+    .replace(/^MSB\s*2$/, "MSB-2")
+    .replace(/^KS\s*2$/, "KS2")
+    .replace(/^IIS$/, "SSM")
+    .replace(/^LPI$/, "LBP");
 }
-function parseHeader(text){
-  let m=text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4}).*?Pukul\s*(10|12|15|17)[\.:]00/is);
-  if(m) return {date:isoDate(+m[1],+m[2],+m[3]), time:m[4]+":00:00"};
-  let d=text.match(/(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})/i);
-  if(d) return {date:isoDate(+d[1], monthMap[d[2].toLowerCase()], +d[3])};
-  let s=text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  return s ? {date:isoDate(+s[1],+s[2],+s[3])} : null;
-}
+function parseHeader(text) {
+  const source = String(text || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[＊*]/g, "")
+    .replace(/\s+/g, " ");
 
-function parseTonnage(text){
-  const h=parseHeader(text); if(!h || !h.time) throw Error("Tanggal/jam snapshot 10/12/15/17 tidak ditemukan.");
-  let kp=null, rows=[], declared=null;
-  for(const raw of text.split(/\r?\n/)){
-    const line=raw.trim(); if(!line) continue;
-    if(/^KP[.\s]/i.test(line)){ kp=canonKP(line); continue; }
-    let ts=line.match(/^TOTAL\s+SELURUH\s*:\s*([\d.,]+)/i);
-    if(ts){ declared=num(ts[1]); continue; }
-    if(/^TOTAL\s*:/i.test(line)) continue;
-    let r=line.match(/^([^:]+)\s*:\s*([\d.,]+|-)\s*(?:\((\d+)\))?/);
-    if(kp && r) rows.push({kp_code:kp, supplier_name:r[1].trim(), tonnage_kg:r[2]==="-"?0:num(r[2]), trip_count:+(r[3]||0)});
+  let date = null;
+  let d = source.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (d) {
+    date = isoDate(+d[1], +d[2], +d[3]);
+  } else {
+    d = source.match(
+      /(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})/i
+    );
+    if (d) date = isoDate(+d[1], monthMap[d[2].toLowerCase()], +d[3]);
   }
-  const total=rows.reduce((a,b)=>a+b.tonnage_kg,0), trips=rows.reduce((a,b)=>a+b.trip_count,0);
-  return {...h, rows, total, trips, declared, validTotal: declared==null || declared===total};
+
+  let time = null;
+
+  // Primary: "Pukul 17.00 WIB", "Pukul 17:00", "Jam 17.00", including markdown stars.
+  let t = source.match(
+    /(?:Pukul|Jam)\s*(10|12|15|17)\s*(?:[.:]\s*00)?\s*(?:WIB)?/i
+  );
+
+  // Fallback: standalone canonical snapshot clock.
+  if (!t) {
+    t = source.match(/(?:^|\s)(10|12|15|17)\s*[.:]\s*00\s*(?:WIB)?(?:\s|$)/i);
+  }
+
+  if (t) time = `${t[1]}:00:00`;
+
+  return date || time ? { date, time } : null;
 }
-function previewTonnage(){
-  try{
-    TONNAGE_PREVIEW=parseTonnage($("tonnageText").value);
-    const p=TONNAGE_PREVIEW;
-    $("tonnagePreview").textContent=
-      `SNAPSHOT ${p.date} ${p.time.slice(0,5)}\n` +
+
+function selectedTonnageFallback() {
+  const date = $("monitorDate")?.value || null;
+  const time = $("tonnageSnapshotTime")?.value || null;
+  return { date, time };
+}
+
+function resolveTonnageHeader(text) {
+  const parsed = parseHeader(text) || {};
+  const fallback = selectedTonnageFallback();
+
+  const date = parsed.date || fallback.date;
+  const time = parsed.time || fallback.time;
+
+  if (!date) {
+    throw Error(
+      "Tanggal snapshot tidak ditemukan. Pilih Tanggal pada filter Monitoring Harian."
+    );
+  }
+  if (!time) {
+    throw Error(
+      "Waktu snapshot tidak ditemukan. Header seperti 'Pukul 17.00 WIB' seharusnya terbaca; jika tidak, pilih Jam Snapshot 10.00 / 12.00 / 15.00 / 17.00."
+    );
+  }
+
+  return {
+    date,
+    time,
+    dateSource: parsed.date ? "header WhatsApp" : "filter tanggal",
+    timeSource: parsed.time ? "header WhatsApp" : "pilihan jam",
+  };
+}
+function parseTonnage(text) {
+  const h = resolveTonnageHeader(text);
+  let kp = null,
+    rows = [],
+    declared = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^KP[.\s]/i.test(line)) {
+      kp = canonKP(line);
+      continue;
+    }
+    let ts = line.match(/^TOTAL\s+SELURUH\s*:\s*([\d.,]+)/i);
+    if (ts) {
+      declared = num(ts[1]);
+      continue;
+    }
+    if (/^TOTAL\s*:/i.test(line)) continue;
+    let r = line.match(/^([^:]+)\s*:\s*([\d.,]+|-)\s*(?:\((\d+)\))?/);
+    if (kp && r)
+      rows.push({
+        kp_code: kp,
+        supplier_name: r[1].trim(),
+        tonnage_kg: r[2] === "-" ? 0 : num(r[2]),
+        trip_count: +(r[3] || 0),
+      });
+  }
+  const total = rows.reduce((a, b) => a + b.tonnage_kg, 0),
+    trips = rows.reduce((a, b) => a + b.trip_count, 0);
+  return {
+    ...h,
+    rows,
+    total,
+    trips,
+    declared,
+    validTotal: declared == null || declared === total,
+  };
+}
+function previewTonnage() {
+  try {
+    TONNAGE_PREVIEW = parseTonnage($("tonnageText").value);
+    const p = TONNAGE_PREVIEW;
+    $("tonnagePreview").textContent =
+      `SNAPSHOT ${p.date} ${p.time.slice(0, 5)}\n` +
       `KP/Supplier rows: ${p.rows.length}\n` +
       `Total parser: ${kg(p.total)}\n` +
-      `TOTAL SELURUH: ${p.declared==null ? "tidak ditemukan" : kg(p.declared)}\n` +
+      `TOTAL SELURUH: ${ p.declared == null ? "tidak ditemukan" : kg(p.declared) }\n` +
       `Mobil/Trip: ${p.trips}\n` +
       `Validasi total: ${p.validTotal ? "OK ✓" : "PERLU CEK ⚠"}\n\n` +
       JSON.stringify(p.rows, null, 2);
-  }catch(e){ $("tonnagePreview").textContent="ERROR: "+e.message; }
+  } catch (e) {
+    $("tonnagePreview").textContent = "ERROR: " + e.message;
+  }
 }
-async function saveTonnage(){
-  if(!TONNAGE_PREVIEW) return alert("Preview dahulu.");
+async function saveTonnage() {
+  if (!TONNAGE_PREVIEW) return alert("Preview dahulu.");
   const p = TONNAGE_PREVIEW;
-  const {data:s, error} = await db.from("monitoring_snapshots").upsert({
-    report_date:p.date, snapshot_time:p.time, total_tonnage_kg:p.declared ?? p.total,
-    total_trips:p.trips, raw_text:$("tonnageText").value, status:p.validTotal ? "validated" : "needs_review"
-  }, {onConflict:"report_date,snapshot_time"}).select().single();
-  if(error) return alert(error.message);
+  const { data: s, error } = await db
+    .from("monitoring_snapshots")
+    .upsert(
+      {
+        report_date: p.date,
+        snapshot_time: p.time,
+        total_tonnage_kg: p.declared ?? p.total,
+        total_trips: p.trips,
+        raw_text: $("tonnageText").value,
+        status: p.validTotal ? "validated" : "needs_review",
+      },
+      { onConflict: "report_date,snapshot_time" }
+    )
+    .select()
+    .single();
+  if (error) return alert(error.message);
   await db.from("monitoring_snapshot_details").delete().eq("snapshot_id", s.id);
-  const {error:e2} = await db.from("monitoring_snapshot_details").insert(p.rows.map(r => ({...r, snapshot_id:s.id})));
-  if(e2) return alert(e2.message);
+  const { error: e2 } = await db
+    .from("monitoring_snapshot_details")
+    .insert(p.rows.map((r) => ({ ...r, snapshot_id: s.id })));
+  if (e2) return alert(e2.message);
   alert("Snapshot tersimpan.");
-  TONNAGE_PREVIEW=null;
+  TONNAGE_PREVIEW = null;
   await loadDashboard();
 }
 
-function parsePrice(text){
-  const h=parseHeader(text); if(!h) throw Error("Tanggal harga tidak ditemukan.");
-  let kp=null, rows=[];
-  const kpHead=/^(BMK|FAA|KIP|ASMJ[\s-]?[12]?|HKBS|TKWL[\s-]?[12]|SISL|GSS|SSL|MAN|SSM|IIS|GSL(?:-INUMAN)?|SKA|KS\s*2|LPI|LSHP|PSM|BSN|MSB\s*2|BSS|KWP)\s*$/i;
-  for(const raw of text.split(/\r?\n/)){
-    let line=raw.trim(); if(!line) continue;
-    if(kpHead.test(line)){ kp=canonKP(line); continue; }
-    if(!kp) continue;
-    const closed=/TUTUP/i.test(line);
-    const pm=line.match(/Rp\.?\s*([\d.]+)/gi);
-    const price=pm?.length ? num(pm[pm.length-1]) : null;
-    let left=line.split(/(?:Naik|Turun|Rp\.?|TUTUP|\()/i)[0].trim().replace(/\s*-\s*$/, "");
-    let names=left.split(/\s*-\s*/).map(x=>x.trim()).filter(Boolean);
-    if(!names.length) continue;
-    names.forEach(n=>rows.push({effective_date:h.date, kp_code:kp, supplier_name:n, price_per_kg:closed?null:price, status:closed?"closed":"active", raw_line:line}));
+function parsePrice(text) {
+  const h = parseHeader(text);
+  if (!h) throw Error("Tanggal harga tidak ditemukan.");
+  let kp = null,
+    rows = [];
+  const kpHead =
+    /^(BMK|FAA|KIP|ASMJ[\s-]?[12]?|HKBS|TKWL[\s-]?[12]|SISL|GSS|SSL|MAN|SSM|IIS|GSL(?:-INUMAN)?|SKA|KS\s*2|LPI|LSHP|PSM|BSN|MSB\s*2|BSS|KWP)\s*$/i;
+  for (const raw of text.split(/\r?\n/)) {
+    let line = raw.trim();
+    if (!line) continue;
+    if (kpHead.test(line)) {
+      kp = canonKP(line);
+      continue;
+    }
+    if (!kp) continue;
+    const closed = /TUTUP/i.test(line);
+    const pm = line.match(/Rp\.?\s*([\d.]+)/gi);
+    const price = pm?.length ? num(pm[pm.length - 1]) : null;
+    let left = line
+      .split(/(?:Naik|Turun|Rp\.?|TUTUP|\()/i)[0]
+      .trim()
+      .replace(/\s*-\s*$/, "");
+    let names = left
+      .split(/\s*-\s*/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    if (!names.length) continue;
+    names.forEach((n) =>
+      rows.push({
+        effective_date: h.date,
+        kp_code: kp,
+        supplier_name: n,
+        price_per_kg: closed ? null : price,
+        status: closed ? "closed" : "active",
+        raw_line: line,
+      })
+    );
   }
-  return {date:h.date, rows};
+  return { date: h.date, rows };
 }
-function previewPrice(){
-  try{
-    PRICE_PREVIEW=parsePrice($("priceText").value);
-    $("pricePreview").textContent=`Tanggal efektif: ${PRICE_PREVIEW.date}\nBaris harga: ${PRICE_PREVIEW.rows.length}\n\n`+JSON.stringify(PRICE_PREVIEW.rows,null,2);
-  }catch(e){ $("pricePreview").textContent="ERROR: "+e.message; }
+function previewPrice() {
+  try {
+    PRICE_PREVIEW = parsePrice($("priceText").value);
+    $("pricePreview").textContent =
+      `Tanggal efektif: ${PRICE_PREVIEW.date}\nBaris harga: ${PRICE_PREVIEW.rows.length}\n\n` +
+      JSON.stringify(PRICE_PREVIEW.rows, null, 2);
+  } catch (e) {
+    $("pricePreview").textContent = "ERROR: " + e.message;
+  }
 }
-async function savePrice(){
-  if(!PRICE_PREVIEW) return alert("Preview dahulu.");
-  const {error}=await db.from("daily_prices").upsert(PRICE_PREVIEW.rows,{onConflict:"effective_date,kp_code,supplier_name"});
-  if(error) return alert(error.message);
+async function savePrice() {
+  if (!PRICE_PREVIEW) return alert("Preview dahulu.");
+  const { error } = await db
+    .from("daily_prices")
+    .upsert(PRICE_PREVIEW.rows, {
+      onConflict: "effective_date,kp_code,supplier_name",
+    });
+  if (error) return alert(error.message);
   alert("Harga tersimpan.");
-  PRICE_PREVIEW=null;
+  PRICE_PREVIEW = null;
   await loadPrices();
   await loadDashboard();
 }
 
-function parseExpense(text){
-  const h=parseHeader(text); if(!h) throw Error("Tanggal biaya tidak ditemukan.");
-  let kpMatch=text.match(/\b(KP\s*)?(BMK|FAA|KIP|ASMJ[\s-]?[12]|HKBS|TKWL[\s-]?[12]|SISL|GSS|SSL|MAN|SSM|IIS|GSL|SKA|KS\s*2|LPI|LSHP|PSM|BSN|MSB\s*2|BSS|KWP)\b/i);
-  let kp=kpMatch ? canonKP(kpMatch[0]) : $("expenseKp").value;
-  if(!kp) throw Error("KP tidak ditemukan. Pilih KP manual.");
-  let category="Lainnya", rows=[];
-  for(const raw of text.split(/\r?\n/)){
-    const line=raw.trim(); if(!line || /^total/i.test(line)) continue;
-    let cat=line.match(/(?:B\.|beban)\s*([^(]+)/i);
-    if(cat) category=cat[1].trim();
-    let amounts=[...line.matchAll(/(\d{1,3}(?:\.\d{3})+)/g)].map(m=>num(m[1]));
-    if(!amounts.length) continue;
-    if(amounts.length>1 && /:\s*\d/.test(line)) amounts=amounts.slice(0,-1);
-    amounts.forEach(a=>rows.push({
-      expense_date:h.date, kp_code:kp, category,
-      subcategory:/pengambilan dana|p\.\s*dana/i.test(line) ? "Pengambilan Dana" : /bbm/i.test(line) ? "BBM" : null,
-      description:line, amount:a
-    }));
+function parseExpense(text) {
+  const h = parseHeader(text);
+  if (!h) throw Error("Tanggal biaya tidak ditemukan.");
+  let kpMatch = text.match(
+    /\b(KP\s*)?(BMK|FAA|KIP|ASMJ[\s-]?[12]|HKBS|TKWL[\s-]?[12]|SISL|GSS|SSL|MAN|SSM|IIS|GSL|SKA|KS\s*2|LPI|LSHP|PSM|BSN|MSB\s*2|BSS|KWP)\b/i
+  );
+  let kp = kpMatch ? canonKP(kpMatch[0]) : $("expenseKp").value;
+  if (!kp) throw Error("KP tidak ditemukan. Pilih KP manual.");
+  let category = "Lainnya",
+    rows = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^total/i.test(line)) continue;
+    let cat = line.match(/(?:B\.|beban)\s*([^(]+)/i);
+    if (cat) category = cat[1].trim();
+    let amounts = [...line.matchAll(/(\d{1,3}(?:\.\d{3})+)/g)].map((m) =>
+      num(m[1])
+    );
+    if (!amounts.length) continue;
+    if (amounts.length > 1 && /:\s*\d/.test(line))
+      amounts = amounts.slice(0, -1);
+    amounts.forEach((a) =>
+      rows.push({
+        expense_date: h.date,
+        kp_code: kp,
+        category,
+        subcategory: /pengambilan dana|p\.\s*dana/i.test(line)
+          ? "Pengambilan Dana"
+          : /bbm/i.test(line)
+          ? "BBM"
+          : null,
+        description: line,
+        amount: a,
+      })
+    );
   }
-  return {date:h.date, kp, rows, total:rows.reduce((a,b)=>a+b.amount,0)};
+  return {
+    date: h.date,
+    kp,
+    rows,
+    total: rows.reduce((a, b) => a + b.amount, 0),
+  };
 }
-function previewExpense(){
-  try{
-    EXPENSE_PREVIEW=parseExpense($("expenseText").value);
-    $("expensePreview").textContent=`Tanggal: ${EXPENSE_PREVIEW.date}\nKP: ${EXPENSE_PREVIEW.kp}\nTotal parser: ${rupiah(EXPENSE_PREVIEW.total)}\n\n`+JSON.stringify(EXPENSE_PREVIEW.rows,null,2);
-  }catch(e){ $("expensePreview").textContent="ERROR: "+e.message; }
+function previewExpense() {
+  try {
+    EXPENSE_PREVIEW = parseExpense($("expenseText").value);
+    $("expensePreview").textContent =
+      `Tanggal: ${EXPENSE_PREVIEW.date}\nKP: ${ EXPENSE_PREVIEW.kp }\nTotal parser: ${rupiah(EXPENSE_PREVIEW.total)}\n\n` +
+      JSON.stringify(EXPENSE_PREVIEW.rows, null, 2);
+  } catch (e) {
+    $("expensePreview").textContent = "ERROR: " + e.message;
+  }
 }
-async function saveExpense(){
-  if(!EXPENSE_PREVIEW) return alert("Preview dahulu.");
-  const {error}=await db.from("unit_expenses").insert(EXPENSE_PREVIEW.rows.map(x=>({...x, raw_text:$("expenseText").value})));
-  if(error) return alert(error.message);
+async function saveExpense() {
+  if (!EXPENSE_PREVIEW) return alert("Preview dahulu.");
+  const { error } = await db
+    .from("unit_expenses")
+    .insert(
+      EXPENSE_PREVIEW.rows.map((x) => ({
+        ...x,
+        raw_text: $("expenseText").value,
+      }))
+    );
+  if (error) return alert(error.message);
   alert("Pengeluaran tersimpan.");
-  EXPENSE_PREVIEW=null;
+  EXPENSE_PREVIEW = null;
   await loadExpenses();
   await loadDashboard();
 }
 
-function masterProvinceFromAddress(address){
-  const a=String(address||"").toLowerCase();
-  if(a.includes("riau")) return "Riau";
-  if(a.includes("aceh")) return "Aceh";
-  if(a.includes("sumatera utara")) return "Sumatera Utara";
-  if(a.includes("sumatera selatan")) return "Sumatera Selatan";
-  if(a.includes("lampung")) return "Lampung";
+function masterProvinceFromAddress(address) {
+  const a = String(address || "").toLowerCase();
+  if (a.includes("riau")) return "Riau";
+  if (a.includes("aceh")) return "Aceh";
+  if (a.includes("sumatera utara")) return "Sumatera Utara";
+  if (a.includes("sumatera selatan")) return "Sumatera Selatan";
+  if (a.includes("lampung")) return "Lampung";
   return "Lainnya";
 }
-function renderMasterDirectory(){
-  if(!$("masterDirectory")) return;
+function renderMasterDirectory() {
+  if (!$("masterDirectory")) return;
 
-  const search=($("masterSearch")?.value||"").trim().toLowerCase();
-  const filter=$("masterFilter")?.value||"ALL";
+  const search = ($("masterSearch")?.value || "").trim().toLowerCase();
+  const filter = $("masterFilter")?.value || "ALL";
 
-  let units=MASTER_DIRECTORY_DATA.map(u=>({
+  let units = MASTER_DIRECTORY_DATA.map((u) => ({
     ...u,
-    suppliers:MASTER_SUPPLIER_DATA.filter(s=>s.kp_id===u.id)
+    suppliers: MASTER_SUPPLIER_DATA.filter((s) => s.kp_id === u.id),
   }));
 
-  if(filter==="WITH_PIC") units=units.filter(u=>u.unit_head||u.manager_ffb);
-  if(filter==="NO_PIC") units=units.filter(u=>!u.unit_head&&!u.manager_ffb);
+  if (filter === "WITH_PIC")
+    units = units.filter((u) => u.unit_head || u.manager_ffb);
+  if (filter === "NO_PIC")
+    units = units.filter((u) => !u.unit_head && !u.manager_ffb);
 
-  if(search){
-    units=units.filter(u=>{
-      const supplierText=u.suppliers.map(s=>`${s.name} ${s.full_name||""} ${s.category||""}`).join(" ");
-      return `${u.code} ${u.name||""} ${u.address||""} ${u.unit_head||""} ${u.manager_ffb||""} ${supplierText}`.toLowerCase().includes(search);
+  if (search) {
+    units = units.filter((u) => {
+      const supplierText = u.suppliers
+        .map((s) => `${s.name} ${s.full_name || ""} ${s.category || ""}`)
+        .join(" ");
+      return `${u.code} ${u.name || ""} ${u.address || ""} ${ u.unit_head || "" } ${u.manager_ffb || ""} ${supplierText}`
+        .toLowerCase()
+        .includes(search);
     });
   }
 
-  $("masterDirectory").innerHTML=units.length?units.map(u=>`
-    <div class="master-unit-card">
-      <div class="master-unit-card-head">
-        <div class="master-unit-code">
-          <strong>${u.code}</strong>
-          <div>
-            <span class="master-unit-name">${u.name||u.code}</span>
-          </div>
-        </div>
-        <span class="master-status">${u.active?"AKTIF":"NONAKTIF"}</span>
-      </div>
-      <div class="master-unit-address">${u.address||"Alamat belum tersedia"}</div>
-      <div class="master-unit-meta">
-        <div class="master-meta-item">
-          <small>Pimpinan Unit</small>
-          <b>${u.unit_head||"—"}</b>
-        </div>
-        <div class="master-meta-item">
-          <small>Manager FFB</small>
-          <b>${u.manager_ffb||"—"}</b>
-        </div>
-      </div>
-      <div class="master-unit-suppliers">
-        ${u.suppliers.length
-          ? u.suppliers.map(s=>`<span class="master-supplier-chip" title="${s.full_name||s.name} • ${s.category||"Kategori belum tersedia"}">${s.name}${s.full_name&&s.full_name!==s.name?` • ${s.full_name}`:""}</span>`).join("")
-          : '<span class="master-supplier-chip">Belum ada SPB</span>'
-        }
-      </div>
-    </div>`).join("")
+  $("masterDirectory").innerHTML = units.length
+    ? units
+        .map(
+          (u) => ` <div class="master-unit-card"> <div class="master-unit-card-head"> <div class="master-unit-code"> <strong>${u.code}</strong> <div> <span class="master-unit-name">${u.name || u.code}</span> </div> </div> <span class="master-status">${u.active ? "AKTIF" : "NONAKTIF"}</span> </div> <div class="master-unit-address">${ u.address || "Alamat belum tersedia" }</div> <div class="master-unit-meta"> <div class="master-meta-item"> <small>Pimpinan Unit</small> <b>${u.unit_head || "—"}</b> </div> <div class="master-meta-item"> <small>Manager FFB</small> <b>${u.manager_ffb || "—"}</b> </div> </div> <div class="master-unit-suppliers"> ${ u.suppliers.length ? u.suppliers .map( (s) => `<span class="master-supplier-chip" title="${ s.full_name || s.name } • ${s.category || "Kategori belum tersedia"}">${s.name}${ s.full_name && s.full_name !== s.name ? ` • ${s.full_name}` : "" }</span>` ) .join("") : '<span class="master-supplier-chip">Belum ada SPB</span>' } </div> </div>`
+        )
+        .join("")
     : '<div class="master-empty">Tidak ada master data yang cocok dengan filter.</div>';
 
-  const allUnits=MASTER_DIRECTORY_DATA;
-  const regions=new Set(allUnits.map(u=>masterProvinceFromAddress(u.address)).filter(x=>x!=="Lainnya"));
-  $("masterUnitCount").textContent=allUnits.filter(u=>u.active).length;
-  $("masterSupplierCount").textContent=MASTER_SUPPLIER_DATA.filter(s=>s.active).length;
-  $("masterHeadCount").textContent=allUnits.filter(u=>u.unit_head).length;
-  $("masterRegionCount").textContent=regions.size;
+  const allUnits = MASTER_DIRECTORY_DATA;
+  const regions = new Set(
+    allUnits
+      .map((u) => masterProvinceFromAddress(u.address))
+      .filter((x) => x !== "Lainnya")
+  );
+  $("masterUnitCount").textContent = allUnits.filter((u) => u.active).length;
+  $("masterSupplierCount").textContent = MASTER_SUPPLIER_DATA.filter(
+    (s) => s.active
+  ).length;
+  $("masterHeadCount").textContent = allUnits.filter((u) => u.unit_head).length;
+  $("masterRegionCount").textContent = regions.size;
 
-  $("masterSupplierTable").innerHTML=table(
-    ["KP","Kode SPB / DO","Nama Lengkap","Kategori Buah","Status"],
-    MASTER_SUPPLIER_DATA
-      .filter(s=>s.active)
-      .sort((a,b)=>(a.master_kp?.code||"").localeCompare(b.master_kp?.code||"")||a.name.localeCompare(b.name))
-      .map(s=>[
-        s.master_kp?.code||"",
+  $("masterSupplierTable").innerHTML = table(
+    ["KP", "Kode SPB / DO", "Nama Lengkap", "Kategori Buah", "Status"],
+    MASTER_SUPPLIER_DATA.filter((s) => s.active)
+      .sort(
+        (a, b) =>
+          (a.master_kp?.code || "").localeCompare(b.master_kp?.code || "") ||
+          a.name.localeCompare(b.name)
+      )
+      .map((s) => [
+        s.master_kp?.code || "",
         s.name,
-        s.full_name||s.name,
-        s.category||"—",
-        s.active?"Aktif":"Nonaktif"
+        s.full_name || s.name,
+        s.category || "—",
+        s.active ? "Aktif" : "Nonaktif",
       ])
   );
 }
-async function loadMaster(){
-  const {data:kps,error:kpError}=await db.from("master_kp")
+async function loadMaster() {
+  const { data: kps, error: kpError } = await db
+    .from("master_kp")
     .select("id,code,name,address,unit_head,manager_ffb,active")
-    .eq("active",true)
+    .eq("active", true)
     .order("code");
 
-  const codes=(!kpError && kps?.length)
-    ? kps.map(x=>x.code).filter(Boolean)
-    : [...FALLBACK_KP_CODES];
+  const codes =
+    !kpError && kps?.length
+      ? kps.map((x) => x.code).filter(Boolean)
+      : [...FALLBACK_KP_CODES];
 
-  MASTER_KP_COUNT=codes.length;
+  MASTER_KP_COUNT = codes.length;
 
-  const optionsAll='<option value="ALL">Semua KP</option>' +
-    codes.map(code=>`<option value="${code}">${code}</option>`).join("");
-  const optionsExpense='<option value="">Pilih KP jika tidak terdeteksi otomatis</option>' +
-    codes.map(code=>`<option value="${code}">${code}</option>`).join("");
+  const optionsAll =
+    '<option value="ALL">Semua KP</option>' +
+    codes.map((code) => `<option value="${code}">${code}</option>`).join("");
+  const optionsExpense =
+    '<option value="">Pilih KP jika tidak terdeteksi otomatis</option>' +
+    codes.map((code) => `<option value="${code}">${code}</option>`).join("");
 
-  if($("expenseKp")) $("expenseKp").innerHTML=optionsExpense;
-  if($("historyKp")) $("historyKp").innerHTML=optionsAll;
-  if($("monitorKp")) $("monitorKp").innerHTML=optionsAll;
+  if ($("expenseKp")) $("expenseKp").innerHTML = optionsExpense;
+  if ($("historyKp")) $("historyKp").innerHTML = optionsAll;
+  if ($("monitorKp")) $("monitorKp").innerHTML = optionsAll;
 
-  if(kpError){
-    console.warn("Master KP Supabase gagal dimuat; memakai fallback dropdown.",kpError);
-    MASTER_DIRECTORY_DATA=codes.map((code,i)=>({id:-(i+1),code,name:code,address:null,unit_head:null,manager_ffb:null,active:true}));
-  }else{
-    MASTER_DIRECTORY_DATA=kps||[];
+  if (kpError) {
+    console.warn(
+      "Master KP Supabase gagal dimuat; memakai fallback dropdown.",
+      kpError
+    );
+    MASTER_DIRECTORY_DATA = codes.map((code, i) => ({
+      id: -(i + 1),
+      code,
+      name: code,
+      address: null,
+      unit_head: null,
+      manager_ffb: null,
+      active: true,
+    }));
+  } else {
+    MASTER_DIRECTORY_DATA = kps || [];
   }
 
   await initKPMonitoringFilters();
 
-  const {data:s,error:supplierError}=await db.from("master_supplier")
+  const { data: s, error: supplierError } = await db
+    .from("master_supplier")
     .select("id,kp_id,name,full_name,category,aliases,active,master_kp(code)")
     .order("name");
 
-  MASTER_SUPPLIER_DATA=supplierError?[]:(s||[]);
+  MASTER_SUPPLIER_DATA = supplierError ? [] : s || [];
   renderMasterDirectory();
 }
 
-async function getLatestEffectivePrices(date){
-  const {data}=await db.from("daily_prices").select("*").lte("effective_date",date).order("effective_date",{ascending:false}).limit(2000);
-  const latest={};
-  (data||[]).forEach(x=>{
-    const key=x.kp_code+"|"+x.supplier_name;
-    if(!latest[key]) latest[key]=x;
+async function getLatestEffectivePrices(date) {
+  const { data } = await db
+    .from("daily_prices")
+    .select("*")
+    .lte("effective_date", date)
+    .order("effective_date", { ascending: false })
+    .limit(2000);
+  const latest = {};
+  (data || []).forEach((x) => {
+    const key = x.kp_code + "|" + x.supplier_name;
+    if (!latest[key]) latest[key] = x;
   });
   return Object.values(latest);
 }
 
-
-
-async function openDashboardDetail(page,mode=null){
-  if(page==="monitoring" && $("monitorKp") && !$("monitorKp").value) $("monitorKp").value="ALL";
+async function openDashboardDetail(page, mode = null) {
+  if (page === "monitoring" && $("monitorKp") && !$("monitorKp").value)
+    $("monitorKp").value = "ALL";
   await goToPage(page);
-  if(page==="monitoring" && mode) setMonitorMode(mode);
+  if (page === "monitoring" && mode) setMonitorMode(mode);
 }
 
-
-
-
-
-async function loadDashboard(){
-  const {data:s} = await db.from("monitoring_snapshots").select("*").order("report_date",{ascending:false}).order("snapshot_time",{ascending:false}).limit(50);
-  const latest=s?.[0];
-  const todayDate = latest?.report_date || new Date().toISOString().slice(0,10);
+async function loadDashboard() {
+  const { data: s } = await db
+    .from("monitoring_snapshots")
+    .select("*")
+    .order("report_date", { ascending: false })
+    .order("snapshot_time", { ascending: false })
+    .limit(50);
+  const latest = s?.[0];
+  const todayDate =
+    latest?.report_date || new Date().toISOString().slice(0, 10);
 
   // Prices
   const latestPrices = await getLatestEffectivePrices(todayDate);
-  const activePrices = latestPrices.filter(x=>x.status==="active" && x.price_per_kg != null);
-  const pricesOnly = activePrices.map(x=>Number(x.price_per_kg));
-  const avgPrice = pricesOnly.length ? pricesOnly.reduce((a,b)=>a+b,0)/pricesOnly.length : 0;
+  const activePrices = latestPrices.filter(
+    (x) => x.status === "active" && x.price_per_kg != null
+  );
+  const pricesOnly = activePrices.map((x) => Number(x.price_per_kg));
+  const avgPrice = pricesOnly.length
+    ? pricesOnly.reduce((a, b) => a + b, 0) / pricesOnly.length
+    : 0;
   const minPrice = pricesOnly.length ? Math.min(...pricesOnly) : 0;
   const maxPrice = pricesOnly.length ? Math.max(...pricesOnly) : 0;
 
@@ -452,174 +706,307 @@ async function loadDashboard(){
   $("priceMax").textContent = rupiah(maxPrice);
   $("priceStatus").textContent = activePrices.length ? "Aktif" : "Belum Ada";
   $("priceActiveCount").textContent = activePrices.length + " supplier";
-  $("priceMinDelta").textContent = pricesOnly.length ? "Harga minimum aktif" : "-";
-  $("priceAvgDelta").textContent = pricesOnly.length ? "Rata-rata tertimbang" : "-";
-  $("priceMaxDelta").textContent = pricesOnly.length ? "Harga maksimum aktif" : "-";
+  $("priceMinDelta").textContent = pricesOnly.length
+    ? "Harga minimum aktif"
+    : "-";
+  $("priceAvgDelta").textContent = pricesOnly.length
+    ? "Rata-rata tertimbang"
+    : "-";
+  $("priceMaxDelta").textContent = pricesOnly.length
+    ? "Harga maksimum aktif"
+    : "-";
 
   // Price trend 7 days
-  const {data:priceRows} = await db.from("daily_prices").select("effective_date,price_per_kg,status");
-  const trendMap={};
-  (priceRows||[]).forEach(x=>{
-    if(x.status!=="active" || x.price_per_kg==null) return;
-    if(!trendMap[x.effective_date]) trendMap[x.effective_date]=[];
+  const { data: priceRows } = await db
+    .from("daily_prices")
+    .select("effective_date,price_per_kg,status");
+  const trendMap = {};
+  (priceRows || []).forEach((x) => {
+    if (x.status !== "active" || x.price_per_kg == null) return;
+    if (!trendMap[x.effective_date]) trendMap[x.effective_date] = [];
     trendMap[x.effective_date].push(Number(x.price_per_kg));
   });
   const trendDays = Object.keys(trendMap).sort().slice(-7);
-  const trendVals = trendDays.map(d=>trendMap[d].reduce((a,b)=>a+b,0)/trendMap[d].length);
-  Plotly.newPlot("priceTrendChart", [{
-    x:trendDays.map(d=>d.slice(8,10)+"/"+d.slice(5,7)),
-    y:trendVals,
-    type:"scatter", mode:"lines+markers",
-    line:{width:3,color:"#49de5f",shape:"spline"},
-    marker:{size:9,color:"#62ff74"},
-    fill:"tozeroy", fillcolor:"rgba(73,222,95,.08)",
-    hovertemplate:"<b>%{x}</b><br>Rp%{y:,.0f}/kg<extra></extra>"
-  }], {
-    ...darkLayout,
-    margin:{t:10,l:52,r:14,b:30},
-    yaxis:{...darkLayout.yaxis, fixedrange:true},
-    xaxis:{...darkLayout.xaxis, fixedrange:true}
-  }, plotConfig);
+  const trendVals = trendDays.map(
+    (d) => trendMap[d].reduce((a, b) => a + b, 0) / trendMap[d].length
+  );
+  Plotly.newPlot(
+    "priceTrendChart",
+    [
+      {
+        x: trendDays.map((d) => d.slice(8, 10) + "/" + d.slice(5, 7)),
+        y: trendVals,
+        type: "scatter",
+        mode: "lines+markers",
+        line: { width: 3, color: "#49de5f", shape: "spline" },
+        marker: { size: 9, color: "#62ff74" },
+        fill: "tozeroy",
+        fillcolor: "rgba(73,222,95,.08)",
+        hovertemplate: "<b>%{x}</b><br>Rp%{y:,.0f}/kg<extra></extra>",
+      },
+    ],
+    {
+      ...darkLayout,
+      margin: { t: 10, l: 52, r: 14, b: 30 },
+      yaxis: { ...darkLayout.yaxis, fixedrange: true },
+      xaxis: { ...darkLayout.xaxis, fixedrange: true },
+    },
+    plotConfig
+  );
 
   // Expenses
-  const {data:expRows} = await db.from("unit_expenses").select("*").eq("expense_date",todayDate);
+  const { data: expRows } = await db
+    .from("unit_expenses")
+    .select("*")
+    .eq("expense_date", todayDate);
   const dailyExpenses = expRows || [];
-  const dailyExpenseTotal = dailyExpenses.reduce((a,b)=>a+Number(b.amount||0),0);
+  const dailyExpenseTotal = dailyExpenses.reduce(
+    (a, b) => a + Number(b.amount || 0),
+    0
+  );
   $("kpiExpense").textContent = rupiah(dailyExpenseTotal);
-  $("kpiExpenseSub").textContent = dailyExpenseTotal ? "Total pengeluaran " + todayDate : "Belum ada pengeluaran pada tanggal snapshot";
+  $("kpiExpenseSub").textContent = dailyExpenseTotal
+    ? "Total pengeluaran " + todayDate
+    : "Belum ada pengeluaran pada tanggal snapshot";
 
-  const expCat={};
-  dailyExpenses.forEach(x=>{ const k=x.category || "Lainnya"; expCat[k]=(expCat[k]||0)+Number(x.amount||0); });
+  const expCat = {};
+  dailyExpenses.forEach((x) => {
+    const k = x.category || "Lainnya";
+    expCat[k] = (expCat[k] || 0) + Number(x.amount || 0);
+  });
   const expLabels = Object.keys(expCat);
   const expValues = Object.values(expCat);
-  const expColors = ["#3b95ff","#45d367","#f0b325","#c9984f","#ff6a5c","#b36bff"];
-  if(expValues.length){
-    Plotly.newPlot("expenseDonut", [{
-      labels:expLabels, values:expValues, type:"pie", hole:.62,
-      marker:{colors:expLabels.map((_,i)=>expColors[i % expColors.length])},
-      textinfo:"none",
-      hovertemplate:"<b>%{label}</b><br>Rp%{value:,.0f}<extra></extra>"
-    }], {
-      paper_bgcolor:"rgba(0,0,0,0)",
-      plot_bgcolor:"rgba(0,0,0,0)",
-      margin:{t:0,l:0,r:0,b:0},
-      showlegend:false,
-      annotations:[{
-        text:`<b>${rupiah(dailyExpenseTotal).replace("Rp","Rp")}<\/b>`,
-        showarrow:false,font:{size:16,color:"#fff"},x:0.5,y:0.52
-      },{
-        text:"Juta", showarrow:false, font:{size:12,color:"#ddd0c1"}, x:0.5, y:0.40
-      }]
-    }, plotConfig);
-    $("expenseLegend").innerHTML = expLabels.map((label,i)=>{
-      const val = expCat[label];
-      const pct = dailyExpenseTotal ? ((val/dailyExpenseTotal)*100).toFixed(1) : "0.0";
-      return `<div class="legend-row"><div class="dot" style="background:${expColors[i%expColors.length]}"></div><div><small>${label}</small><b>${rupiah(val)}</b></div><span>${pct}%</span></div>`;
-    }).join("");
+  const expColors = [
+    "#3b95ff",
+    "#45d367",
+    "#f0b325",
+    "#c9984f",
+    "#ff6a5c",
+    "#b36bff",
+  ];
+  if (expValues.length) {
+    Plotly.newPlot(
+      "expenseDonut",
+      [
+        {
+          labels: expLabels,
+          values: expValues,
+          type: "pie",
+          hole: 0.62,
+          marker: {
+            colors: expLabels.map((_, i) => expColors[i % expColors.length]),
+          },
+          textinfo: "none",
+          hovertemplate: "<b>%{label}</b><br>Rp%{value:,.0f}<extra></extra>",
+        },
+      ],
+      {
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
+        margin: { t: 0, l: 0, r: 0, b: 0 },
+        showlegend: false,
+        annotations: [
+          {
+            text: `<b>${rupiah(dailyExpenseTotal).replace("Rp", "Rp")}<\/b>`,
+            showarrow: false,
+            font: { size: 16, color: "#fff" },
+            x: 0.5,
+            y: 0.52,
+          },
+          {
+            text: "Juta",
+            showarrow: false,
+            font: { size: 12, color: "#ddd0c1" },
+            x: 0.5,
+            y: 0.4,
+          },
+        ],
+      },
+      plotConfig
+    );
+    $("expenseLegend").innerHTML = expLabels
+      .map((label, i) => {
+        const val = expCat[label];
+        const pct = dailyExpenseTotal
+          ? ((val / dailyExpenseTotal) * 100).toFixed(1)
+          : "0.0";
+        return `<div class="legend-row"><div class="dot" style="background:${ expColors[i % expColors.length] }"></div><div><small>${label}</small><b>${rupiah( val )}</b></div><span>${pct}%</span></div>`;
+      })
+      .join("");
   } else {
-    $("expenseDonut").innerHTML = "<div style='padding:40px;color:#ddd0c1'>Belum ada pengeluaran.</div>";
+    $("expenseDonut").innerHTML =
+      "<div style='padding:40px;color:#ddd0c1'>Belum ada pengeluaran.</div>";
     $("expenseLegend").innerHTML = "";
   }
 
-  if(!latest){
-    $("kpiTonase").textContent="0 kg";
-    $("kpiTonaseSub").textContent="Belum ada snapshot";
-    $("kpiTrips").textContent="0";
-    $("kpiActiveKP").textContent=`0 / ${MASTER_KP_COUNT}`;
+  if (!latest) {
+    $("kpiTonase").textContent = "0 kg";
+    $("kpiTonaseSub").textContent = "Belum ada snapshot";
+    $("kpiTrips").textContent = "0";
+    $("kpiActiveKP").textContent = `0 / ${MASTER_KP_COUNT}`;
     renderStatusBoxes([]);
-    $("controlTable").innerHTML = table(["NO","KP","SUPPLIER","TONASE (KG)","TRIP","HARGA (RP/KG)","NILAI TBS (RP)","PENGELUARAN (RP)","COST/KG"], []);
+    $("controlTable").innerHTML = table(
+      [
+        "NO",
+        "KP",
+        "SUPPLIER",
+        "TONASE (KG)",
+        "TRIP",
+        "HARGA (RP/KG)",
+        "NILAI TBS (RP)",
+        "PENGELUARAN (RP)",
+        "COST/KG",
+      ],
+      []
+    );
     return;
   }
 
   $("kpiTonase").textContent = kg(latest.total_tonnage_kg);
-  $("kpiTonaseSub").textContent = "Total tonase hingga " + latest.snapshot_time.slice(0,5);
+  $("kpiTonaseSub").textContent =
+    "Total tonase hingga " + latest.snapshot_time.slice(0, 5);
   $("kpiTrips").textContent = latest.total_trips;
 
-  const daySnapshots = (s||[]).filter(x=>x.report_date===latest.report_date).sort((a,b)=>a.snapshot_time.localeCompare(b.snapshot_time));
+  const daySnapshots = (s || [])
+    .filter((x) => x.report_date === latest.report_date)
+    .sort((a, b) => a.snapshot_time.localeCompare(b.snapshot_time));
   const slotMap = {};
-  daySnapshots.forEach(x=>slotMap[x.snapshot_time.slice(0,5)] = Number(x.total_tonnage_kg));
-  const y = slots.map(slot=>slotMap[slot] ?? null);
+  daySnapshots.forEach(
+    (x) => (slotMap[x.snapshot_time.slice(0, 5)] = Number(x.total_tonnage_kg))
+  );
+  const y = slots.map((slot) => slotMap[slot] ?? null);
 
   const doneCount = daySnapshots.length;
-  $("snapshotFinished").textContent = latest.snapshot_time.slice(0,5) + " WIB";
+  $("snapshotFinished").textContent = latest.snapshot_time.slice(0, 5) + " WIB";
   $("snapshotProgress").textContent = doneCount + " / 4";
 
-  const actual = daySnapshots.map(x=>Number(x.total_tonnage_kg));
-  if(actual.length > 1){
+  const actual = daySnapshots.map((x) => Number(x.total_tonnage_kg));
+  if (actual.length > 1) {
     const delta = actual.at(-1) - actual.at(-2);
-    const pct = actual.at(-2) ? (delta/actual.at(-2))*100 : 0;
-    $("intradayDelta").textContent = (delta>=0?"+":"") + compactKg(delta) + " • " + (pct>=0?"+":"") + pct.toFixed(1) + "%";
+    const pct = actual.at(-2) ? (delta / actual.at(-2)) * 100 : 0;
+    $("intradayDelta").textContent =
+      (delta >= 0 ? "+" : "") +
+      compactKg(delta) +
+      " • " +
+      (pct >= 0 ? "+" : "") +
+      pct.toFixed(1) +
+      "%";
   } else {
     $("intradayDelta").textContent = "Belum ada data sebelumnya";
   }
 
-  Plotly.newPlot("intradayChart", [
-    {
-      x:slots, y:y, type:"scatter", mode:"lines+markers+text",
-      text:y.map((v,i)=>v==null ? "Menunggu" : (i===0 || y[i-1]==null ? compactKg(v)+" kg" : "")),
-      textposition:"top center",
-      line:{width:3,color:"#c6c6c6",dash:"dash",shape:"spline"},
-      marker:{
-        size:12,
-        color:y.map(v=>v==null ? "rgba(255,255,255,.18)" : "#49de5f"),
-        line:{width:2,color:y.map(v=>v==null ? "rgba(255,255,255,.28)" : "#49de5f")}
+  Plotly.newPlot(
+    "intradayChart",
+    [
+      {
+        x: slots,
+        y: y,
+        type: "scatter",
+        mode: "lines+markers+text",
+        text: y.map((v, i) =>
+          v == null
+            ? "Menunggu"
+            : i === 0 || y[i - 1] == null
+            ? compactKg(v) + " kg"
+            : ""
+        ),
+        textposition: "top center",
+        line: { width: 3, color: "#c6c6c6", dash: "dash", shape: "spline" },
+        marker: {
+          size: 12,
+          color: y.map((v) =>
+            v == null ? "rgba(255,255,255,.18)" : "#49de5f"
+          ),
+          line: {
+            width: 2,
+            color: y.map((v) =>
+              v == null ? "rgba(255,255,255,.28)" : "#49de5f"
+            ),
+          },
+        },
+        hovertemplate: "<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>",
       },
-      hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
-    }
-  ], {
-    ...darkLayout,
-    margin:{t:38,l:64,r:18,b:46},
-    xaxis:{...darkLayout.xaxis, fixedrange:true, type:"category", categoryorder:"array", categoryarray:slots},
-    yaxis:{...darkLayout.yaxis, fixedrange:true, tickformat:"~s", rangemode:"tozero"},
-    showlegend:false
-  }, plotConfig);
+    ],
+    {
+      ...darkLayout,
+      margin: { t: 38, l: 64, r: 18, b: 46 },
+      xaxis: {
+        ...darkLayout.xaxis,
+        fixedrange: true,
+        type: "category",
+        categoryorder: "array",
+        categoryarray: slots,
+      },
+      yaxis: {
+        ...darkLayout.yaxis,
+        fixedrange: true,
+        tickformat: "~s",
+        rangemode: "tozero",
+      },
+      showlegend: false,
+    },
+    plotConfig
+  );
 
-  const {data:detailRows} = await db.from("monitoring_snapshot_details").select("kp_code,supplier_name,tonnage_kg,trip_count").eq("snapshot_id", latest.id);
+  const { data: detailRows } = await db
+    .from("monitoring_snapshot_details")
+    .select("kp_code,supplier_name,tonnage_kg,trip_count")
+    .eq("snapshot_id", latest.id);
   const byKP = {};
-  (detailRows||[]).forEach(r=>{
-    if(!byKP[r.kp_code]) byKP[r.kp_code] = {tonnage:0, trips:0};
-    byKP[r.kp_code].tonnage += Number(r.tonnage_kg||0);
-    byKP[r.kp_code].trips += Number(r.trip_count||0);
+  (detailRows || []).forEach((r) => {
+    if (!byKP[r.kp_code]) byKP[r.kp_code] = { tonnage: 0, trips: 0 };
+    byKP[r.kp_code].tonnage += Number(r.tonnage_kg || 0);
+    byKP[r.kp_code].trips += Number(r.trip_count || 0);
   });
-  const kpPairs = Object.entries(byKP).sort((a,b)=>b[1].tonnage-a[1].tonnage);
+  const kpPairs = Object.entries(byKP).sort(
+    (a, b) => b[1].tonnage - a[1].tonnage
+  );
   $("kpiActiveKP").textContent = kpPairs.length + " / " + MASTER_KP_COUNT;
 
-  const top8 = kpPairs.slice(0,8);
-  Plotly.newPlot("topKpChart", [{
-    x:top8.map(x=>x[1].tonnage),
-    y:top8.map(x=>x[0]),
-    type:"bar", orientation:"h",
-    marker:{color:"#4bd85c"},
-    hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
-  }], {
-    ...darkLayout,
-    margin:{t:10,l:82,r:10,b:36},
-    yaxis:{...darkLayout.yaxis, autorange:"reversed", fixedrange:true},
-    xaxis:{...darkLayout.xaxis, fixedrange:true, tickformat:"~s"},
-    showlegend:false
-  }, plotConfig);
+  const top8 = kpPairs.slice(0, 8);
+  Plotly.newPlot(
+    "topKpChart",
+    [
+      {
+        x: top8.map((x) => x[1].tonnage),
+        y: top8.map((x) => x[0]),
+        type: "bar",
+        orientation: "h",
+        marker: { color: "#4bd85c" },
+        hovertemplate: "<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>",
+      },
+    ],
+    {
+      ...darkLayout,
+      margin: { t: 10, l: 82, r: 10, b: 36 },
+      yaxis: { ...darkLayout.yaxis, autorange: "reversed", fixedrange: true },
+      xaxis: { ...darkLayout.xaxis, fixedrange: true, tickformat: "~s" },
+      showlegend: false,
+    },
+    plotConfig
+  );
 
   renderStatusBoxes(daySnapshots);
 
-  const topChart=$("topKpChart");
-  if(topChart?.on){
+  const topChart = $("topKpChart");
+  if (topChart?.on) {
     topChart.removeAllListeners?.("plotly_click");
-    topChart.on("plotly_click", async ev=>{
-      const code=ev?.points?.[0]?.y;
-      if(code && $("monitorKp")){
-        $("monitorKp").value=code;
+    topChart.on("plotly_click", async (ev) => {
+      const code = ev?.points?.[0]?.y;
+      if (code && $("monitorKp")) {
+        $("monitorKp").value = code;
         await goToPage("monitoring");
         setMonitorMode("daily");
       }
     });
   }
 
-  const intraday=$("intradayChart");
-  if(intraday?.on){
+  const intraday = $("intradayChart");
+  if (intraday?.on) {
     intraday.removeAllListeners?.("plotly_click");
-    intraday.on("plotly_click", async ()=>{
-      if($("monitorKp")) $("monitorKp").value="ALL";
-      if($("monitorDate")) $("monitorDate").value=latest.report_date;
+    intraday.on("plotly_click", async () => {
+      if ($("monitorKp")) $("monitorKp").value = "ALL";
+      if ($("monitorDate")) $("monitorDate").value = latest.report_date;
       await goToPage("monitoring");
       setMonitorMode("daily");
     });
@@ -627,20 +1014,31 @@ async function loadDashboard(){
 
   // Control table
   const priceMap = {};
-  latestPrices.forEach(x=>priceMap[x.kp_code + "|" + x.supplier_name] = x);
+  latestPrices.forEach(
+    (x) => (priceMap[x.kp_code + "|" + x.supplier_name] = x)
+  );
   const expenseByKP = {};
-  dailyExpenses.forEach(x=>expenseByKP[x.kp_code] = (expenseByKP[x.kp_code] || 0) + Number(x.amount || 0));
+  dailyExpenses.forEach(
+    (x) =>
+      (expenseByKP[x.kp_code] =
+        (expenseByKP[x.kp_code] || 0) + Number(x.amount || 0))
+  );
 
-  const controlRows = (detailRows||[])
-    .filter(r=>Number(r.tonnage_kg||0) > 0 || Number(r.trip_count||0) > 0)
-    .sort((a,b)=>Number(b.tonnage_kg)-Number(a.tonnage_kg))
-    .map((r,i)=>{
-      const price = priceMap[r.kp_code + "|" + r.supplier_name]?.price_per_kg || 0;
+  const controlRows = (detailRows || [])
+    .filter(
+      (r) => Number(r.tonnage_kg || 0) > 0 || Number(r.trip_count || 0) > 0
+    )
+    .sort((a, b) => Number(b.tonnage_kg) - Number(a.tonnage_kg))
+    .map((r, i) => {
+      const price =
+        priceMap[r.kp_code + "|" + r.supplier_name]?.price_per_kg || 0;
       const value = Number(r.tonnage_kg || 0) * Number(price || 0);
       const exp = expenseByKP[r.kp_code] || 0;
-      const costkg = Number(r.tonnage_kg || 0) ? (exp / Number(r.tonnage_kg || 0)) : 0;
+      const costkg = Number(r.tonnage_kg || 0)
+        ? exp / Number(r.tonnage_kg || 0)
+        : 0;
       return [
-        i+1,
+        i + 1,
         r.kp_code,
         r.supplier_name,
         Number(r.tonnage_kg || 0).toLocaleString("id-ID"),
@@ -648,1506 +1046,2245 @@ async function loadDashboard(){
         price ? Number(price).toLocaleString("id-ID") : "-",
         value ? Number(value).toLocaleString("id-ID") : "-",
         exp ? exp.toLocaleString("id-ID") : "-",
-        costkg ? costkg.toLocaleString("id-ID", {minimumFractionDigits:2, maximumFractionDigits:2}) : "-"
+        costkg
+          ? costkg.toLocaleString("id-ID", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })
+          : "-",
       ];
     });
-  $("controlTitle").textContent = `CONTROL TABLE - SNAPSHOT TERAKHIR (${latest.snapshot_time.slice(0,5)})`;
+  $(
+    "controlTitle"
+  ).textContent = `CONTROL TABLE - SNAPSHOT TERAKHIR (${latest.snapshot_time.slice( 0, 5 )})`;
   $("controlTable").innerHTML = table(
-    ["NO","KP","SUPPLIER","TONASE (KG)","TRIP","HARGA (RP/KG)","NILAI TBS (RP)","PENGELUARAN (RP)","COST/KG (RP)"],
+    [
+      "NO",
+      "KP",
+      "SUPPLIER",
+      "TONASE (KG)",
+      "TRIP",
+      "HARGA (RP/KG)",
+      "NILAI TBS (RP)",
+      "PENGELUARAN (RP)",
+      "COST/KG (RP)",
+    ],
     controlRows
   );
 
   // Snapshot table in monitoring page
-  const snapRows = kpPairs.map(([kp,v])=>[kp, kg(v.tonnage), v.trips, latest.snapshot_time.slice(0,5)]);
-  snapRows.push(["TOTAL", kg(latest.total_tonnage_kg), latest.total_trips, latest.snapshot_time.slice(0,5)]);
-  $("snapshotTable").innerHTML = table(["KP","Tonase","Mobil / Trip","Jam"], snapRows, true);
-}
-
-function renderStatusBoxes(daySnapshots){
-  const map = {};
-  daySnapshots.forEach(x=>map[x.snapshot_time.slice(0,5)] = x);
-  $("snapshotStatus").innerHTML = slots.map(slot=>{
-    const s = map[slot];
-    return `<div class="status-box ${s ? "done" : ""}">
-      <div class="slot ${s ? "" : "wait"}">${slot}</div>
-      <div class="status-val">${s ? compactKg(s.total_tonnage_kg) : "Menunggu"}</div>
-      <div class="status-sub">${s ? (s.total_trips + " trip") : "Menunggu"}</div>
-    </div>`;
-  }).join("");
-}
-
-async function loadPrices(){
-  const refDate = new Date().toISOString().slice(0,10);
-  const latest = await getLatestEffectivePrices(refDate);
-  $("priceTable").innerHTML = table(
-    ["KP","Supplier","Harga","Status","Tanggal Berlaku"],
-    latest.sort((a,b)=>a.kp_code.localeCompare(b.kp_code) || a.supplier_name.localeCompare(b.supplier_name)).map(x=>[
-      x.kp_code, x.supplier_name,
-      x.status==="closed" ? "TUTUP" : rupiah(x.price_per_kg),
-      x.status==="closed" ? "Closed" : "Active",
-      x.effective_date
-    ])
+  const snapRows = kpPairs.map(([kp, v]) => [
+    kp,
+    kg(v.tonnage),
+    v.trips,
+    latest.snapshot_time.slice(0, 5),
+  ]);
+  snapRows.push([
+    "TOTAL",
+    kg(latest.total_tonnage_kg),
+    latest.total_trips,
+    latest.snapshot_time.slice(0, 5),
+  ]);
+  $("snapshotTable").innerHTML = table(
+    ["KP", "Tonase", "Mobil / Trip", "Jam"],
+    snapRows,
+    true
   );
 }
-async function loadExpenses(){
-  const {data} = await db.from("unit_expenses").select("*").order("expense_date",{ascending:false}).limit(1500);
-  const agg = {};
-  (data||[]).forEach(x=>agg[x.kp_code] = (agg[x.kp_code] || 0) + Number(x.amount||0));
-  $("expenseTable").innerHTML = table(["KP","Total Pengeluaran"], Object.entries(agg).sort((a,b)=>b[1]-a[1]).map(([kp,val])=>[kp, rupiah(val)]));
+
+function renderStatusBoxes(daySnapshots) {
+  const map = {};
+  daySnapshots.forEach((x) => (map[x.snapshot_time.slice(0, 5)] = x));
+  $("snapshotStatus").innerHTML = slots
+    .map((slot) => {
+      const s = map[slot];
+      return `<div class="status-box ${s ? "done" : ""}"> <div class="slot ${s ? "" : "wait"}">${slot}</div> <div class="status-val">${ s ? compactKg(s.total_tonnage_kg) : "Menunggu" }</div> <div class="status-sub">${s ? s.total_trips + " trip" : "Menunggu"}</div> </div>`;
+    })
+    .join("");
 }
-async function loadHistoryFilters(){
-  const {data} = await db.from("historical_summary").select("year");
-  const years = [...new Set((data||[]).map(x=>x.year))].sort((a,b)=>b-a);
-  $("historyYear").innerHTML = years.map(y=>`<option>${y}</option>`).join("");
+
+async function loadPrices() {
+  const refDate = new Date().toISOString().slice(0, 10);
+  const latest = await getLatestEffectivePrices(refDate);
+  $("priceTable").innerHTML = table(
+    ["KP", "Supplier", "Harga", "Status", "Tanggal Berlaku"],
+    latest
+      .sort(
+        (a, b) =>
+          a.kp_code.localeCompare(b.kp_code) ||
+          a.supplier_name.localeCompare(b.supplier_name)
+      )
+      .map((x) => [
+        x.kp_code,
+        x.supplier_name,
+        x.status === "closed" ? "TUTUP" : rupiah(x.price_per_kg),
+        x.status === "closed" ? "Closed" : "Active",
+        x.effective_date,
+      ])
+  );
+}
+async function loadExpenses() {
+  const { data } = await db
+    .from("unit_expenses")
+    .select("*")
+    .order("expense_date", { ascending: false })
+    .limit(1500);
+  const agg = {};
+  (data || []).forEach(
+    (x) => (agg[x.kp_code] = (agg[x.kp_code] || 0) + Number(x.amount || 0))
+  );
+  $("expenseTable").innerHTML = table(
+    ["KP", "Total Pengeluaran"],
+    Object.entries(agg)
+      .sort((a, b) => b[1] - a[1])
+      .map(([kp, val]) => [kp, rupiah(val)])
+  );
+}
+async function loadHistoryFilters() {
+  const { data } = await db.from("historical_summary").select("year");
+  const years = [...new Set((data || []).map((x) => x.year))].sort(
+    (a, b) => b - a
+  );
+  $("historyYear").innerHTML = years
+    .map((y) => `<option>${y}</option>`)
+    .join("");
   await loadHistory();
 }
-async function loadHistory(){
+async function loadHistory() {
   const year = $("historyYear").value;
-  if(!year) return;
+  if (!year) return;
   let q = db.from("historical_summary").select("*").eq("year", year);
-  if($("historyKp").value !== "ALL") q = q.eq("kp_code", $("historyKp").value);
-  const {data} = await q;
+  if ($("historyKp").value !== "ALL") q = q.eq("kp_code", $("historyKp").value);
+  const { data } = await q;
   const rows = data || [];
   const monthly = Array(12).fill(0);
-  rows.forEach(x=>monthly[x.month-1] += Number(x.tonnage_kg||0));
-  const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
-  Plotly.newPlot("historyChart", [{
-    x:months, y:monthly, type:"scatter", mode:"lines+markers",
-    line:{width:3,color:"#49de5f",shape:"spline"},
-    marker:{size:8,color:"#66ff79"},
-    fill:"tozeroy", fillcolor:"rgba(73,222,95,.06)",
-    hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
-  }], {
-    ...darkLayout,
-    xaxis:{...darkLayout.xaxis, fixedrange:true},
-    yaxis:{...darkLayout.yaxis, fixedrange:true, tickformat:"~s", rangemode:"tozero"}
-  }, plotConfig);
+  rows.forEach((x) => (monthly[x.month - 1] += Number(x.tonnage_kg || 0)));
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Mei",
+    "Jun",
+    "Jul",
+    "Ags",
+    "Sep",
+    "Okt",
+    "Nov",
+    "Des",
+  ];
+  Plotly.newPlot(
+    "historyChart",
+    [
+      {
+        x: months,
+        y: monthly,
+        type: "scatter",
+        mode: "lines+markers",
+        line: { width: 3, color: "#49de5f", shape: "spline" },
+        marker: { size: 8, color: "#66ff79" },
+        fill: "tozeroy",
+        fillcolor: "rgba(73,222,95,.06)",
+        hovertemplate: "<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>",
+      },
+    ],
+    {
+      ...darkLayout,
+      xaxis: { ...darkLayout.xaxis, fixedrange: true },
+      yaxis: {
+        ...darkLayout.yaxis,
+        fixedrange: true,
+        tickformat: "~s",
+        rangemode: "tozero",
+      },
+    },
+    plotConfig
+  );
 
   const agg = {};
-  rows.forEach(x=>agg[x.kp_code] = (agg[x.kp_code] || 0) + Number(x.tonnage_kg || 0));
-  const top = Object.entries(agg).sort((a,b)=>b[1]-a[1]).slice(0,10);
-  Plotly.newPlot("historyTopChart", [{
-    x:top.map(x=>x[1]),
-    y:top.map(x=>x[0]),
-    type:"bar", orientation:"h",
-    marker:{color:"#4bd85c"}
-  }], {
-    ...darkLayout,
-    yaxis:{...darkLayout.yaxis, autorange:"reversed", fixedrange:true},
-    xaxis:{...darkLayout.xaxis, fixedrange:true, tickformat:"~s"}
-  }, plotConfig);
+  rows.forEach(
+    (x) => (agg[x.kp_code] = (agg[x.kp_code] || 0) + Number(x.tonnage_kg || 0))
+  );
+  const top = Object.entries(agg)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+  Plotly.newPlot(
+    "historyTopChart",
+    [
+      {
+        x: top.map((x) => x[1]),
+        y: top.map((x) => x[0]),
+        type: "bar",
+        orientation: "h",
+        marker: { color: "#4bd85c" },
+      },
+    ],
+    {
+      ...darkLayout,
+      yaxis: { ...darkLayout.yaxis, autorange: "reversed", fixedrange: true },
+      xaxis: { ...darkLayout.xaxis, fixedrange: true, tickformat: "~s" },
+    },
+    plotConfig
+  );
 
-  $("historyTable").innerHTML = table(["KP","Bulan","Tonase"], rows.sort((a,b)=>a.kp_code.localeCompare(b.kp_code) || a.month-b.month).map(x=>[
-    x.kp_code, x.month, kg(x.tonnage_kg)
-  ]));
+  $("historyTable").innerHTML = table(
+    ["KP", "Bulan", "Tonase"],
+    rows
+      .sort((a, b) => a.kp_code.localeCompare(b.kp_code) || a.month - b.month)
+      .map((x) => [x.kp_code, x.month, kg(x.tonnage_kg)])
+  );
 }
-
-
-
 
 // =========================================================
 // DASHBOARD INTERACTIVE TONNAGE TRENDS
 // Satu pilihan KP mengendalikan Harian, Bulanan, Tahunan.
 // =========================================================
-function trendBadge(id,current,previous,comparisonLabel=""){
-  const el=$(id);
-  if(!el) return;
-  current=Number(current||0);
-  previous=Number(previous||0);
-  if(previous<=0){
-    el.className="trend-badge neutral";
-    el.textContent="Belum ada pembanding";
+function trendBadge(id, current, previous, comparisonLabel = "") {
+  const el = $(id);
+  if (!el) return;
+  current = Number(current || 0);
+  previous = Number(previous || 0);
+  if (previous <= 0) {
+    el.className = "trend-badge neutral";
+    el.textContent = "Belum ada pembanding";
     return;
   }
-  const pct=(current-previous)/previous*100;
-  if(Math.abs(pct)<0.05){
-    el.className="trend-badge neutral";
-    el.textContent="0.0%";
+  const pct = ((current - previous) / previous) * 100;
+  if (Math.abs(pct) < 0.05) {
+    el.className = "trend-badge neutral";
+    el.textContent = "0.0%";
     return;
   }
-  el.className="trend-badge "+(pct>0?"up":"down");
-  el.textContent=`${pct>0?"▲":"▼"} ${Math.abs(pct).toFixed(1)}%${comparisonLabel?` ${comparisonLabel}`:""}`;
+  el.className = "trend-badge " + (pct > 0 ? "up" : "down");
+  el.textContent = `${pct > 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%${ comparisonLabel ? ` ${comparisonLabel}` : "" }`;
 }
-function renderMiniTrend(containerId,x,y,color="#49de5f"){
-  const el=$(containerId);
-  if(!el) return;
-  const clean=y.map(v=>v==null?0:Number(v||0));
-  const hasData=clean.some(v=>v>0);
-  if(!hasData){
+function renderMiniTrend(containerId, x, y, color = "#49de5f") {
+  const el = $(containerId);
+  if (!el) return;
+  const clean = y.map((v) => (v == null ? 0 : Number(v || 0)));
+  const hasData = clean.some((v) => v > 0);
+  if (!hasData) {
     Plotly.purge(containerId);
-    el.innerHTML='<div style="padding:17px 5px;text-align:center;color:#9f9588;font-size:7px">Belum ada data</div>';
+    el.innerHTML =
+      '<div style="padding:17px 5px;text-align:center;color:#9f9588;font-size:7px">Belum ada data</div>';
     return;
   }
-  Plotly.newPlot(containerId,[{
-    x,y:clean,type:"bar",
-    marker:{color:clean.map(v=>v>0?color:"rgba(255,255,255,.08)")},
-    hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
-  }],{
-    paper_bgcolor:"rgba(0,0,0,0)",
-    plot_bgcolor:"rgba(0,0,0,0)",
-    margin:{t:3,l:2,r:2,b:2},
-    xaxis:{visible:false,fixedrange:true},
-    yaxis:{visible:false,rangemode:"tozero",fixedrange:true},
-    bargap:.38,
-    showlegend:false
-  },plotConfig);
+  Plotly.newPlot(
+    containerId,
+    [
+      {
+        x,
+        y: clean,
+        type: "bar",
+        marker: {
+          color: clean.map((v) => (v > 0 ? color : "rgba(255,255,255,.08)")),
+        },
+        hovertemplate: "<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>",
+      },
+    ],
+    {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      margin: { t: 3, l: 2, r: 2, b: 2 },
+      xaxis: { visible: false, fixedrange: true },
+      yaxis: { visible: false, rangemode: "tozero", fixedrange: true },
+      bargap: 0.38,
+      showlegend: false,
+    },
+    plotConfig
+  );
 }
-async function openTrendDetail(mode){
-  const selected=dashboardSelectedKP();
-  if($("monitorKp")) $("monitorKp").value=selected;
+async function openTrendDetail(mode) {
+  const selected = dashboardSelectedKP();
+  if ($("monitorKp")) $("monitorKp").value = selected;
   await goToPage("monitoring");
   setMonitorMode(mode);
 }
-async function loadMonitoringTrendIndicators(){
-  if(!$("monitorKp")) return;
-  const kp=$("monitorKp").value || "ALL";
+async function loadMonitoringTrendIndicators() {
+  if (!$("monitorKp")) return;
+  const kp = $("monitorKp").value || "ALL";
 
   // HARIAN: tanggal operasional dari filter Monitoring.
-  let dailyDate=$("monitorDate")?.value;
-  if(!dailyDate){
-    const {data:lastSnap}=await db.from("monitoring_snapshots")
-      .select("report_date").order("report_date",{ascending:false}).limit(1);
-    dailyDate=lastSnap?.[0]?.report_date || localISODate();
+  let dailyDate = $("monitorDate")?.value;
+  if (!dailyDate) {
+    const { data: lastSnap } = await db
+      .from("monitoring_snapshots")
+      .select("report_date")
+      .order("report_date", { ascending: false })
+      .limit(1);
+    dailyDate = lastSnap?.[0]?.report_date || localISODate();
   }
 
-  const {data:snaps}=await db.from("monitoring_snapshots")
+  const { data: snaps } = await db
+    .from("monitoring_snapshots")
     .select("id,report_date,snapshot_time,total_tonnage_kg")
-    .eq("report_date",dailyDate)
-    .order("snapshot_time",{ascending:true});
+    .eq("report_date", dailyDate)
+    .order("snapshot_time", { ascending: true });
 
-  const dailyById={};
-  if(kp==="ALL"){
-    (snaps||[]).forEach(s=>dailyById[s.id]=Number(s.total_tonnage_kg||0));
-  }else if(snaps?.length){
-    const ids=snaps.map(s=>s.id);
-    const {data:d}=await db.from("monitoring_snapshot_details")
+  const dailyById = {};
+  if (kp === "ALL") {
+    (snaps || []).forEach(
+      (s) => (dailyById[s.id] = Number(s.total_tonnage_kg || 0))
+    );
+  } else if (snaps?.length) {
+    const ids = snaps.map((s) => s.id);
+    const { data: d } = await db
+      .from("monitoring_snapshot_details")
       .select("snapshot_id,tonnage_kg")
-      .in("snapshot_id",ids)
-      .eq("kp_code",kp);
-    ids.forEach(id=>dailyById[id]=0);
-    (d||[]).forEach(r=>dailyById[r.snapshot_id]=(dailyById[r.snapshot_id]||0)+Number(r.tonnage_kg||0));
+      .in("snapshot_id", ids)
+      .eq("kp_code", kp);
+    ids.forEach((id) => (dailyById[id] = 0));
+    (d || []).forEach(
+      (r) =>
+        (dailyById[r.snapshot_id] =
+          (dailyById[r.snapshot_id] || 0) + Number(r.tonnage_kg || 0))
+    );
   }
 
-  const dailySlotMap={};
-  (snaps||[]).forEach(s=>dailySlotMap[s.snapshot_time.slice(0,5)]=dailyById[s.id]||0);
-  const dailyY=slots.map(slot=>dailySlotMap[slot] ?? null);
-  const dailyActual=(snaps||[]).map(s=>dailyById[s.id]||0);
-  const dailyCurrent=dailyActual.at(-1)||0;
-  const dailyPrevious=dailyActual.length>1?dailyActual.at(-2):0;
+  const dailySlotMap = {};
+  (snaps || []).forEach(
+    (s) => (dailySlotMap[s.snapshot_time.slice(0, 5)] = dailyById[s.id] || 0)
+  );
+  const dailyY = slots.map((slot) => dailySlotMap[slot] ?? null);
+  const dailyActual = (snaps || []).map((s) => dailyById[s.id] || 0);
+  const dailyCurrent = dailyActual.at(-1) || 0;
+  const dailyPrevious = dailyActual.length > 1 ? dailyActual.at(-2) : 0;
 
-  $("dailyTrendValue").textContent=kg(dailyCurrent);
-  $("dailyTrendPeriod").textContent=`${kp==="ALL"?"Semua KP":kp} • ${dailyDate}`;
-  trendBadge("dailyTrendBadge",dailyCurrent,dailyPrevious,"vs snapshot");
-  renderMiniTrend("dailyTrendMini",slots,dailyY);
+  $("dailyTrendValue").textContent = kg(dailyCurrent);
+  $("dailyTrendPeriod").textContent = `${ kp === "ALL" ? "Semua KP" : kp } • ${dailyDate}`;
+  trendBadge("dailyTrendBadge", dailyCurrent, dailyPrevious, "vs snapshot");
+  renderMiniTrend("dailyTrendMini", slots, dailyY);
 
   // BULANAN + TAHUNAN: historical_summary / monthly summary.
-  let hq=db.from("historical_summary").select("year,month,kp_code,tonnage_kg");
-  if(kp!=="ALL") hq=hq.eq("kp_code",kp);
-  const {data:hist}=await hq;
-  const rows=hist||[];
-  const years=[...new Set(rows.map(r=>Number(r.year)))].sort((a,b)=>a-b);
-  const latestYear=years.at(-1);
-  const monthTotals=Array(12).fill(0);
+  let hq = db
+    .from("historical_summary")
+    .select("year,month,kp_code,tonnage_kg");
+  if (kp !== "ALL") hq = hq.eq("kp_code", kp);
+  const { data: hist } = await hq;
+  const rows = hist || [];
+  const years = [...new Set(rows.map((r) => Number(r.year)))].sort(
+    (a, b) => a - b
+  );
+  const latestYear = years.at(-1);
+  const monthTotals = Array(12).fill(0);
 
-  if(latestYear){
-    rows.filter(r=>Number(r.year)===latestYear).forEach(r=>{
-      const m=Number(r.month);
-      if(m>=1&&m<=12) monthTotals[m-1]+=Number(r.tonnage_kg||0);
-    });
+  if (latestYear) {
+    rows
+      .filter((r) => Number(r.year) === latestYear)
+      .forEach((r) => {
+        const m = Number(r.month);
+        if (m >= 1 && m <= 12) monthTotals[m - 1] += Number(r.tonnage_kg || 0);
+      });
   }
 
-  let latestMonthIndex=-1;
-  for(let i=11;i>=0;i--){
-    if(monthTotals[i]>0){latestMonthIndex=i;break;}
+  let latestMonthIndex = -1;
+  for (let i = 11; i >= 0; i--) {
+    if (monthTotals[i] > 0) {
+      latestMonthIndex = i;
+      break;
+    }
   }
-  const monthLabels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
-  const monthlyCurrent=latestMonthIndex>=0?monthTotals[latestMonthIndex]:0;
-  let previousMonthIndex=latestMonthIndex-1;
-  while(previousMonthIndex>=0 && monthTotals[previousMonthIndex]===0) previousMonthIndex--;
-  const monthlyPrevious=previousMonthIndex>=0?monthTotals[previousMonthIndex]:0;
+  const monthLabels = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Mei",
+    "Jun",
+    "Jul",
+    "Ags",
+    "Sep",
+    "Okt",
+    "Nov",
+    "Des",
+  ];
+  const monthlyCurrent =
+    latestMonthIndex >= 0 ? monthTotals[latestMonthIndex] : 0;
+  let previousMonthIndex = latestMonthIndex - 1;
+  while (previousMonthIndex >= 0 && monthTotals[previousMonthIndex] === 0)
+    previousMonthIndex--;
+  const monthlyPrevious =
+    previousMonthIndex >= 0 ? monthTotals[previousMonthIndex] : 0;
 
-  $("monthlyTrendValue").textContent=kg(monthlyCurrent);
-  $("monthlyTrendPeriod").textContent=latestYear
-    ? `${kp==="ALL"?"Semua KP":kp} • ${monthLabels[Math.max(latestMonthIndex,0)]} ${latestYear}`
-    : `${kp==="ALL"?"Semua KP":kp} • Belum ada data`;
-  trendBadge("monthlyTrendBadge",monthlyCurrent,monthlyPrevious,"vs bulan");
-  renderMiniTrend("monthlyTrendMini",monthLabels,monthTotals,"#f0b325");
+  $("monthlyTrendValue").textContent = kg(monthlyCurrent);
+  $("monthlyTrendPeriod").textContent = latestYear
+    ? `${kp === "ALL" ? "Semua KP" : kp} • ${ monthLabels[Math.max(latestMonthIndex, 0)] } ${latestYear}`
+    : `${kp === "ALL" ? "Semua KP" : kp} • Belum ada data`;
+  trendBadge("monthlyTrendBadge", monthlyCurrent, monthlyPrevious, "vs bulan");
+  renderMiniTrend("monthlyTrendMini", monthLabels, monthTotals, "#f0b325");
 
-  const byYear={};
-  rows.forEach(r=>{
-    const y=Number(r.year),m=Number(r.month),v=Number(r.tonnage_kg||0);
-    if(!byYear[y]) byYear[y]={total:0,months:{}};
-    byYear[y].total+=v;
-    byYear[y].months[m]=(byYear[y].months[m]||0)+v;
+  const byYear = {};
+  rows.forEach((r) => {
+    const y = Number(r.year),
+      m = Number(r.month),
+      v = Number(r.tonnage_kg || 0);
+    if (!byYear[y]) byYear[y] = { total: 0, months: {} };
+    byYear[y].total += v;
+    byYear[y].months[m] = (byYear[y].months[m] || 0) + v;
   });
 
-  const annualYears=Object.keys(byYear).map(Number).sort((a,b)=>a-b);
-  const annualY=annualYears.map(y=>byYear[y].total);
-  const annualLatest=annualYears.at(-1);
-  const annualPrev=annualYears.length>1?annualYears.at(-2):null;
-  const annualCurrent=annualLatest?byYear[annualLatest].total:0;
-  const latestMonths=annualLatest
-    ? Object.keys(byYear[annualLatest].months).map(Number).filter(m=>byYear[annualLatest].months[m]>0)
+  const annualYears = Object.keys(byYear)
+    .map(Number)
+    .sort((a, b) => a - b);
+  const annualY = annualYears.map((y) => byYear[y].total);
+  const annualLatest = annualYears.at(-1);
+  const annualPrev = annualYears.length > 1 ? annualYears.at(-2) : null;
+  const annualCurrent = annualLatest ? byYear[annualLatest].total : 0;
+  const latestMonths = annualLatest
+    ? Object.keys(byYear[annualLatest].months)
+        .map(Number)
+        .filter((m) => byYear[annualLatest].months[m] > 0)
     : [];
-  const comparablePrev=annualPrev
-    ? latestMonths.reduce((sum,m)=>sum+(byYear[annualPrev].months[m]||0),0)
+  const comparablePrev = annualPrev
+    ? latestMonths.reduce(
+        (sum, m) => sum + (byYear[annualPrev].months[m] || 0),
+        0
+      )
     : 0;
 
-  $("yearlyTrendValue").textContent=kg(annualCurrent);
-  $("yearlyTrendPeriod").textContent=annualLatest
-    ? `${kp==="ALL"?"Semua KP":kp} • ${annualLatest}${latestMonths.length<12?` YTD ${latestMonths.length} bln`:""}`
-    : `${kp==="ALL"?"Semua KP":kp} • Belum ada data`;
-  trendBadge("yearlyTrendBadge",annualCurrent,comparablePrev,annualPrev?`vs ${annualPrev}`:"");
-  renderMiniTrend("yearlyTrendMini",annualYears.map(String),annualY,"#b36bff");
+  $("yearlyTrendValue").textContent = kg(annualCurrent);
+  $("yearlyTrendPeriod").textContent = annualLatest
+    ? `${kp === "ALL" ? "Semua KP" : kp} • ${annualLatest}${ latestMonths.length < 12 ? ` YTD ${latestMonths.length} bln` : "" }`
+    : `${kp === "ALL" ? "Semua KP" : kp} • Belum ada data`;
+  trendBadge(
+    "yearlyTrendBadge",
+    annualCurrent,
+    comparablePrev,
+    annualPrev ? `vs ${annualPrev}` : ""
+  );
+  renderMiniTrend(
+    "yearlyTrendMini",
+    annualYears.map(String),
+    annualY,
+    "#b36bff"
+  );
 }
-
 
 // =========================================================
 // EXCEL IMPORT v4.6: MULTI-FILE + REPORT-STYLE XLS + ANNUAL
 // =========================================================
 const MONTH_ID = {
-  januari:1,februari:2,maret:3,april:4,mei:5,juni:6,juli:7,agustus:8,
-  september:9,oktober:10,november:11,desember:12,
-  jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,agst:8,
-  sep:9,sept:9,oct:10,okt:10,nov:11,dec:12,des:12
+  januari: 1,
+  februari: 2,
+  maret: 3,
+  april: 4,
+  mei: 5,
+  juni: 6,
+  juli: 7,
+  agustus: 8,
+  september: 9,
+  oktober: 10,
+  november: 11,
+  desember: 12,
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  agst: 8,
+  sep: 9,
+  sept: 9,
+  oct: 10,
+  okt: 10,
+  nov: 11,
+  dec: 12,
+  des: 12,
 };
 
-function parseExcelNumber(v){
-  if(v==null || v==="") return null;
-  if(typeof v==="number") return Number.isFinite(v)?v:null;
-  const s=String(v).trim();
-  if(!s || /^#/.test(s)) return null;
+function parseExcelNumber(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const s = String(v).trim();
+  if (!s || /^#/.test(s)) return null;
   // Indonesian thousands separator: 294.351 -> 294351
-  if(/^-?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(s)){
-    const n=Number(s.replace(/\./g,"").replace(",","."));
-    return Number.isFinite(n)?n:null;
+  if (/^-?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(s)) {
+    const n = Number(s.replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
   }
-  const n=Number(s.replace(/\s/g,"").replace(",",".").replace(/[^\d.-]/g,""));
-  return Number.isFinite(n)?n:null;
+  const n = Number(
+    s
+      .replace(/\s/g, "")
+      .replace(",", ".")
+      .replace(/[^\d.-]/g, "")
+  );
+  return Number.isFinite(n) ? n : null;
 }
-function parseOperationalDate(v){
-  if(v==null || v==="") return null;
-  if(v instanceof Date && !isNaN(v)) return localISODate(v);
-  if(typeof v==="number"){
-    const p=XLSX.SSF.parse_date_code(v);
-    if(p?.y) return `${p.y}-${String(p.m).padStart(2,"0")}-${String(p.d).padStart(2,"0")}`;
+function parseOperationalDate(v) {
+  if (v == null || v === "") return null;
+  if (v instanceof Date && !isNaN(v)) return localISODate(v);
+  if (typeof v === "number") {
+    const p = XLSX.SSF.parse_date_code(v);
+    if (p?.y)
+      return `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart( 2, "0" )}`;
   }
-  const s=String(v).trim();
+  const s = String(v).trim();
 
-  let m=s.match(/^(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})$/i);
-  if(m){
-    const mon=MONTH_ID[m[2].toLowerCase()];
-    return `${m[3]}-${String(mon).padStart(2,"0")}-${String(+m[1]).padStart(2,"0")}`;
+  let m = s.match(
+    /^(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})$/i
+  );
+  if (m) {
+    const mon = MONTH_ID[m[2].toLowerCase()];
+    return `${m[3]}-${String(mon).padStart(2, "0")}-${String(+m[1]).padStart( 2, "0" )}`;
   }
-  m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if(m){
-    let y=+m[3]; if(y<100) y+=2000;
-    return `${y}-${String(+m[2]).padStart(2,"0")}-${String(+m[1]).padStart(2,"0")}`;
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let y = +m[3];
+    if (y < 100) y += 2000;
+    return `${y}-${String(+m[2]).padStart(2, "0")}-${String(+m[1]).padStart( 2, "0" )}`;
   }
-  m=s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-  if(m) return `${m[1]}-${String(+m[2]).padStart(2,"0")}-${String(+m[3]).padStart(2,"0")}`;
+  m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (m)
+    return `${m[1]}-${String(+m[2]).padStart(2, "0")}-${String(+m[3]).padStart( 2, "0" )}`;
   return null;
 }
-function normalizeHeaderKey(s){
-  return String(s||"").toLowerCase().trim()
-    .replace(/\s+/g," ")
-    .replace(/[._-]+/g," ");
+function normalizeHeaderKey(s) {
+  return String(s || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[._-]+/g, " ");
 }
-function pickField(row, aliases){
-  const map={};
-  Object.keys(row||{}).forEach(k=>map[normalizeHeaderKey(k)]=row[k]);
-  for(const a of aliases){
-    const key=normalizeHeaderKey(a);
-    if(key in map) return map[key];
+function pickField(row, aliases) {
+  const map = {};
+  Object.keys(row || {}).forEach((k) => (map[normalizeHeaderKey(k)] = row[k]));
+  for (const a of aliases) {
+    const key = normalizeHeaderKey(a);
+    if (key in map) return map[key];
   }
   return null;
 }
-async function readWorkbookFile(file){
-  if(!file) throw Error("File belum dipilih.");
-  const buf=await file.arrayBuffer();
-  return XLSX.read(buf,{type:"array",cellDates:true});
+async function readWorkbookFile(file) {
+  if (!file) throw Error("File belum dipilih.");
+  const buf = await file.arrayBuffer();
+  return XLSX.read(buf, { type: "array", cellDates: true });
 }
-function sheetAOA(sheet){
-  return XLSX.utils.sheet_to_json(sheet,{header:1,defval:null,raw:false,blankrows:false});
+function sheetAOA(sheet) {
+  return XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: null,
+    raw: false,
+    blankrows: false,
+  });
 }
-function sheetAOARaw(sheet){
-  return XLSX.utils.sheet_to_json(sheet,{header:1,defval:null,raw:true,blankrows:false});
+function sheetAOARaw(sheet) {
+  return XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: null,
+    raw: true,
+    blankrows: false,
+  });
 }
-function findTextCell(aoa, regex){
-  for(let r=0;r<aoa.length;r++){
-    for(let c=0;c<(aoa[r]||[]).length;c++){
-      const s=String(aoa[r][c]??"").trim();
-      if(regex.test(s)) return {r,c,value:s};
+function findTextCell(aoa, regex) {
+  for (let r = 0; r < aoa.length; r++) {
+    for (let c = 0; c < (aoa[r] || []).length; c++) {
+      const s = String(aoa[r][c] ?? "").trim();
+      if (regex.test(s)) return { r, c, value: s };
     }
   }
   return null;
 }
-function inferKPFromText(text,fileName=""){
-  const all=(String(text||"")+" "+String(fileName||"")).toUpperCase();
-  if(/TKWL\s*2|TKWL\s*KANDIS/.test(all)) return "TKWL-2";
-  if(/TKWL\s*1|TKWL\s*SIAK/.test(all)) return "TKWL-1";
-  if(/ASMJ\s*2/.test(all)) return "ASMJ-2";
-  if(/ASMJ\s*1/.test(all)) return "ASMJ-1";
-  if(/MSB\s*2/.test(all)) return "MSB-2";
-  if(/\bKS\s*2\b|\bKS2\b/.test(all)) return "KS2";
-  if(/\bIIS\b|\bSSM\b/.test(all)) return "SSM";
-  if(/\bGSL\s*[- ]\s*INUMAN\b/.test(all)) return "GSL-INUMAN";
-  const candidates=FALLBACK_KP_CODES.slice().sort((a,b)=>b.length-a.length);
-  for(const code of candidates){
-    const variants=[code,code.replace("-"," "),code.replace("-","")];
-    if(variants.some(v=>all.includes(v))) return code;
+function normalizeKpSearchText(s) {
+  return String(s || "")
+    .toUpperCase()
+    .replace(/[_]+/g, " ")
+    .replace(/[^A-Z0-9-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function hasKpToken(text, token) {
+  const t = normalizeKpSearchText(text);
+  const variants = [token, token.replace(/-/g, " "), token.replace(/-/g, "")]
+    .map(normalizeKpSearchText)
+    .filter(Boolean);
+
+  return variants.some((v) => {
+    // exact token/phrase boundary, avoids MAN matching inside unrelated words.
+    const escaped = v
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "\\s+");
+    return new RegExp(`(?:^|\\s)${escaped}(?:\\s|$)`, "i").test(t);
+  });
+}
+function inferKPFromText(text, fileName = "") {
+  const file = String(fileName || "").replace(/\.(xlsx|xls)$/i, "");
+  const body = String(text || "");
+
+  // Explicit aliases first.
+  const aliasRules = [
+    { code: "GSL-INUMAN", rx: /GSL[\s_-]*INUMAN/i },
+    { code: "TKWL-2", rx: /TKWL[\s_-]*2|TKWL[\s_-]*KANDIS/i },
+    { code: "TKWL-1", rx: /TKWL[\s_-]*1|TKWL[\s_-]*SIAK/i },
+    { code: "ASMJ-2", rx: /ASMJ[\s_-]*2/i },
+    { code: "ASMJ-1", rx: /ASMJ[\s_-]*1/i },
+    { code: "MSB-2", rx: /MSB[\s_-]*2/i },
+    { code: "KS2", rx: /\bKS[\s_-]*2\b|\bKS2\b/i },
+    { code: "SSM", rx: /\bIIS\b|\bSSM\b/i },
+    { code: "LBP", rx: /\bLBP\b|\bLPI\b/i },
+  ];
+
+  // Filename is the strongest source for monthly operational exports.
+  for (const r of aliasRules) {
+    if (r.rx.test(file)) return r.code;
   }
-  if(/\bLBP\b|\bLPI\b/.test(all)) return "LBP";
+  const filenameCandidates = FALLBACK_KP_CODES.slice().sort(
+    (a, b) => b.length - a.length
+  );
+  for (const code of filenameCandidates) {
+    if (hasKpToken(file, code)) return code;
+  }
+
+  // Then use report title/body, still with exact token boundaries.
+  for (const r of aliasRules) {
+    if (r.rx.test(body)) return r.code;
+  }
+  for (const code of filenameCandidates) {
+    if (hasKpToken(body, code)) return code;
+  }
+
   return null;
 }
-function supplierToken(s){
-  return String(s||"").toUpperCase().replace(/[^A-Z0-9]+/g,"").trim();
+function supplierToken(s) {
+  return String(s || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "")
+    .trim();
 }
-function canonSupplierForKP(kp,value){
-  const token=supplierToken(value);
-  if(!token || ["AGEN","SPB","DO","SUPPLIER","JENISSPB","UNKNOWN","ALL"].includes(token)) return null;
-  const candidates=(MASTER_SUPPLIER_DATA||[]).filter(s=>(s.master_kp?.code||"")===kp);
-  for(const s of candidates){
-    const names=[s.name,s.full_name,...(s.aliases||[])].filter(Boolean);
-    if(names.some(n=>supplierToken(n)===token)) return s.name;
+function canonSupplierForKP(kp, value) {
+  const token = supplierToken(value);
+  if (
+    !token ||
+    ["AGEN", "SPB", "DO", "SUPPLIER", "JENISSPB", "UNKNOWN", "ALL"].includes(
+      token
+    )
+  )
+    return null;
+  const candidates = (MASTER_SUPPLIER_DATA || []).filter(
+    (s) => (s.master_kp?.code || "") === kp
+  );
+  for (const s of candidates) {
+    const names = [s.name, s.full_name, ...(s.aliases || [])].filter(Boolean);
+    if (names.some((n) => supplierToken(n) === token)) return s.name;
   }
-  return String(value||"").trim() || null;
+  return String(value || "").trim() || null;
 }
-function inferSupplierFromReport(aoa,fileName="",kp=""){
+function inferSupplierFromReport(aoa, fileName = "", kp = "") {
   // Primary source: metadata "Agen" near top of operational report.
-  for(let r=0;r<Math.min(35,aoa.length);r++){
-    const row=aoa[r]||[];
-    for(let c=0;c<row.length;c++){
-      if(/^agen$/i.test(String(row[c]??"").trim())){
-        const candidates=[];
-        for(let cc=c+1;cc<row.length;cc++) candidates.push(row[cc]);
-        for(let rr=r+1;rr<Math.min(r+3,aoa.length);rr++){
-          candidates.push(...(aoa[rr]||[]));
+  for (let r = 0; r < Math.min(35, aoa.length); r++) {
+    const row = aoa[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (/^agen$/i.test(String(row[c] ?? "").trim())) {
+        const candidates = [];
+        for (let cc = c + 1; cc < row.length; cc++) candidates.push(row[cc]);
+        for (let rr = r + 1; rr < Math.min(r + 3, aoa.length); rr++) {
+          candidates.push(...(aoa[rr] || []));
         }
-        for(const raw of candidates){
-          const v=String(raw??"").trim();
-          if(!v) continue;
-          const canonical=canonSupplierForKP(kp,v);
-          if(canonical) return canonical;
+        for (const raw of candidates) {
+          const v = String(raw ?? "").trim();
+          if (!v) continue;
+          const canonical = canonSupplierForKP(kp, v);
+          if (canonical) return canonical;
         }
       }
     }
   }
 
   // Fallback: match supplier name/alias in filename, scoped to selected KP.
-  const f=supplierToken(String(fileName||"").replace(/\.(xlsx|xls)$/i,""));
-  const candidates=(MASTER_SUPPLIER_DATA||[]).filter(s=>(s.master_kp?.code||"")===kp);
-  for(const s of candidates){
-    const names=[s.name,s.full_name,...(s.aliases||[])].filter(Boolean)
-      .sort((a,b)=>String(b).length-String(a).length);
-    if(names.some(n=>f.includes(supplierToken(n)))) return s.name;
+  const f = supplierToken(String(fileName || "").replace(/\.(xlsx|xls)$/i, ""));
+  const candidates = (MASTER_SUPPLIER_DATA || []).filter(
+    (s) => (s.master_kp?.code || "") === kp
+  );
+  for (const s of candidates) {
+    const names = [s.name, s.full_name, ...(s.aliases || [])]
+      .filter(Boolean)
+      .sort((a, b) => String(b).length - String(a).length);
+    if (names.some((n) => f.includes(supplierToken(n)))) return s.name;
   }
   return "UNKNOWN";
 }
-function findReportColumns(aoa){
+function findReportColumns(aoa) {
   // Operational reports often use a 2-row header, e.g.
   // row 1: NO. BUKTI | NO. POLISI | PEMBELIAN | TANGGAL BAYAR
-  // row 2:                         TONASE | HARGA | NILAI PEMBELIAN
+  // row 2: TONASE | HARGA | NILAI PEMBELIAN
   // Therefore inspect each column across up to 3 consecutive header rows.
-  for(let r=0;r<Math.min(80,aoa.length);r++){
-    const maxCols=Math.max(
-      (aoa[r]||[]).length,
-      (aoa[r+1]||[]).length,
-      (aoa[r+2]||[]).length
+  for (let r = 0; r < Math.min(80, aoa.length); r++) {
+    const maxCols = Math.max(
+      (aoa[r] || []).length,
+      (aoa[r + 1] || []).length,
+      (aoa[r + 2] || []).length
     );
-    let no=-1,bukti=-1,polisi=-1,tonase=-1,date=-1;
+    let no = -1,
+      bukti = -1,
+      polisi = -1,
+      tonase = -1,
+      date = -1;
 
-    for(let c=0;c<maxCols;c++){
-      const parts=[0,1,2].map(off=>String((aoa[r+off]||[])[c]??"").trim()).filter(Boolean);
-      const s=parts.join(" ").toUpperCase().replace(/\s+/g," ");
+    for (let c = 0; c < maxCols; c++) {
+      const parts = [0, 1, 2]
+        .map((off) => String((aoa[r + off] || [])[c] ?? "").trim())
+        .filter(Boolean);
+      const s = parts.join(" ").toUpperCase().replace(/\s+/g, " ");
 
-      if(/^NO$/.test(s) || /^NO\s/.test(s) && !/BUKTI|POLISI/.test(s)) no=c;
-      if(/NO\.?\s*BUKTI/.test(s)) bukti=c;
-      if(/NO\.?\s*POLISI/.test(s)) polisi=c;
-      if(/\bTONASE\b/.test(s)) tonase=c;
-      if(/TANGGAL\s*BAYAR|^TANGGAL$|\bTGL\b/.test(s)) date=c;
+      if (/^NO$/.test(s) || (/^NO\s/.test(s) && !/BUKTI|POLISI/.test(s)))
+        no = c;
+      if (/NO\.?\s*BUKTI/.test(s)) bukti = c;
+      if (/NO\.?\s*POLISI/.test(s)) polisi = c;
+      if (/\bTONASE\b/.test(s)) tonase = c;
+      if (/TANGGAL\s*BAYAR|^TANGGAL$|\bTGL\b/.test(s)) date = c;
     }
 
     // For ASMJ-style reports, proof may exist but is not mandatory on every transaction.
-    if(no>=0 && polisi>=0 && tonase>=0){
-      return {row:r,headerRows:3,no,bukti,polisi,tonase,date};
+    if (no >= 0 && polisi >= 0 && tonase >= 0) {
+      return { row: r, headerRows: 3, no, bukti, polisi, tonase, date };
     }
   }
   return null;
 }
-function isTransactionSequence(v){
-  if(typeof v==="number") return Number.isFinite(v) && v>0;
-  const s=String(v??"").trim();
-  return /^\d+$/.test(s) && Number(s)>0;
+function isTransactionSequence(v) {
+  if (typeof v === "number") return Number.isFinite(v) && v > 0;
+  const s = String(v ?? "").trim();
+  return /^\d+$/.test(s) && Number(s) > 0;
 }
-function reportTonnageKg(rawValue,formattedValue){
+function reportTonnageKg(rawValue, formattedValue) {
   // In operational purchase reports, TONASE is already stored as kilograms:
   // examples: 4892, 8512, 26469. Do NOT multiply by 1000.
-  if(typeof rawValue==="number" && Number.isFinite(rawValue) && rawValue>0){
+  if (
+    typeof rawValue === "number" &&
+    Number.isFinite(rawValue) &&
+    rawValue > 0
+  ) {
     return Math.round(rawValue);
   }
-  const n=parseExcelNumber(formattedValue);
-  return n>0 ? Math.round(n) : 0;
+  const n = parseExcelNumber(formattedValue);
+  return n > 0 ? Math.round(n) : 0;
 }
-function findPeriodStartDate(aoa){
-  for(let r=0;r<Math.min(25,aoa.length);r++){
-    for(const cell of (aoa[r]||[])){
-      const s=String(cell??"").trim();
-      // Handles: "01 Agustus 2026 s.d 13 Agustus 2026"
-      const m=s.match(/(\d{1,2}\s+(?:Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4})/i);
-      if(m){
-        const d=parseOperationalDate(m[1]);
-        if(d) return d;
+function findReportPeriod(aoa, fileName = "") {
+  const monthNames =
+    "Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember";
+  for (let r = 0; r < Math.min(30, aoa.length); r++) {
+    for (const cell of aoa[r] || []) {
+      const s = String(cell ?? "").trim();
+      const m = s.match(
+        new RegExp(
+          `(\\d{1,2}\\s+(?:${monthNames})\\s+\\d{4})\\s*(?:s\\.?\\s*d\\.?|sampai|-)\\s*` +
+            `(\\d{1,2}\\s+(?:${monthNames})\\s+\\d{4})`,
+          "i"
+        )
+      );
+      if (m) {
+        const start = parseOperationalDate(m[1]);
+        const end = parseOperationalDate(m[2]);
+        if (start && end) return { start, end, source: "header" };
+      }
+
+      const one = s.match(
+        new RegExp(`(\\d{1,2}\\s+(?:${monthNames})\\s+\\d{4})`, "i")
+      );
+      if (one) {
+        const d = parseOperationalDate(one[1]);
+        if (d) {
+          const [y, mo] = d.split("-").map(Number);
+          const last = new Date(y, mo, 0).getDate();
+          return {
+            start: `${y}-${String(mo).padStart(2, "0")}-01`,
+            end: `${y}-${String(mo).padStart(2, "0")}-${String(last).padStart( 2, "0" )}`,
+            source: "header-month",
+          };
+        }
       }
     }
   }
-  return null;
-}
-function findNextTransactionDate(aoa,startRow,dateCol,limit=80){
-  if(dateCol<0) return null;
-  for(let r=startRow+1;r<Math.min(aoa.length,startRow+limit);r++){
-    const d=parseOperationalDate((aoa[r]||[])[dateCol]);
-    if(d) return d;
-  }
-  return null;
-}
-function findDeclaredReportTotal(aoa,rawAoa,cols){
-  for(let r=cols.row+1;r<aoa.length;r++){
-    const first=String((aoa[r]||[])[cols.no]??"").trim().toUpperCase();
-    if(/^TOTAL$|^JUMLAH$/.test(first)){
-      const kg=reportTonnageKg((rawAoa[r]||[])[cols.tonase],(aoa[r]||[])[cols.tonase]);
-      if(kg>0) return kg;
+
+  // Filename fallback, e.g. "SKA DSS JULI 2026.xlsx".
+  const f = String(fileName || "");
+  const fm = f.match(new RegExp(`(?:${monthNames})\\s+(20\\d{2})`, "i"));
+  if (fm) {
+    const monthWord = (f.match(new RegExp(`(${monthNames})`, "i")) || [])[1];
+    const mo = MONTH_ID[String(monthWord || "").toLowerCase()];
+    const y = Number(fm[1]);
+    if (mo && y) {
+      const last = new Date(y, mo, 0).getDate();
+      return {
+        start: `${y}-${String(mo).padStart(2, "0")}-01`,
+        end: `${y}-${String(mo).padStart(2, "0")}-${String(last).padStart( 2, "0" )}`,
+        source: "filename",
+      };
     }
   }
   return null;
 }
-function parseMonthlyReportSheet(sheet,sheetName,fileName){
-  const aoa=sheetAOA(sheet);
-  const rawAoa=sheetAOARaw(sheet);
-  const flat=aoa.flat().filter(v=>v!=null).join(" ");
-  const kp=inferKPFromText(flat,fileName);
-  const cols=findReportColumns(aoa);
+function dateInPeriod(date, period) {
+  return !!date && !!period && date >= period.start && date <= period.end;
+}
+function findNextTransactionDate( aoa, startRow, dateCol, period = null, limit = 80 ) {
+  if (dateCol < 0) return null;
+  for (let r = startRow + 1; r < Math.min(aoa.length, startRow + limit); r++) {
+    const d = parseOperationalDate((aoa[r] || [])[dateCol]);
+    if (d && (!period || dateInPeriod(d, period))) return d;
+  }
+  return null;
+}
+function findDeclaredReportTotal(aoa, rawAoa, cols) {
+  for (let r = cols.row + 1; r < aoa.length; r++) {
+    const first = String((aoa[r] || [])[cols.no] ?? "")
+      .trim()
+      .toUpperCase();
+    if (/^TOTAL$|^JUMLAH$/.test(first)) {
+      const kg = reportTonnageKg(
+        (rawAoa[r] || [])[cols.tonase],
+        (aoa[r] || [])[cols.tonase]
+      );
+      if (kg > 0) return kg;
+    }
+  }
+  return null;
+}
+function parseMonthlyReportSheet(sheet, sheetName, fileName) {
+  const aoa = sheetAOA(sheet);
+  const rawAoa = sheetAOARaw(sheet);
+  const flat = aoa
+    .slice(0, 35)
+    .flat()
+    .filter((v) => v != null)
+    .join(" ");
+  const kp = inferKPFromText(flat, fileName);
+  const cols = findReportColumns(aoa);
+  const period = findReportPeriod(aoa, fileName);
 
-  if(!kp || !cols){
+  if (!kp || !cols || !period) {
     return {
-      daily:[],recognized:false,
-      reason:!kp
+      daily: [],
+      recognized: false,
+      reason: !kp
         ? "KP tidak terdeteksi"
-        : "Header transaksi bertingkat (No / No Polisi / Tonase) tidak ditemukan"
+        : !cols
+        ? "Header transaksi bertingkat (No / No Polisi / Tonase) tidak ditemukan"
+        : "Periode laporan tidak terdeteksi",
     };
   }
 
-  const supplier=inferSupplierFromReport(aoa,fileName,kp);
-  if(!supplier || supplier==="UNKNOWN"){
-    return {daily:[],recognized:false,reason:"Supplier/Agen tidak terdeteksi"};
+  const supplier = inferSupplierFromReport(aoa, fileName, kp);
+  if (!supplier || supplier === "UNKNOWN") {
+    return {
+      daily: [],
+      recognized: false,
+      reason: "Supplier/Agen tidak terdeteksi",
+    };
   }
 
-  const periodStart=findPeriodStartDate(aoa);
-  const dailyMap=new Map();
-  let lastDate=null;
-  let acceptedTransactions=0;
-  let blankProofTransactions=0;
-  let skippedNumericRows=0;
+  const dailyMap = new Map();
+  let lastInPeriodDate = null;
+  let acceptedTransactions = 0;
+  let blankProofTransactions = 0;
+  let skippedNumericRows = 0;
+  let outsidePeriodPayments = 0;
+  let blankPaymentDates = 0;
 
-  // Header may span 2 rows; start after the detected header block.
-  const dataStart=cols.row+1;
+  for (let r = cols.row + 1; r < aoa.length; r++) {
+    const row = aoa[r] || [];
+    const rawRow = rawAoa[r] || [];
 
-  for(let r=dataStart;r<aoa.length;r++){
-    const row=aoa[r]||[];
-    const rawRow=rawAoa[r]||[];
+    const seq = row[cols.no];
+    const plate = String(row[cols.polisi] ?? "").trim();
+    const tonKg = reportTonnageKg(rawRow[cols.tonase], row[cols.tonase]);
 
-    const seq=row[cols.no];
-    const plate=String(row[cols.polisi]??"").trim();
-    const tonKg=reportTonnageKg(rawRow[cols.tonase],row[cols.tonase]);
-
-    // A real vehicle transaction is defined by:
-    // numeric sequence + vehicle plate + positive tonnage.
-    // This excludes subtotal/total rows without requiring NO. BUKTI.
-    const validTransaction=isTransactionSequence(seq) && !!plate && tonKg>0;
-
-    if(!validTransaction){
-      if(tonKg>0) skippedNumericRows++;
+    // Only numbered vehicle transactions count.
+    const validTransaction = isTransactionSequence(seq) && !!plate && tonKg > 0;
+    if (!validTransaction) {
+      if (tonKg > 0) skippedNumericRows++;
       continue;
     }
 
-    let rowDate=cols.date>=0 ? parseOperationalDate(row[cols.date]) : null;
-    if(rowDate){
-      lastDate=rowDate;
-    }else if(lastDate){
-      rowDate=lastDate;
-    }else{
-      // First transaction can have blank TANGGAL BAYAR.
-      // Use the next dated transaction; if none, use report period start.
-      rowDate=findNextTransactionDate(aoa,r,cols.date) || periodStart;
+    const paymentDate =
+      cols.date >= 0 ? parseOperationalDate(row[cols.date]) : null;
+    let rowDate = null;
+
+    if (paymentDate && dateInPeriod(paymentDate, period)) {
+      // Use payment date only when it belongs to the report's own period.
+      rowDate = paymentDate;
+      lastInPeriodDate = paymentDate;
+    } else if (paymentDate && !dateInPeriod(paymentDate, period)) {
+      // Payment in the next month still belongs to this report period.
+      // Clamp it to period end so it does not leak into another month.
+      rowDate = period.end;
+      outsidePeriodPayments++;
+    } else {
+      blankPaymentDates++;
+      // For blank date, use the last in-period date; for the first row use the
+      // next in-period date; if neither exists, use the report start.
+      rowDate =
+        lastInPeriodDate ||
+        findNextTransactionDate(aoa, r, cols.date, period) ||
+        period.start;
     }
 
-    if(!rowDate) continue;
+    const proof = cols.bukti >= 0 ? String(row[cols.bukti] ?? "").trim() : "";
+    if (!proof) blankProofTransactions++;
 
-    const proof=cols.bukti>=0 ? String(row[cols.bukti]??"").trim() : "";
-    if(!proof) blankProofTransactions++;
-
-    const key=`${rowDate}|${kp}|${supplier}`;
-    const prev=dailyMap.get(key)||{
-      report_date:rowDate,
-      kp_code:kp,
-      supplier_name:supplier,
-      tonnage_kg:0,
-      trip_count:0,
-      source_file:fileName
+    const key = `${rowDate}|${kp}|${supplier}`;
+    const prev = dailyMap.get(key) || {
+      report_date: rowDate,
+      kp_code: kp,
+      supplier_name: supplier,
+      tonnage_kg: 0,
+      trip_count: 0,
+      source_file: fileName,
     };
-    prev.tonnage_kg+=tonKg;
-    prev.trip_count+=1;
-    dailyMap.set(key,prev);
+    prev.tonnage_kg += tonKg;
+    prev.trip_count += 1;
+    dailyMap.set(key, prev);
     acceptedTransactions++;
   }
 
-  const daily=[...dailyMap.values()];
-  const parsedTotal=daily.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
-  const declaredTotal=findDeclaredReportTotal(aoa,rawAoa,cols);
-  const totalDiff=declaredTotal==null ? null : parsedTotal-declaredTotal;
-  const integrityOk=declaredTotal==null ? true : Math.abs(totalDiff)<=1;
+  const daily = [...dailyMap.values()];
+  const parsedTotal = daily.reduce((a, r) => a + Number(r.tonnage_kg || 0), 0);
+  const declaredTotal = findDeclaredReportTotal(aoa, rawAoa, cols);
+  const totalDiff = declaredTotal == null ? null : parsedTotal - declaredTotal;
+  const integrityOk = declaredTotal == null ? true : Math.abs(totalDiff) <= 1;
 
   return {
     daily,
-    recognized:acceptedTransactions>0,
-    kp,supplier,
+    recognized: acceptedTransactions > 0,
+    kp,
+    supplier,
+    period,
     acceptedTransactions,
     blankProofTransactions,
     skippedNumericRows,
+    outsidePeriodPayments,
+    blankPaymentDates,
     parsedTotal,
     declaredTotal,
     totalDiff,
     integrityOk,
-    reason:acceptedTransactions?"":"Tidak ada baris transaksi valid"
+    reason: acceptedTransactions ? "" : "Tidak ada baris transaksi valid",
   };
 }
-function parseMonthlySimpleTable(sheet,sheetName,fileName){
-  const rows=XLSX.utils.sheet_to_json(sheet,{defval:null,raw:false});
-  const out=[];
-  for(const r of rows){
-    const kp=canonKP(pickField(r,["kp","kode kp","kantor pencairan","kantor","unit","kode unit"]));
-    const supplierRaw=pickField(r,["supplier","agen","jenis spb","spb","do"]);
-    const supplier=canonSupplierForKP(kp,supplierRaw)||String(supplierRaw||"ALL").trim()||"ALL";
-    const date=parseOperationalDate(pickField(r,["tanggal","date","tgl","report date"]));
-    const tonValue=pickField(r,["tonase kg","tonnage kg","tonase","tonnage","berat kg","berat"]);
-    const ton=transactionTonnageKg(null,tonValue);
-    const trip=parseExcelNumber(pickField(r,["trip","jumlah trip","mobil masuk","jumlah kendaraan","kendaraan"]));
-    if(kp && date && ton>0){
+function parseMonthlySimpleTable(sheet, sheetName, fileName) {
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null, raw: false });
+  const out = [];
+  for (const r of rows) {
+    const kp = canonKP(
+      pickField(r, [
+        "kp",
+        "kode kp",
+        "kantor pencairan",
+        "kantor",
+        "unit",
+        "kode unit",
+      ])
+    );
+    const supplierRaw = pickField(r, [
+      "supplier",
+      "agen",
+      "jenis spb",
+      "spb",
+      "do",
+    ]);
+    const supplier =
+      canonSupplierForKP(kp, supplierRaw) ||
+      String(supplierRaw || "ALL").trim() ||
+      "ALL";
+    const date = parseOperationalDate(
+      pickField(r, ["tanggal", "date", "tgl", "report date"])
+    );
+    const tonValue = pickField(r, [
+      "tonase kg",
+      "tonnage kg",
+      "tonase",
+      "tonnage",
+      "berat kg",
+      "berat",
+    ]);
+    const ton = transactionTonnageKg(null, tonValue);
+    const trip = parseExcelNumber(
+      pickField(r, [
+        "trip",
+        "jumlah trip",
+        "mobil masuk",
+        "jumlah kendaraan",
+        "kendaraan",
+      ])
+    );
+    if (kp && date && ton > 0) {
       out.push({
-        report_date:date,
-        kp_code:kp,
-        supplier_name:supplier,
-        tonnage_kg:ton,
-        trip_count:trip==null?1:Math.max(0,Math.round(trip)),
-        source_file:fileName
+        report_date: date,
+        kp_code: kp,
+        supplier_name: supplier,
+        tonnage_kg: ton,
+        trip_count: trip == null ? 1 : Math.max(0, Math.round(trip)),
+        source_file: fileName,
       });
     }
   }
   return out;
 }
-function combineDailyRows(rows){
-  const m=new Map();
-  rows.forEach(r=>{
-    const key=`${r.report_date}|${r.kp_code}|${r.supplier_name||"ALL"}`;
-    const p=m.get(key)||{...r,tonnage_kg:0,trip_count:0};
-    p.tonnage_kg+=Number(r.tonnage_kg||0);
-    p.trip_count+=Number(r.trip_count||0);
-    m.set(key,p);
+function combineDailyRows(rows) {
+  const m = new Map();
+  rows.forEach((r) => {
+    const key = `${r.report_date}|${r.kp_code}|${r.supplier_name || "ALL"}`;
+    const p = m.get(key) || { ...r, tonnage_kg: 0, trip_count: 0 };
+    p.tonnage_kg += Number(r.tonnage_kg || 0);
+    p.trip_count += Number(r.trip_count || 0);
+    m.set(key, p);
   });
   return [...m.values()];
 }
-function parseMonthlyWorkbook(wb,fileName){
-  let daily=[];
-  let recognizedSheets=0;
-  const notes=[];
-  const integrityIssues=[];
+function parseMonthlyWorkbook(wb, fileName) {
+  let daily = [];
+  let recognizedSheets = 0;
+  const notes = [];
+  const integrityIssues = [];
 
-  wb.SheetNames.forEach(name=>{
-    const sheet=wb.Sheets[name];
-    const report=parseMonthlyReportSheet(sheet,name,fileName);
+  wb.SheetNames.forEach((name) => {
+    const sheet = wb.Sheets[name];
+    const report = parseMonthlyReportSheet(sheet, name, fileName);
 
-    if(report.recognized && report.daily.length){
+    if (report.recognized && report.daily.length) {
       daily.push(...report.daily);
       recognizedSheets++;
 
       notes.push(
-        `${name}: ${report.kp} / ${report.supplier}`+
-        ` / ${report.acceptedTransactions} transaksi`+
-        ` / ${report.blankProofTransactions} transaksi tanpa No. Bukti`+
-        ` / ${report.skippedNumericRows} baris angka non-transaksi diabaikan`+
-        (report.declaredTotal!=null
-          ? ` / Total Excel ${kg(report.declaredTotal)} → ${report.integrityOk?"COCOK":"SELISIH"}`
-          : "")
+        `${name}: ${report.kp} / ${report.supplier}` +
+          ` / periode ${report.period.start} s.d ${report.period.end}` +
+          ` / ${report.acceptedTransactions} transaksi` +
+          ` / ${report.outsidePeriodPayments} pembayaran di luar periode dialokasikan ke akhir periode` +
+          ` / ${report.blankProofTransactions} transaksi tanpa No. Bukti` +
+          ` / ${report.skippedNumericRows} baris angka non-transaksi diabaikan` +
+          (report.declaredTotal != null
+            ? ` / Total Excel ${kg(report.declaredTotal)} → ${ report.integrityOk ? "COCOK" : "SELISIH" }`
+            : "")
       );
 
-      if(!report.integrityOk){
+      if (!report.integrityOk) {
         integrityIssues.push(
-          `${name}: hasil parser ${kg(report.parsedTotal)} ≠ Total Excel ${kg(report.declaredTotal)}`
+          `${name}: hasil parser ${kg(report.parsedTotal)} ≠ Total Excel ${kg( report.declaredTotal )}`
         );
       }
       return;
     }
 
-    const simple=parseMonthlySimpleTable(sheet,name,fileName);
-    if(simple.length){
+    const simple = parseMonthlySimpleTable(sheet, name, fileName);
+    if (simple.length) {
       daily.push(...simple);
       recognizedSheets++;
       notes.push(`${name}: tabel sederhana / ${simple.length} baris`);
-    }else{
-      notes.push(`${name}: belum dikenali (${report.reason||"format tidak sesuai"})`);
+    } else {
+      notes.push(
+        `${name}: belum dikenali (${report.reason || "format tidak sesuai"})`
+      );
     }
   });
 
-  daily=combineDailyRows(daily);
+  daily = combineDailyRows(daily);
   return {
-    fileName,daily,recognizedSheets,notes,
-    integrityOk:integrityIssues.length===0,
-    integrityIssues
+    fileName,
+    daily,
+    recognizedSheets,
+    notes,
+    integrityOk: integrityIssues.length === 0,
+    integrityIssues,
   };
 }
-function monthlyGroupKey(r){
-  const [y,m]=String(r.report_date).split("-").map(Number);
+function monthlyGroupKey(r) {
+  const [y, m] = String(r.report_date).split("-").map(Number);
   return `${y}|${m}|${r.kp_code}`;
 }
-async function validateMonthlyAgainstAnnual(dailyRows){
-  const grouped=new Map();
-  dailyRows.forEach(r=>{
-    const [year,month]=r.report_date.split("-").map(Number);
-    const key=`${year}|${month}|${r.kp_code}`;
-    const g=grouped.get(key)||{
-      year,month,kp_code:r.kp_code,
-      parsed_kg:0,trips:0,suppliers:new Set()
+async function validateMonthlyAgainstAnnual(dailyRows) {
+  const grouped = new Map();
+  dailyRows.forEach((r) => {
+    const [year, month] = r.report_date.split("-").map(Number);
+    const key = `${year}|${month}|${r.kp_code}`;
+    const g = grouped.get(key) || {
+      year,
+      month,
+      kp_code: r.kp_code,
+      parsed_kg: 0,
+      trips: 0,
+      suppliers: new Set(),
     };
-    g.parsed_kg+=Number(r.tonnage_kg||0);
-    g.trips+=Number(r.trip_count||0);
+    g.parsed_kg += Number(r.tonnage_kg || 0);
+    g.trips += Number(r.trip_count || 0);
     g.suppliers.add(r.supplier_name);
-    grouped.set(key,g);
+    grouped.set(key, g);
   });
 
-  const result=[];
-  for(const g of grouped.values()){
-    const {data:refData,error}=await db.from("historical_summary")
+  const result = [];
+  for (const g of grouped.values()) {
+    const { data: refData, error } = await db
+      .from("historical_summary")
       .select("tonnage_kg,source_file")
-      .eq("year",g.year).eq("month",g.month).eq("kp_code",g.kp_code)
+      .eq("year", g.year)
+      .eq("month", g.month)
+      .eq("kp_code", g.kp_code)
       .maybeSingle();
 
-    if(error){
-      result.push({...g,status:"ERROR",reference_kg:null,diff_kg:null,block:false,note:error.message});
-      continue;
-    }
-
-    if(!refData){
+    if (error) {
       result.push({
-        ...g,status:"TANPA REFERENSI",reference_kg:null,diff_kg:null,block:false,
-        note:"Data tahunan belum tersedia untuk pembanding."
+        ...g,
+        status: "ERROR",
+        reference_kg: null,
+        diff_kg: null,
+        block: false,
+        note: error.message,
       });
       continue;
     }
 
-    const reference=Number(refData.tonnage_kg||0);
-    const diff=g.parsed_kg-reference;
-    const tolerance=Math.max(1000,reference*0.002); // 0.2% or 1 ton
-    const abs=Math.abs(diff);
+    if (!refData) {
+      result.push({
+        ...g,
+        status: "TANPA REFERENSI",
+        reference_kg: null,
+        diff_kg: null,
+        block: false,
+        note: "Data tahunan belum tersedia untuk pembanding.",
+      });
+      continue;
+    }
 
-    let status="BELUM LENGKAP";
-    let block=false;
-    let note="Total file yang dipilih masih di bawah referensi tahunan; kemungkinan supplier lain belum diupload.";
+    const reference = Number(refData.tonnage_kg || 0);
+    const diff = g.parsed_kg - reference;
+    const tolerance = Math.max(1000, reference * 0.002); // 0.2% or 1 ton
+    const abs = Math.abs(diff);
 
-    if(abs<=tolerance){
-      status="COCOK";
-      note="Total bulanan sesuai referensi tahunan.";
-    }else if(diff>tolerance){
-      status="MELEBIHI REFERENSI";
-      block=true;
-      note="Total hasil parser melebihi referensi tahunan. Simpan diblokir untuk mencegah double count/subtotal.";
+    let status = "BELUM LENGKAP";
+    let block = false;
+    let note =
+      "Total file yang dipilih masih di bawah referensi tahunan; kemungkinan supplier lain belum diupload.";
+
+    if (abs <= tolerance) {
+      status = "COCOK";
+      note = "Total bulanan sesuai referensi tahunan.";
+    } else if (diff > tolerance) {
+      status = "MELEBIHI REFERENSI";
+      block = true;
+      note =
+        "Total hasil parser melebihi referensi tahunan. Simpan diblokir untuk mencegah double count/subtotal.";
     }
 
     result.push({
       ...g,
-      reference_kg:reference,
-      diff_kg:diff,
-      diff_pct:reference?diff/reference*100:null,
-      reference_source:refData.source_file,
-      status,block,note
+      reference_kg: reference,
+      diff_kg: diff,
+      diff_pct: reference ? (diff / reference) * 100 : null,
+      reference_source: refData.source_file,
+      status,
+      block,
+      note,
     });
   }
   return result;
 }
-async function previewMonthlyExcels(fileList){
-  try{
-    const files=[...(fileList||[])];
-    if(!files.length) throw Error("Pilih minimal 1 file.");
-    const previews=[];
-    let allDaily=[];
+async function previewMonthlyExcels(fileList) {
+  try {
+    const files = [...(fileList || [])];
+    if (!files.length) throw Error("Pilih minimal 1 file.");
+    const previews = [];
+    let allDaily = [];
 
-    for(const file of files){
-      const wb=await readWorkbookFile(file);
-      const p=parseMonthlyWorkbook(wb,file.name);
+    for (const file of files) {
+      const wb = await readWorkbookFile(file);
+      const p = parseMonthlyWorkbook(wb, file.name);
       previews.push(p);
       allDaily.push(...p.daily);
     }
 
-    allDaily=combineDailyRows(allDaily);
-    const validation=await validateMonthlyAgainstAnnual(allDaily);
-    const integrityBlocked=previews.filter(p=>!p.integrityOk);
+    allDaily = combineDailyRows(allDaily);
+    const validation = await validateMonthlyAgainstAnnual(allDaily);
+    const integrityBlocked = previews.filter((p) => !p.integrityOk);
 
-    MONTHLY_EXCEL_PREVIEW={
-      files:files.map(f=>f.name),
-      daily:allDaily,
-      fileResults:previews,
+    MONTHLY_EXCEL_PREVIEW = {
+      files: files.map((f) => f.name),
+      daily: allDaily,
+      fileResults: previews,
       validation,
-      integrityBlocked
+      integrityBlocked,
     };
 
-    const kpSet=new Set(allDaily.map(r=>r.kp_code));
-    const supplierSet=new Set(allDaily.map(r=>`${r.kp_code}/${r.supplier_name}`));
-    const tripTotal=allDaily.reduce((a,r)=>a+Number(r.trip_count||0),0);
-    const tonTotal=allDaily.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const kpSet = new Set(allDaily.map((r) => r.kp_code));
+    const supplierSet = new Set(
+      allDaily.map((r) => `${r.kp_code}/${r.supplier_name}`)
+    );
+    const tripTotal = allDaily.reduce(
+      (a, r) => a + Number(r.trip_count || 0),
+      0
+    );
+    const tonTotal = allDaily.reduce(
+      (a, r) => a + Number(r.tonnage_kg || 0),
+      0
+    );
 
-    const validationText=validation.length
-      ? "\n\nVALIDASI vs DATA TAHUNAN:\n"+
-        validation.map(v=>{
-          const ref=v.reference_kg==null?"-":kg(v.reference_kg);
-          const diff=v.diff_kg==null?"-":`${v.diff_kg>=0?"+":""}${kg(v.diff_kg)}`;
-          return `• ${v.kp_code} ${String(v.month).padStart(2,"0")}/${v.year}: ${v.status}\n`+
-                 `  Bulanan: ${kg(v.parsed_kg)} | Tahunan: ${ref} | Selisih: ${diff}\n`+
-                 `  ${v.note}`;
-        }).join("\n")
+    const validationText = validation.length
+      ? "\n\nVALIDASI vs DATA TAHUNAN:\n" +
+        validation
+          .map((v) => {
+            const ref = v.reference_kg == null ? "-" : kg(v.reference_kg);
+            const diff =
+              v.diff_kg == null
+                ? "-"
+                : `${v.diff_kg >= 0 ? "+" : ""}${kg(v.diff_kg)}`;
+            return (
+              `• ${v.kp_code} ${String(v.month).padStart(2, "0")}/${v.year}: ${ v.status }\n` +
+              ` Bulanan: ${kg( v.parsed_kg )} | Tahunan: ${ref} | Selisih: ${diff}\n` +
+              ` ${v.note}`
+            );
+          })
+          .join("\n")
       : "";
 
-    $("monthlyExcelPreview").textContent=
-      `FILE DIPILIH: ${files.length}\n`+
-      `File terbaca: ${previews.filter(p=>p.daily.length).length}/${files.length}\n`+
-      `KP terdeteksi: ${kpSet.size}\n`+
-      `Supplier terdeteksi: ${supplierSet.size}\n`+
-      `Baris harian supplier: ${allDaily.length}\n`+
-      `Total trip: ${tripTotal.toLocaleString("id-ID")}\n`+
-      `Total tonase: ${kg(tonTotal)}\n\n`+
-      previews.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n")+
+    $("monthlyExcelPreview").textContent =
+      `FILE DIPILIH: ${files.length}\n` +
+      `File terbaca: ${previews.filter((p) => p.daily.length).length}/${ files.length }\n` +
+      `KP terdeteksi: ${kpSet.size}\n` +
+      `Supplier terdeteksi: ${supplierSet.size}\n` +
+      `Baris harian supplier: ${allDaily.length}\n` +
+      `Total trip: ${tripTotal.toLocaleString("id-ID")}\n` +
+      `Total tonase: ${kg(tonTotal)}\n\n` +
+      previews
+        .map((p) => `• ${p.fileName}\n ${p.notes.join("\n ")}`)
+        .join("\n\n") +
       validationText;
-  }catch(e){
-    MONTHLY_EXCEL_PREVIEW=null;
-    $("monthlyExcelPreview").textContent="ERROR: "+e.message;
+  } catch (e) {
+    MONTHLY_EXCEL_PREVIEW = null;
+    $("monthlyExcelPreview").textContent = "ERROR: " + e.message;
   }
 }
-async function replaceRowsFromSameFiles(fileNames){
-  for(const fileName of fileNames){
-    const {error}=await db.from("kp_daily_history").delete().eq("source_file",fileName);
-    if(error) throw error;
+async function replaceRowsFromSameFiles(fileNames) {
+  for (const fileName of fileNames) {
+    const { error } = await db
+      .from("kp_daily_history")
+      .delete()
+      .eq("source_file", fileName);
+    if (error) throw error;
   }
 }
-async function saveMonthlyExcel(){
-  if(!MONTHLY_EXCEL_PREVIEW) return alert("Pilih dan preview Excel bulanan dahulu.");
-  const p=MONTHLY_EXCEL_PREVIEW;
-  if(!p.daily.length) return alert("Tidak ada transaksi yang dapat disimpan.");
+async function saveMonthlyExcel() {
+  if (!MONTHLY_EXCEL_PREVIEW)
+    return alert("Pilih dan preview Excel bulanan dahulu.");
+  const p = MONTHLY_EXCEL_PREVIEW;
+  if (!p.daily.length) return alert("Tidak ada transaksi yang dapat disimpan.");
 
-  const badFiles=(p.integrityBlocked||[]);
-  if(badFiles.length){
+  const badFiles = p.integrityBlocked || [];
+  if (badFiles.length) {
     return alert(
-      "SIMPAN DIBLOKIR.\n\n"+
-      badFiles.map(f=>`${f.fileName}: ${f.integrityIssues.join("; ")}`).join("\n")+
-      "\n\nTotal transaksi parser belum sama dengan Total Excel."
+      "SIMPAN DIBLOKIR.\n\n" +
+        badFiles
+          .map((f) => `${f.fileName}: ${f.integrityIssues.join("; ")}`)
+          .join("\n") +
+        "\n\nTotal transaksi parser belum sama dengan Total Excel."
     );
   }
 
-  const blocked=(p.validation||[]).filter(v=>v.block);
-  if(blocked.length){
+  const blocked = (p.validation || []).filter((v) => v.block);
+  if (blocked.length) {
     return alert(
-      "SIMPAN DIBLOKIR.\n\n"+
-      blocked.map(v=>`${v.kp_code}: hasil parser melebihi referensi tahunan.`).join("\n")+
-      "\n\nPeriksa file/preview terlebih dahulu."
+      "SIMPAN DIBLOKIR.\n\n" +
+        blocked
+          .map((v) => `${v.kp_code}: hasil parser melebihi referensi tahunan.`)
+          .join("\n") +
+        "\n\nPeriksa file/preview terlebih dahulu."
     );
   }
 
   // Re-uploading the same source file replaces its prior imported rows.
   // This also removes legacy rows that were previously saved with supplier_name=SPB.
-  try{
+  try {
     await replaceRowsFromSameFiles(p.files);
-  }catch(e){
-    return alert("Gagal membersihkan versi import lama: "+e.message);
+  } catch (e) {
+    return alert("Gagal membersihkan versi import lama: " + e.message);
   }
 
-  const chunkSize=500;
-  for(let i=0;i<p.daily.length;i+=chunkSize){
-    const chunk=p.daily.slice(i,i+chunkSize);
-    const {error}=await db.from("kp_daily_history")
-      .upsert(chunk,{onConflict:"report_date,kp_code,supplier_name"});
-    if(error) return alert("Gagal simpan detail bulanan: "+error.message);
+  const chunkSize = 500;
+  for (let i = 0; i < p.daily.length; i += chunkSize) {
+    const chunk = p.daily.slice(i, i + chunkSize);
+    const { error } = await db
+      .from("kp_daily_history")
+      .upsert(chunk, { onConflict: "report_date,kp_code,supplier_name" });
+    if (error) return alert("Gagal simpan detail bulanan: " + error.message);
   }
 
   // IMPORTANT:
   // Monthly detail NEVER writes to historical_summary.
   // historical_summary is authoritative annual/historical workbook data only.
   alert(
-    `Upload bulanan berhasil.\n`+
-    `File: ${p.files.length}\n`+
-    `Baris harian supplier: ${p.daily.length}\n\n`+
-    `Historical tahunan tidak diubah.`
+    `Upload bulanan berhasil.\n` +
+      `File: ${p.files.length}\n` +
+      `Baris harian supplier: ${p.daily.length}\n\n` +
+      `Historical tahunan tidak diubah.`
   );
 
-  MONTHLY_EXCEL_PREVIEW=null;
-  if($("monthlyExcelFile")) $("monthlyExcelFile").value="";
-  $("monthlyExcelPreview").textContent="Belum ada file bulanan dipilih.";
+  MONTHLY_EXCEL_PREVIEW = null;
+  if ($("monthlyExcelFile")) $("monthlyExcelFile").value = "";
+  $("monthlyExcelPreview").textContent = "Belum ada file bulanan dipilih.";
   await loadKPMonthlyPanel($("monitorKp").value || "ALL");
 }
 
 // ---------- ANNUAL ----------
-function annualMonthColumns(aoa){
-  const map={};
-  for(let r=0;r<Math.min(12,aoa.length);r++){
-    (aoa[r]||[]).forEach((v,c)=>{
-      const key=normalizeHeaderKey(v);
-      const m=MONTH_ID[key];
-      if(m) map[m]=c;
+function annualMonthColumns(aoa) {
+  const map = {};
+  for (let r = 0; r < Math.min(12, aoa.length); r++) {
+    (aoa[r] || []).forEach((v, c) => {
+      const key = normalizeHeaderKey(v);
+      const m = MONTH_ID[key];
+      if (m) map[m] = c;
     });
   }
   // Known operational annual workbook fallback: C:N = Jan:Dec
-  if(Object.keys(map).length<6){
-    for(let m=1;m<=12;m++) map[m]=m+1;
+  if (Object.keys(map).length < 6) {
+    for (let m = 1; m <= 12; m++) map[m] = m + 1;
   }
   return map;
 }
-function parseAnnualSheet(sheet,sheetName,fileName){
-  const aoa=sheetAOA(sheet);
-  const yearMatch=String(sheetName).match(/\b(20\d{2})\b/);
-  const titleText=aoa.slice(0,5).flat().join(" ");
-  const titleYear=titleText.match(/\b(20\d{2})\b/);
-  const year=Number(yearMatch?.[1]||titleYear?.[1]);
-  if(!year) return [];
+function parseAnnualSheet(sheet, sheetName, fileName) {
+  const aoa = sheetAOA(sheet);
+  const yearMatch = String(sheetName).match(/\b(20\d{2})\b/);
+  const titleText = aoa.slice(0, 5).flat().join(" ");
+  const titleYear = titleText.match(/\b(20\d{2})\b/);
+  const year = Number(yearMatch?.[1] || titleYear?.[1]);
+  if (!year) return [];
 
-  const monthCols=annualMonthColumns(aoa);
-  const out=[];
-  for(let r=0;r<aoa.length;r++){
-    const row=aoa[r]||[];
-    let unit=String(row[1]??"").trim();
-    if(!unit || /^(unit|nama unit|total|jumlah)$/i.test(unit)) continue;
+  const monthCols = annualMonthColumns(aoa);
+  const out = [];
+  for (let r = 0; r < aoa.length; r++) {
+    const row = aoa[r] || [];
+    let unit = String(row[1] ?? "").trim();
+    if (!unit || /^(unit|nama unit|total|jumlah)$/i.test(unit)) continue;
 
-    const kp=canonKP(unit);
-    if(!kp || kp.length>30) continue;
+    const kp = canonKP(unit);
+    if (!kp || kp.length > 30) continue;
 
-    let numericMonths=0;
-    for(let m=1;m<=12;m++){
-      const c=monthCols[m];
-      const val=parseExcelNumber(row[c]);
-      if(val!=null && val>0){
+    let numericMonths = 0;
+    for (let m = 1; m <= 12; m++) {
+      const c = monthCols[m];
+      const val = parseExcelNumber(row[c]);
+      if (val != null && val > 0) {
         numericMonths++;
-        out.push({year,month:m,kp_code:kp,tonnage_kg:val,source_file:fileName});
+        out.push({
+          year,
+          month: m,
+          kp_code: kp,
+          tonnage_kg: val,
+          source_file: fileName,
+        });
       }
     }
     // If no monthly numeric cells, row was not a unit row.
-    if(!numericMonths){
-      for(let i=out.length-1;i>=0 && out[i]?.kp_code===kp && out[i]?.year===year;i--) out.splice(i,1);
+    if (!numericMonths) {
+      for (
+        let i = out.length - 1;
+        i >= 0 && out[i]?.kp_code === kp && out[i]?.year === year;
+        i--
+      )
+        out.splice(i, 1);
     }
   }
   return out;
 }
-function combineAnnualRows(rows){
-  const m=new Map();
-  rows.forEach(r=>{
-    const key=`${r.year}|${r.month}|${r.kp_code}`;
+function combineAnnualRows(rows) {
+  const m = new Map();
+  rows.forEach((r) => {
+    const key = `${r.year}|${r.month}|${r.kp_code}`;
     // Annual workbook should have one authoritative value per unit/month;
     // if duplicate across files, latest selected file wins rather than sum.
-    m.set(key,r);
+    m.set(key, r);
   });
   return [...m.values()];
 }
-function parseAnnualWorkbook(wb,fileName){
-  let summary=[];
-  const notes=[];
-  wb.SheetNames.forEach(name=>{
-    const rows=parseAnnualSheet(wb.Sheets[name],name,fileName);
+function parseAnnualWorkbook(wb, fileName) {
+  let summary = [];
+  const notes = [];
+  wb.SheetNames.forEach((name) => {
+    const rows = parseAnnualSheet(wb.Sheets[name], name, fileName);
     summary.push(...rows);
     notes.push(`${name}: ${rows.length} KP/bulan terbaca`);
   });
-  return {fileName,summary:combineAnnualRows(summary),notes};
+  return { fileName, summary: combineAnnualRows(summary), notes };
 }
-async function previewAnnualExcels(fileList){
-  try{
-    const files=[...(fileList||[])];
-    if(!files.length) throw Error("Pilih minimal 1 file.");
-    const all=[];
-    const fileResults=[];
-    for(const file of files){
-      const wb=await readWorkbookFile(file);
-      const p=parseAnnualWorkbook(wb,file.name);
+async function previewAnnualExcels(fileList) {
+  try {
+    const files = [...(fileList || [])];
+    if (!files.length) throw Error("Pilih minimal 1 file.");
+    const all = [];
+    const fileResults = [];
+    for (const file of files) {
+      const wb = await readWorkbookFile(file);
+      const p = parseAnnualWorkbook(wb, file.name);
       all.push(...p.summary);
       fileResults.push(p);
     }
-    const summary=combineAnnualRows(all);
-    ANNUAL_EXCEL_PREVIEW={files:files.map(f=>f.name),summary,fileResults};
+    const summary = combineAnnualRows(all);
+    ANNUAL_EXCEL_PREVIEW = {
+      files: files.map((f) => f.name),
+      summary,
+      fileResults,
+    };
 
-    const years=[...new Set(summary.map(r=>r.year))].sort();
-    const units=new Set(summary.map(r=>r.kp_code));
-    $("annualExcelPreview").textContent=
-      `FILE DIPILIH: ${files.length}\n`+
-      `Tahun terbaca: ${years.join(", ")||"-"}\n`+
-      `Unit/KP historis: ${units.size}\n`+
-      `Baris KP/bulan: ${summary.length}\n\n`+
-      fileResults.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n");
-  }catch(e){
-    ANNUAL_EXCEL_PREVIEW=null;
-    $("annualExcelPreview").textContent="ERROR: "+e.message;
+    const years = [...new Set(summary.map((r) => r.year))].sort();
+    const units = new Set(summary.map((r) => r.kp_code));
+    $("annualExcelPreview").textContent =
+      `FILE DIPILIH: ${files.length}\n` +
+      `Tahun terbaca: ${years.join(", ") || "-"}\n` +
+      `Unit/KP historis: ${units.size}\n` +
+      `Baris KP/bulan: ${summary.length}\n\n` +
+      fileResults
+        .map((p) => `• ${p.fileName}\n ${p.notes.join("\n ")}`)
+        .join("\n\n");
+  } catch (e) {
+    ANNUAL_EXCEL_PREVIEW = null;
+    $("annualExcelPreview").textContent = "ERROR: " + e.message;
   }
 }
-async function saveAnnualExcel(){
-  if(!ANNUAL_EXCEL_PREVIEW) return alert("Pilih dan preview Excel tahunan dahulu.");
-  const p=ANNUAL_EXCEL_PREVIEW;
-  if(!p.summary.length) return alert("Tidak ada data tahunan yang dapat disimpan.");
+async function saveAnnualExcel() {
+  if (!ANNUAL_EXCEL_PREVIEW)
+    return alert("Pilih dan preview Excel tahunan dahulu.");
+  const p = ANNUAL_EXCEL_PREVIEW;
+  if (!p.summary.length)
+    return alert("Tidak ada data tahunan yang dapat disimpan.");
 
-  const chunkSize=500;
-  for(let i=0;i<p.summary.length;i+=chunkSize){
-    const {error}=await db.from("historical_summary")
-      .upsert(p.summary.slice(i,i+chunkSize),{onConflict:"year,month,kp_code"});
-    if(error) return alert("Gagal simpan data tahunan: "+error.message);
+  const chunkSize = 500;
+  for (let i = 0; i < p.summary.length; i += chunkSize) {
+    const { error } = await db
+      .from("historical_summary")
+      .upsert(p.summary.slice(i, i + chunkSize), {
+        onConflict: "year,month,kp_code",
+      });
+    if (error) return alert("Gagal simpan data tahunan: " + error.message);
   }
 
-  alert(`Upload tahunan berhasil.\nFile: ${p.files.length}\nBaris KP/bulan: ${p.summary.length}`);
-  ANNUAL_EXCEL_PREVIEW=null;
-  if($("annualExcelFile")) $("annualExcelFile").value="";
-  $("annualExcelPreview").textContent="Belum ada file tahunan dipilih.";
+  alert(
+    `Upload tahunan berhasil.\nFile: ${p.files.length}\nBaris KP/bulan: ${p.summary.length}`
+  );
+  ANNUAL_EXCEL_PREVIEW = null;
+  if ($("annualExcelFile")) $("annualExcelFile").value = "";
+  $("annualExcelPreview").textContent = "Belum ada file tahunan dipilih.";
   await initKPMonitoringFilters();
   await loadKPYearlyPanel($("monitorKp").value || "ALL");
 }
 
-
-function resetPlotContainer(id){
-  const el=$(id);
-  if(!el) return;
-  try{ Plotly.purge(id); }catch(e){}
-  el.innerHTML="";
+function resetPlotContainer(id) {
+  const el = $(id);
+  if (!el) return;
+  try {
+    Plotly.purge(id);
+  } catch (e) {}
+  el.innerHTML = "";
 }
 
 // =========================================================
 // KP MONITORING: HARIAN / BULANAN / TAHUNAN
 // =========================================================
-function localISODate(d=new Date()){
-  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,"0"), day=String(d.getDate()).padStart(2,"0");
+function localISODate(d = new Date()) {
+  const y = d.getFullYear(),
+    m = String(d.getMonth() + 1).padStart(2, "0"),
+    day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-function monthLabelId(monthValue){
-  if(!monthValue) return "-";
-  const [y,m]=monthValue.split("-").map(Number);
-  return new Date(y,m-1,1).toLocaleDateString("id-ID",{month:"long",year:"numeric"});
+function monthLabelId(monthValue) {
+  if (!monthValue) return "-";
+  const [y, m] = monthValue.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("id-ID", {
+    month: "long",
+    year: "numeric",
+  });
 }
-function dateLabelId(dateValue){
-  if(!dateValue) return "-";
-  const [y,m,d]=dateValue.split("-").map(Number);
-  return new Date(y,m-1,d).toLocaleDateString("id-ID",{day:"2-digit",month:"long",year:"numeric"});
+function dateLabelId(dateValue) {
+  if (!dateValue) return "-";
+  const [y, m, d] = dateValue.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
 }
-function yearMonthBounds(monthValue){
-  const [y,m]=monthValue.split("-").map(Number);
-  const last=new Date(y,m,0).getDate();
-  return {start:`${y}-${String(m).padStart(2,"0")}-01`, end:`${y}-${String(m).padStart(2,"0")}-${String(last).padStart(2,"0")}`};
+function yearMonthBounds(monthValue) {
+  const [y, m] = monthValue.split("-").map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return {
+    start: `${y}-${String(m).padStart(2, "0")}-01`,
+    end: `${y}-${String(m).padStart(2, "0")}-${String(last).padStart(2, "0")}`,
+  };
 }
-async function initKPMonitoringFilters(){
-  if(!$("monitorDate")) return;
-  const {data:latest}=await db.from("monitoring_snapshots")
+async function initKPMonitoringFilters() {
+  if (!$("monitorDate")) return;
+  const { data: latest } = await db
+    .from("monitoring_snapshots")
     .select("report_date")
-    .order("report_date",{ascending:false})
+    .order("report_date", { ascending: false })
     .limit(1);
-  const latestDate=latest?.[0]?.report_date || localISODate();
-  if(!$("monitorDate").value) $("monitorDate").value=latestDate;
-  if(!$("monitorMonth").value) $("monitorMonth").value=latestDate.slice(0,7);
+  const latestDate = latest?.[0]?.report_date || localISODate();
+  if (!$("monitorDate").value) $("monitorDate").value = latestDate;
+  if (!$("monitorMonth").value)
+    $("monitorMonth").value = latestDate.slice(0, 7);
 
-  const {data:histYears}=await db.from("historical_summary").select("year");
-  const years=[...new Set((histYears||[]).map(x=>Number(x.year)))];
-  const currentYear=Number(latestDate.slice(0,4));
-  if(!years.includes(currentYear)) years.push(currentYear);
-  years.sort((a,b)=>b-a);
-  $("monitorYear").innerHTML=years.map(y=>`<option value="${y}">${y}</option>`).join("");
-  if(years.includes(currentYear)) $("monitorYear").value=String(currentYear);
+  const { data: histYears } = await db
+    .from("historical_summary")
+    .select("year");
+  const years = [...new Set((histYears || []).map((x) => Number(x.year)))];
+  const currentYear = Number(latestDate.slice(0, 4));
+  if (!years.includes(currentYear)) years.push(currentYear);
+  years.sort((a, b) => b - a);
+  $("monitorYear").innerHTML = years
+    .map((y) => `<option value="${y}">${y}</option>`)
+    .join("");
+  if (years.includes(currentYear)) $("monitorYear").value = String(currentYear);
 }
-function setMonitorMode(mode){
-  MONITOR_MODE=mode;
+function setMonitorMode(mode) {
+  MONITOR_MODE = mode;
   setSidebarMonitoringActive(mode);
 
-  ["daily","monthly","yearly"].forEach(m=>{
-    const panelId=m==="daily"?"monitorDailyPanel":m==="monthly"?"monitorMonthlyPanel":"monitorYearlyPanel";
-    $(panelId)?.classList.toggle("active",m===mode);
+  ["daily", "monthly", "yearly"].forEach((m) => {
+    const panelId =
+      m === "daily"
+        ? "monitorDailyPanel"
+        : m === "monthly"
+        ? "monitorMonthlyPanel"
+        : "monitorYearlyPanel";
+    $(panelId)?.classList.toggle("active", m === mode);
   });
 
-  $("monitorDateWrap").classList.toggle("hidden",mode!=="daily");
-  $("monitorMonthWrap").classList.toggle("hidden",mode!=="monthly");
-  $("monitorYearWrap").classList.toggle("hidden",mode!=="yearly");
+  $("monitorDateWrap").classList.toggle("hidden", mode !== "daily");
+  $("monitorMonthWrap").classList.toggle("hidden", mode !== "monthly");
+  $("monitorYearWrap").classList.toggle("hidden", mode !== "yearly");
 
-  const titleMap={
-    daily:["Monitoring • Harian","Snapshot operasional per KP pada 10.00, 12.00, 15.00, dan 17.00."],
-    monthly:["Monitoring • Bulanan","Analisis tonase bulanan per KP dan upload Excel data bulanan."],
-    yearly:["Monitoring • Tahunan","Analisis tonase tahunan per KP dan upload Excel data tahunan."]
+  const titleMap = {
+    daily: [
+      "Monitoring • Harian",
+      "Snapshot operasional per KP pada 10.00, 12.00, 15.00, dan 17.00.",
+    ],
+    monthly: [
+      "Monitoring • Bulanan",
+      "Analisis tonase bulanan per KP dan upload Excel data bulanan.",
+    ],
+    yearly: [
+      "Monitoring • Tahunan",
+      "Analisis tonase tahunan per KP dan upload Excel data tahunan.",
+    ],
   };
-  if($("monitorPageTitle")) $("monitorPageTitle").textContent=titleMap[mode][0];
-  if($("monitorPageSubtitle")) $("monitorPageSubtitle").textContent=titleMap[mode][1];
+  if ($("monitorPageTitle"))
+    $("monitorPageTitle").textContent = titleMap[mode][0];
+  if ($("monitorPageSubtitle"))
+    $("monitorPageSubtitle").textContent = titleMap[mode][1];
 
   loadKPMonitoring();
 }
-function setMonitorSummary({kp,period,tonnage,trips,coverage,tonnageSub,tripsSub,coverageSub}){
-  $("monitorKpiKp").textContent=kp==="ALL"?"Semua KP":kp;
-  $("monitorKpiPeriod").textContent=period;
-  $("monitorKpiTonnage").textContent=kg(tonnage);
-  $("monitorKpiTonnageSub").textContent=tonnageSub || "-";
-  $("monitorKpiTrips").textContent=trips==null?"—":Number(trips).toLocaleString("id-ID");
-  $("monitorKpiTripsSub").textContent=tripsSub || "-";
-  $("monitorKpiCoverage").textContent=coverage;
-  $("monitorKpiCoverageSub").textContent=coverageSub || "-";
+function setMonitorSummary({ kp, period, tonnage, trips, coverage, tonnageSub, tripsSub, coverageSub, }) {
+  $("monitorKpiKp").textContent = kp === "ALL" ? "Semua KP" : kp;
+  $("monitorKpiPeriod").textContent = period;
+  $("monitorKpiTonnage").textContent = kg(tonnage);
+  $("monitorKpiTonnageSub").textContent = tonnageSub || "-";
+  $("monitorKpiTrips").textContent =
+    trips == null ? "—" : Number(trips).toLocaleString("id-ID");
+  $("monitorKpiTripsSub").textContent = tripsSub || "-";
+  $("monitorKpiCoverage").textContent = coverage;
+  $("monitorKpiCoverageSub").textContent = coverageSub || "-";
 }
-function renderMonitorEmpty(message){
+function renderMonitorEmpty(message) {
   Plotly.purge("monitorKpChart");
-  $("monitorKpChart").innerHTML=`<div style="padding:55px 20px;text-align:center;color:#c8bdaf">${message}</div>`;
-  $("monitorKpTable").innerHTML=table(["Keterangan"],[[message]]);
+  $(
+    "monitorKpChart"
+  ).innerHTML = `<div style="padding:55px 20px;text-align:center;color:#c8bdaf">${message}</div>`;
+  $("monitorKpTable").innerHTML = table(["Keterangan"], [[message]]);
 }
-async function loadKPMonitoring(){
-  if(!$("monitorKp")) return;
-  const kp=$("monitorKp").value || "ALL";
-  if(MONITOR_MODE==="daily") return loadKPDaily(kp);
-  if(MONITOR_MODE==="monthly") return loadKPMonthlyPanel(kp);
+async function loadKPMonitoring() {
+  if (!$("monitorKp")) return;
+  const kp = $("monitorKp").value || "ALL";
+  if (MONITOR_MODE === "daily") return loadKPDaily(kp);
+  if (MONITOR_MODE === "monthly") return loadKPMonthlyPanel(kp);
   return loadKPYearlyPanel(kp);
 }
 
-function setMonthlyPanelSummary({kp,period,tonnage,trips,coverage,tonnageSub,tripsSub,coverageSub}){
-  $("monthlyKpiKp").textContent=kp==="ALL"?"Semua KP":kp;
-  $("monthlyKpiPeriod").textContent=period;
-  $("monthlyKpiTonnage").textContent=kg(tonnage);
-  $("monthlyKpiTonnageSub").textContent=tonnageSub||"-";
-  $("monthlyKpiTrips").textContent=trips==null?"—":Number(trips).toLocaleString("id-ID");
-  $("monthlyKpiTripsSub").textContent=tripsSub||"-";
-  $("monthlyKpiCoverage").textContent=coverage;
-  $("monthlyKpiCoverageSub").textContent=coverageSub||"-";
+function setMonthlyPanelSummary({ kp, period, tonnage, trips, coverage, tonnageSub, tripsSub, coverageSub, }) {
+  $("monthlyKpiKp").textContent = kp === "ALL" ? "Semua KP" : kp;
+  $("monthlyKpiPeriod").textContent = period;
+  $("monthlyKpiTonnage").textContent = kg(tonnage);
+  $("monthlyKpiTonnageSub").textContent = tonnageSub || "-";
+  $("monthlyKpiTrips").textContent =
+    trips == null ? "—" : Number(trips).toLocaleString("id-ID");
+  $("monthlyKpiTripsSub").textContent = tripsSub || "-";
+  $("monthlyKpiCoverage").textContent = coverage;
+  $("monthlyKpiCoverageSub").textContent = coverageSub || "-";
 }
-function setYearlyPanelSummary({kp,period,tonnage,coverage,tonnageSub,coverageSub}){
-  $("yearlyKpiKp").textContent=kp==="ALL"?"Semua KP":kp;
-  $("yearlyKpiPeriod").textContent=period;
-  $("yearlyKpiTonnage").textContent=kg(tonnage);
-  $("yearlyKpiTonnageSub").textContent=tonnageSub||"-";
-  $("yearlyKpiCoverage").textContent=coverage;
-  $("yearlyKpiCoverageSub").textContent=coverageSub||"-";
+function setYearlyPanelSummary({ kp, period, tonnage, coverage, tonnageSub, coverageSub, }) {
+  $("yearlyKpiKp").textContent = kp === "ALL" ? "Semua KP" : kp;
+  $("yearlyKpiPeriod").textContent = period;
+  $("yearlyKpiTonnage").textContent = kg(tonnage);
+  $("yearlyKpiTonnageSub").textContent = tonnageSub || "-";
+  $("yearlyKpiCoverage").textContent = coverage;
+  $("yearlyKpiCoverageSub").textContent = coverageSub || "-";
 }
-async function loadKPMonthlyPanel(kp){
-  const month=$("monitorMonth").value;
-  if(!month) return;
-  const {start,end}=yearMonthBounds(month);
-  const [year,monthNum]=month.split("-").map(Number);
+async function loadKPMonthlyPanel(kp) {
+  const month = $("monitorMonth").value;
+  if (!month) return;
+  const { start, end } = yearMonthBounds(month);
+  const [year, monthNum] = month.split("-").map(Number);
 
-  let dq=db.from("kp_daily_history")
+  let dq = db
+    .from("kp_daily_history")
     .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count")
-    .gte("report_date",start).lte("report_date",end)
-    .order("report_date",{ascending:true});
-  if(kp!=="ALL") dq=dq.eq("kp_code",kp);
+    .gte("report_date", start)
+    .lte("report_date", end)
+    .order("report_date", { ascending: true });
+  if (kp !== "ALL") dq = dq.eq("kp_code", kp);
 
-  const {data:daily,error:de}=await dq;
-  if(de){
-    resetPlotContainer("monthlyMonitorChart"); $("monthlyMonitorChart").innerHTML=`<div class="chart-empty-state">${de.message}</div>`;
+  const { data: daily, error: de } = await dq;
+  if (de) {
+    resetPlotContainer("monthlyMonitorChart");
+    $(
+      "monthlyMonitorChart"
+    ).innerHTML = `<div class="chart-empty-state">${de.message}</div>`;
     return;
   }
 
-  if(daily?.length){
-    const byDate={};
-    daily.forEach(r=>{
-      if(!byDate[r.report_date]) byDate[r.report_date]={tonnage:0,trips:0};
-      byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
-      byDate[r.report_date].trips+=Number(r.trip_count||0);
+  if (daily?.length) {
+    const byDate = {};
+    daily.forEach((r) => {
+      if (!byDate[r.report_date])
+        byDate[r.report_date] = { tonnage: 0, trips: 0 };
+      byDate[r.report_date].tonnage += Number(r.tonnage_kg || 0);
+      byDate[r.report_date].trips += Number(r.trip_count || 0);
     });
-    const dates=Object.keys(byDate).sort();
-    const vals=dates.map(d=>byDate[d].tonnage);
-    const total=vals.reduce((a,b)=>a+b,0);
-    const trips=dates.reduce((a,d)=>a+byDate[d].trips,0);
-    const avg=dates.length?total/dates.length:0;
+    const dates = Object.keys(byDate).sort();
+    const vals = dates.map((d) => byDate[d].tonnage);
+    const total = vals.reduce((a, b) => a + b, 0);
+    const trips = dates.reduce((a, d) => a + byDate[d].trips, 0);
+    const avg = dates.length ? total / dates.length : 0;
 
     setMonthlyPanelSummary({
-      kp,period:monthLabelId(month),tonnage:total,trips,
-      coverage:`${dates.length} hari`,
-      tonnageSub:`Rata-rata ${kg(avg)} / hari data`,
-      tripsSub:"Total trip Excel bulanan",
-      coverageSub:"Hari dengan data"
+      kp,
+      period: monthLabelId(month),
+      tonnage: total,
+      trips,
+      coverage: `${dates.length} hari`,
+      tonnageSub: `Rata-rata ${kg(avg)} / hari data`,
+      tripsSub: "Total trip Excel bulanan",
+      coverageSub: "Hari dengan data",
     });
 
     resetPlotContainer("monthlyMonitorChart");
-    Plotly.newPlot("monthlyMonitorChart",[{
-      x:dates.map(d=>d.slice(8,10)),
-      y:vals,type:"bar",
-      text:vals.map(v=>compactKg(v)),
-      textposition:"outside",
-      cliponaxis:false,
-      marker:{color:"#49de5f"},
-      hovertemplate:"Tanggal %{x}<br>%{y:,.0f} kg<extra></extra>"
-    }],{
-      ...darkLayout,
-      margin:{t:28,l:58,r:18,b:42},
-      xaxis:{...darkLayout.xaxis,fixedrange:true},
-      yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
-      showlegend:false
-    },plotConfig);
+    Plotly.newPlot(
+      "monthlyMonitorChart",
+      [
+        {
+          x: dates.map((d) => d.slice(8, 10)),
+          y: vals,
+          type: "bar",
+          text: vals.map((v) => compactKg(v)),
+          textposition: "outside",
+          cliponaxis: false,
+          marker: { color: "#49de5f" },
+          hovertemplate: "Tanggal %{x}<br>%{y:,.0f} kg<extra></extra>",
+        },
+      ],
+      {
+        ...darkLayout,
+        margin: { t: 28, l: 58, r: 18, b: 42 },
+        xaxis: { ...darkLayout.xaxis, fixedrange: true },
+        yaxis: {
+          ...darkLayout.yaxis,
+          rangemode: "tozero",
+          tickformat: "~s",
+          fixedrange: true,
+        },
+        showlegend: false,
+      },
+      plotConfig
+    );
 
-    $("monthlyMonitorTable").innerHTML=table(
-      ["Tanggal","Tonase","Trip"],
-      dates.map(d=>[d,kg(byDate[d].tonnage),byDate[d].trips])
+    $("monthlyMonitorTable").innerHTML = table(
+      ["Tanggal", "Tonase", "Trip"],
+      dates.map((d) => [d, kg(byDate[d].tonnage), byDate[d].trips])
     );
     return;
   }
 
-  let sq=db.from("historical_summary")
+  let sq = db
+    .from("historical_summary")
     .select("kp_code,tonnage_kg")
-    .eq("year",year).eq("month",monthNum);
-  if(kp!=="ALL") sq=sq.eq("kp_code",kp);
-  const {data:summary}=await sq;
-  const rows=summary||[];
-  const total=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    .eq("year", year)
+    .eq("month", monthNum);
+  if (kp !== "ALL") sq = sq.eq("kp_code", kp);
+  const { data: summary } = await sq;
+  const rows = summary || [];
+  const total = rows.reduce((a, r) => a + Number(r.tonnage_kg || 0), 0);
 
   setMonthlyPanelSummary({
-    kp,period:monthLabelId(month),tonnage:total,trips:null,
-    coverage:`${rows.length} KP`,
-    tonnageSub:rows.length?"Summary bulanan tersedia":"Belum ada data",
-    tripsSub:"Upload Excel detail untuk trip",
-    coverageSub:rows.length?"Data summary":"Belum ada data"
+    kp,
+    period: monthLabelId(month),
+    tonnage: total,
+    trips: null,
+    coverage: `${rows.length} KP`,
+    tonnageSub: rows.length ? "Summary bulanan tersedia" : "Belum ada data",
+    tripsSub: "Upload Excel detail untuk trip",
+    coverageSub: rows.length ? "Data summary" : "Belum ada data",
   });
 
-  if(!rows.length){
+  if (!rows.length) {
     resetPlotContainer("monthlyMonitorChart");
-    $("monthlyMonitorChart").innerHTML="<div class='chart-empty-state'>Belum ada data. Upload Excel Bulanan di panel ini.</div>";
-    $("monthlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data bulanan"]]);
+    $("monthlyMonitorChart").innerHTML =
+      "<div class='chart-empty-state'>Belum ada data. Upload Excel Bulanan di panel ini.</div>";
+    $("monthlyMonitorTable").innerHTML = table(
+      ["Keterangan"],
+      [["Belum ada data bulanan"]]
+    );
     return;
   }
 
-  const pairs=rows.map(r=>[r.kp_code,Number(r.tonnage_kg||0)]).sort((a,b)=>b[1]-a[1]);
+  const pairs = rows
+    .map((r) => [r.kp_code, Number(r.tonnage_kg || 0)])
+    .sort((a, b) => b[1] - a[1]);
   resetPlotContainer("monthlyMonitorChart");
-    Plotly.newPlot("monthlyMonitorChart",[{
-    x:pairs.map(x=>x[1]),
-    y:pairs.map(x=>x[0]),
-    type:"bar",orientation:"h",
-    marker:{color:"#49de5f"},
-    hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
-  }],{
-    ...darkLayout,
-    margin:{t:18,l:74,r:18,b:38},
-    xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
-    yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
-    showlegend:false
-  },plotConfig);
+  Plotly.newPlot(
+    "monthlyMonitorChart",
+    [
+      {
+        x: pairs.map((x) => x[1]),
+        y: pairs.map((x) => x[0]),
+        type: "bar",
+        orientation: "h",
+        marker: { color: "#49de5f" },
+        hovertemplate: "<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>",
+      },
+    ],
+    {
+      ...darkLayout,
+      margin: { t: 18, l: 74, r: 18, b: 38 },
+      xaxis: { ...darkLayout.xaxis, tickformat: "~s", fixedrange: true },
+      yaxis: { ...darkLayout.yaxis, autorange: "reversed", fixedrange: true },
+      showlegend: false,
+    },
+    plotConfig
+  );
 
-  $("monthlyMonitorTable").innerHTML=table(
-    ["KP","Tonase","Sumber"],
-    pairs.map(([code,val])=>[code,kg(val),"Summary Bulanan"])
+  $("monthlyMonitorTable").innerHTML = table(
+    ["KP", "Tonase", "Sumber"],
+    pairs.map(([code, val]) => [code, kg(val), "Summary Bulanan"])
   );
 }
-async function loadKPYearlyPanel(kp){
-  const year=Number($("monitorYear").value);
-  let q=db.from("historical_summary")
+async function loadKPYearlyPanel(kp) {
+  const year = Number($("monitorYear").value);
+  let q = db
+    .from("historical_summary")
     .select("month,kp_code,tonnage_kg")
-    .eq("year",year);
-  if(kp!=="ALL") q=q.eq("kp_code",kp);
+    .eq("year", year);
+  if (kp !== "ALL") q = q.eq("kp_code", kp);
 
-  const {data,error}=await q;
-  if(error){
-    resetPlotContainer("yearlyMonitorChart"); $("yearlyMonitorChart").innerHTML=`<div class="chart-empty-state">${error.message}</div>`;
+  const { data, error } = await q;
+  if (error) {
+    resetPlotContainer("yearlyMonitorChart");
+    $(
+      "yearlyMonitorChart"
+    ).innerHTML = `<div class="chart-empty-state">${error.message}</div>`;
     return;
   }
 
-  const rows=data||[];
-  const monthly=Array(12).fill(0);
-  const monthsPresent=new Set();
-  rows.forEach(r=>{
-    const m=Number(r.month);
-    if(m>=1&&m<=12){
-      monthly[m-1]+=Number(r.tonnage_kg||0);
+  const rows = data || [];
+  const monthly = Array(12).fill(0);
+  const monthsPresent = new Set();
+  rows.forEach((r) => {
+    const m = Number(r.month);
+    if (m >= 1 && m <= 12) {
+      monthly[m - 1] += Number(r.tonnage_kg || 0);
       monthsPresent.add(m);
     }
   });
 
-  const total=monthly.reduce((a,b)=>a+b,0);
-  const avg=monthsPresent.size?total/monthsPresent.size:0;
+  const total = monthly.reduce((a, b) => a + b, 0);
+  const avg = monthsPresent.size ? total / monthsPresent.size : 0;
   setYearlyPanelSummary({
-    kp,period:String(year),tonnage:total,
-    coverage:`${monthsPresent.size} bulan`,
-    tonnageSub:monthsPresent.size?`Rata-rata ${kg(avg)} / bulan`:"Belum ada histori",
-    coverageSub:"Bulan dengan data"
+    kp,
+    period: String(year),
+    tonnage: total,
+    coverage: `${monthsPresent.size} bulan`,
+    tonnageSub: monthsPresent.size
+      ? `Rata-rata ${kg(avg)} / bulan`
+      : "Belum ada histori",
+    coverageSub: "Bulan dengan data",
   });
 
-  const labels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
+  const labels = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Mei",
+    "Jun",
+    "Jul",
+    "Ags",
+    "Sep",
+    "Okt",
+    "Nov",
+    "Des",
+  ];
 
-  if(!rows.length){
+  if (!rows.length) {
     resetPlotContainer("yearlyMonitorChart");
-    $("yearlyMonitorChart").innerHTML="<div class='chart-empty-state'>Belum ada histori. Upload Excel Tahunan di panel ini.</div>";
-    $("yearlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data tahunan"]]);
+    $("yearlyMonitorChart").innerHTML =
+      "<div class='chart-empty-state'>Belum ada histori. Upload Excel Tahunan di panel ini.</div>";
+    $("yearlyMonitorTable").innerHTML = table(
+      ["Keterangan"],
+      [["Belum ada data tahunan"]]
+    );
     return;
   }
 
   resetPlotContainer("yearlyMonitorChart");
-  Plotly.newPlot("yearlyMonitorChart",[{
-    x:labels,y:monthly,type:"bar",
-    text:monthly.map((v,i)=>monthsPresent.has(i+1)&&v>0?compactKg(v):""),
-    textposition:"outside",
-    cliponaxis:false,
-    marker:{color:monthly.map((v,i)=>monthsPresent.has(i+1)?"#49de5f":"rgba(255,255,255,.08)")},
-    hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
-  }],{
-    ...darkLayout,
-    margin:{t:28,l:58,r:18,b:42},
-    xaxis:{...darkLayout.xaxis,fixedrange:true},
-    yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
-    showlegend:false
-  },plotConfig);
+  Plotly.newPlot(
+    "yearlyMonitorChart",
+    [
+      {
+        x: labels,
+        y: monthly,
+        type: "bar",
+        text: monthly.map((v, i) =>
+          monthsPresent.has(i + 1) && v > 0 ? compactKg(v) : ""
+        ),
+        textposition: "outside",
+        cliponaxis: false,
+        marker: {
+          color: monthly.map((v, i) =>
+            monthsPresent.has(i + 1) ? "#49de5f" : "rgba(255,255,255,.08)"
+          ),
+        },
+        hovertemplate: "<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>",
+      },
+    ],
+    {
+      ...darkLayout,
+      margin: { t: 28, l: 58, r: 18, b: 42 },
+      xaxis: { ...darkLayout.xaxis, fixedrange: true },
+      yaxis: {
+        ...darkLayout.yaxis,
+        rangemode: "tozero",
+        tickformat: "~s",
+        fixedrange: true,
+      },
+      showlegend: false,
+    },
+    plotConfig
+  );
 
-  $("yearlyMonitorTable").innerHTML=table(
-    ["Bulan","Tonase","Status"],
-    labels.map((label,i)=>[
-      label,kg(monthly[i]),monthsPresent.has(i+1)?"Tersedia":"Belum ada data"
+  $("yearlyMonitorTable").innerHTML = table(
+    ["Bulan", "Tonase", "Status"],
+    labels.map((label, i) => [
+      label,
+      kg(monthly[i]),
+      monthsPresent.has(i + 1) ? "Tersedia" : "Belum ada data",
     ])
   );
 }
 
-async function loadKPDaily(kp){
-  const date=$("monitorDate").value;
-  $("monitorChartTitle").textContent="INTRADAY PROGRESS 10 / 12 / 15 / 17";
-  $("monitorTableTitle").textContent="DETAIL SNAPSHOT HARIAN";
-  $("monitorSourceBadge").textContent="Snapshot WhatsApp";
-  $("monitorRuleNote").textContent="Setiap jam = snapshot kumulatif";
+async function loadKPDaily(kp) {
+  const date = $("monitorDate").value;
+  $("monitorChartTitle").textContent = "INTRADAY PROGRESS 10 / 12 / 15 / 17";
+  $("monitorTableTitle").textContent = "DETAIL SNAPSHOT HARIAN";
+  $("monitorSourceBadge").textContent = "Snapshot WhatsApp";
+  $("monitorRuleNote").textContent = "Setiap jam = snapshot kumulatif";
 
-  const {data:snaps,error}=await db.from("monitoring_snapshots")
+  const { data: snaps, error } = await db
+    .from("monitoring_snapshots")
     .select("id,report_date,snapshot_time,total_tonnage_kg,total_trips")
-    .eq("report_date",date)
-    .order("snapshot_time",{ascending:true});
-  if(error){renderMonitorEmpty(error.message);return;}
-  if(!snaps?.length){
-    setMonitorSummary({kp,period:dateLabelId(date),tonnage:0,trips:0,coverage:"0 / 4",tonnageSub:"Belum ada snapshot",tripsSub:"Belum ada snapshot",coverageSub:"Snapshot tersedia"});
+    .eq("report_date", date)
+    .order("snapshot_time", { ascending: true });
+  if (error) {
+    renderMonitorEmpty(error.message);
+    return;
+  }
+  if (!snaps?.length) {
+    setMonitorSummary({
+      kp,
+      period: dateLabelId(date),
+      tonnage: 0,
+      trips: 0,
+      coverage: "0 / 4",
+      tonnageSub: "Belum ada snapshot",
+      tripsSub: "Belum ada snapshot",
+      coverageSub: "Snapshot tersedia",
+    });
     renderMonitorEmpty("Belum ada data snapshot untuk tanggal ini.");
     return;
   }
 
-  let values={};
-  if(kp==="ALL"){
-    snaps.forEach(s=>values[s.id]={tonnage:Number(s.total_tonnage_kg||0),trips:Number(s.total_trips||0)});
-  }else{
-    const ids=snaps.map(s=>s.id);
-    const {data:details}=await db.from("monitoring_snapshot_details")
+  let values = {};
+  if (kp === "ALL") {
+    snaps.forEach(
+      (s) =>
+        (values[s.id] = {
+          tonnage: Number(s.total_tonnage_kg || 0),
+          trips: Number(s.total_trips || 0),
+        })
+    );
+  } else {
+    const ids = snaps.map((s) => s.id);
+    const { data: details } = await db
+      .from("monitoring_snapshot_details")
       .select("snapshot_id,tonnage_kg,trip_count")
-      .in("snapshot_id",ids)
-      .eq("kp_code",kp);
-    snaps.forEach(s=>values[s.id]={tonnage:0,trips:0});
-    (details||[]).forEach(d=>{
-      values[d.snapshot_id].tonnage+=Number(d.tonnage_kg||0);
-      values[d.snapshot_id].trips+=Number(d.trip_count||0);
+      .in("snapshot_id", ids)
+      .eq("kp_code", kp);
+    snaps.forEach((s) => (values[s.id] = { tonnage: 0, trips: 0 }));
+    (details || []).forEach((d) => {
+      values[d.snapshot_id].tonnage += Number(d.tonnage_kg || 0);
+      values[d.snapshot_id].trips += Number(d.trip_count || 0);
     });
   }
 
-  const slotData={};
-  snaps.forEach(s=>slotData[s.snapshot_time.slice(0,5)]={...values[s.id],snapshot:s});
-  const ys=slots.map(slot=>slotData[slot]?.tonnage ?? null);
-  const latest=snaps[snaps.length-1];
-  const latestVal=values[latest.id]||{tonnage:0,trips:0};
+  const slotData = {};
+  snaps.forEach(
+    (s) =>
+      (slotData[s.snapshot_time.slice(0, 5)] = { ...values[s.id], snapshot: s })
+  );
+  const ys = slots.map((slot) => slotData[slot]?.tonnage ?? null);
+  const latest = snaps[snaps.length - 1];
+  const latestVal = values[latest.id] || { tonnage: 0, trips: 0 };
 
   setMonitorSummary({
-    kp,period:dateLabelId(date),
-    tonnage:latestVal.tonnage,trips:latestVal.trips,
-    coverage:`${snaps.length} / 4`,
-    tonnageSub:`Snapshot terakhir ${latest.snapshot_time.slice(0,5)}`,
-    tripsSub:"Trip kumulatif snapshot terakhir",
-    coverageSub:"Snapshot tersedia"
+    kp,
+    period: dateLabelId(date),
+    tonnage: latestVal.tonnage,
+    trips: latestVal.trips,
+    coverage: `${snaps.length} / 4`,
+    tonnageSub: `Snapshot terakhir ${latest.snapshot_time.slice(0, 5)}`,
+    tripsSub: "Trip kumulatif snapshot terakhir",
+    coverageSub: "Snapshot tersedia",
   });
 
   resetPlotContainer("monitorKpChart");
-  Plotly.newPlot("monitorKpChart",[{
-    x:slots,y:ys.map(v=>v??0),type:"bar",
-    text:ys.map(v=>v==null?"Menunggu":compactKg(v)),
-    textposition:"outside",
-    cliponaxis:false,
-    marker:{color:ys.map(v=>v==null?"rgba(255,255,255,.10)":"#49de5f")},
-    hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
-  }],{
-    ...darkLayout,
-    margin:{t:34,l:58,r:18,b:42},
-    xaxis:{...darkLayout.xaxis,type:"category",categoryorder:"array",categoryarray:slots,fixedrange:true},
-    yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
-    showlegend:false
-  },plotConfig);
+  Plotly.newPlot(
+    "monitorKpChart",
+    [
+      {
+        x: slots,
+        y: ys.map((v) => v ?? 0),
+        type: "bar",
+        text: ys.map((v) => (v == null ? "Menunggu" : compactKg(v))),
+        textposition: "outside",
+        cliponaxis: false,
+        marker: {
+          color: ys.map((v) =>
+            v == null ? "rgba(255,255,255,.10)" : "#49de5f"
+          ),
+        },
+        hovertemplate: "<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>",
+      },
+    ],
+    {
+      ...darkLayout,
+      margin: { t: 34, l: 58, r: 18, b: 42 },
+      xaxis: {
+        ...darkLayout.xaxis,
+        type: "category",
+        categoryorder: "array",
+        categoryarray: slots,
+        fixedrange: true,
+      },
+      yaxis: {
+        ...darkLayout.yaxis,
+        rangemode: "tozero",
+        tickformat: "~s",
+        fixedrange: true,
+      },
+      showlegend: false,
+    },
+    plotConfig
+  );
 
-  $("monitorKpTable").innerHTML=table(
-    ["Jam","Tonase","Trip","Status"],
-    snaps.map(s=>{
-      const v=values[s.id]||{tonnage:0,trips:0};
-      return [s.snapshot_time.slice(0,5),kg(v.tonnage),v.trips,"Tersedia"];
+  $("monitorKpTable").innerHTML = table(
+    ["Jam", "Tonase", "Trip", "Status"],
+    snaps.map((s) => {
+      const v = values[s.id] || { tonnage: 0, trips: 0 };
+      return [s.snapshot_time.slice(0, 5), kg(v.tonnage), v.trips, "Tersedia"];
     })
   );
 }
-async function loadKPMonthly(kp){
-  const month=$("monitorMonth").value;
-  const {start,end}=yearMonthBounds(month);
-  const [year,monthNum]=month.split("-").map(Number);
+async function loadKPMonthly(kp) {
+  const month = $("monitorMonth").value;
+  const { start, end } = yearMonthBounds(month);
+  const [year, monthNum] = month.split("-").map(Number);
 
-  $("monitorChartTitle").textContent=kp==="ALL"
-    ? "TONASE HARIAN BULAN TERPILIH"
-    : `TONASE HARIAN ${kp} - BULAN TERPILIH`;
-  $("monitorTableTitle").textContent="REKAP HARIAN BULANAN";
-  $("monitorSourceBadge").textContent="Excel Bulanan";
-  $("monitorRuleNote").textContent="Sumber utama: kp_daily_history; fallback ke summary bulanan";
+  $("monitorChartTitle").textContent =
+    kp === "ALL"
+      ? "TONASE HARIAN BULAN TERPILIH"
+      : `TONASE HARIAN ${kp} - BULAN TERPILIH`;
+  $("monitorTableTitle").textContent = "REKAP HARIAN BULANAN";
+  $("monitorSourceBadge").textContent = "Excel Bulanan";
+  $("monitorRuleNote").textContent =
+    "Sumber utama: kp_daily_history; fallback ke summary bulanan";
 
-  let dq=db.from("kp_daily_history")
+  let dq = db
+    .from("kp_daily_history")
     .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count")
-    .gte("report_date",start).lte("report_date",end)
-    .order("report_date",{ascending:true});
-  if(kp!=="ALL") dq=dq.eq("kp_code",kp);
-  const {data:daily,error:dailyErr}=await dq;
-  if(dailyErr){renderMonitorEmpty(dailyErr.message);return;}
+    .gte("report_date", start)
+    .lte("report_date", end)
+    .order("report_date", { ascending: true });
+  if (kp !== "ALL") dq = dq.eq("kp_code", kp);
+  const { data: daily, error: dailyErr } = await dq;
+  if (dailyErr) {
+    renderMonitorEmpty(dailyErr.message);
+    return;
+  }
 
-  if(daily?.length){
-    const byDate={};
-    daily.forEach(r=>{
-      if(!byDate[r.report_date]) byDate[r.report_date]={tonnage:0,trips:0};
-      byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
-      byDate[r.report_date].trips+=Number(r.trip_count||0);
+  if (daily?.length) {
+    const byDate = {};
+    daily.forEach((r) => {
+      if (!byDate[r.report_date])
+        byDate[r.report_date] = { tonnage: 0, trips: 0 };
+      byDate[r.report_date].tonnage += Number(r.tonnage_kg || 0);
+      byDate[r.report_date].trips += Number(r.trip_count || 0);
     });
-    const dates=Object.keys(byDate).sort();
-    const vals=dates.map(d=>byDate[d].tonnage);
-    const total=vals.reduce((a,b)=>a+b,0);
-    const trips=dates.reduce((a,d)=>a+byDate[d].trips,0);
-    const avg=dates.length?total/dates.length:0;
+    const dates = Object.keys(byDate).sort();
+    const vals = dates.map((d) => byDate[d].tonnage);
+    const total = vals.reduce((a, b) => a + b, 0);
+    const trips = dates.reduce((a, d) => a + byDate[d].trips, 0);
+    const avg = dates.length ? total / dates.length : 0;
 
     setMonitorSummary({
-      kp,period:monthLabelId(month),tonnage:total,trips,
-      coverage:`${dates.length} hari`,
-      tonnageSub:`Rata-rata ${kg(avg)} / hari data`,
-      tripsSub:"Total trip dari Excel bulanan",
-      coverageSub:"Hari dengan data"
+      kp,
+      period: monthLabelId(month),
+      tonnage: total,
+      trips,
+      coverage: `${dates.length} hari`,
+      tonnageSub: `Rata-rata ${kg(avg)} / hari data`,
+      tripsSub: "Total trip dari Excel bulanan",
+      coverageSub: "Hari dengan data",
     });
 
     resetPlotContainer("monitorKpChart");
-  Plotly.newPlot("monitorKpChart",[{
-      x:dates.map(d=>d.slice(8,10)),
-      y:vals,type:"bar",
-      text:vals.map(v=>compactKg(v)),
-      textposition:"outside",
-      cliponaxis:false,
-      marker:{color:"#49de5f"},
-      hovertemplate:"Tanggal %{x}<br>%{y:,.0f} kg<extra></extra>"
-    }],{
-      ...darkLayout,
-      margin:{t:28,l:58,r:18,b:42},
-      xaxis:{...darkLayout.xaxis,title:{text:"Tanggal",font:{size:9,color:"#b8aea1"}},fixedrange:true},
-      yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
-      showlegend:false
-    },plotConfig);
+    Plotly.newPlot(
+      "monitorKpChart",
+      [
+        {
+          x: dates.map((d) => d.slice(8, 10)),
+          y: vals,
+          type: "bar",
+          text: vals.map((v) => compactKg(v)),
+          textposition: "outside",
+          cliponaxis: false,
+          marker: { color: "#49de5f" },
+          hovertemplate: "Tanggal %{x}<br>%{y:,.0f} kg<extra></extra>",
+        },
+      ],
+      {
+        ...darkLayout,
+        margin: { t: 28, l: 58, r: 18, b: 42 },
+        xaxis: {
+          ...darkLayout.xaxis,
+          title: { text: "Tanggal", font: { size: 9, color: "#b8aea1" } },
+          fixedrange: true,
+        },
+        yaxis: {
+          ...darkLayout.yaxis,
+          rangemode: "tozero",
+          tickformat: "~s",
+          fixedrange: true,
+        },
+        showlegend: false,
+      },
+      plotConfig
+    );
 
-    $("monitorKpTable").innerHTML=table(
-      ["Tanggal","Tonase","Trip","Sumber"],
-      dates.map(d=>[d,kg(byDate[d].tonnage),byDate[d].trips,"Excel Bulanan"])
+    $("monitorKpTable").innerHTML = table(
+      ["Tanggal", "Tonase", "Trip", "Sumber"],
+      dates.map((d) => [
+        d,
+        kg(byDate[d].tonnage),
+        byDate[d].trips,
+        "Excel Bulanan",
+      ])
     );
     return;
   }
 
   // Fallback: monthly summary only
-  let sq=db.from("historical_summary")
+  let sq = db
+    .from("historical_summary")
     .select("kp_code,tonnage_kg")
-    .eq("year",year).eq("month",monthNum);
-  if(kp!=="ALL") sq=sq.eq("kp_code",kp);
-  const {data:summary,error}=await sq;
-  if(error){renderMonitorEmpty(error.message);return;}
-  const rows=summary||[];
+    .eq("year", year)
+    .eq("month", monthNum);
+  if (kp !== "ALL") sq = sq.eq("kp_code", kp);
+  const { data: summary, error } = await sq;
+  if (error) {
+    renderMonitorEmpty(error.message);
+    return;
+  }
+  const rows = summary || [];
 
-  if(!rows.length){
+  if (!rows.length) {
     setMonitorSummary({
-      kp,period:monthLabelId(month),tonnage:0,trips:null,
-      coverage:"0 hari",
-      tonnageSub:"Belum ada data bulanan",
-      tripsSub:"Upload Excel bulanan untuk detail trip",
-      coverageSub:"Belum ada data"
+      kp,
+      period: monthLabelId(month),
+      tonnage: 0,
+      trips: null,
+      coverage: "0 hari",
+      tonnageSub: "Belum ada data bulanan",
+      tripsSub: "Upload Excel bulanan untuk detail trip",
+      coverageSub: "Belum ada data",
     });
-    renderMonitorEmpty("Belum ada data bulanan. Gunakan tombol Upload Excel Bulanan di atas.");
+    renderMonitorEmpty(
+      "Belum ada data bulanan. Gunakan tombol Upload Excel Bulanan di atas."
+    );
     return;
   }
 
-  const total=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const total = rows.reduce((a, r) => a + Number(r.tonnage_kg || 0), 0);
   setMonitorSummary({
-    kp,period:monthLabelId(month),tonnage:total,trips:null,
-    coverage:`${rows.length} KP`,
-    tonnageSub:"Summary bulanan tersedia",
-    tripsSub:"Trip tidak tersedia di summary",
-    coverageSub:"Upload Excel detail untuk grafik harian"
+    kp,
+    period: monthLabelId(month),
+    tonnage: total,
+    trips: null,
+    coverage: `${rows.length} KP`,
+    tonnageSub: "Summary bulanan tersedia",
+    tripsSub: "Trip tidak tersedia di summary",
+    coverageSub: "Upload Excel detail untuk grafik harian",
   });
 
-  const pairs=rows.map(r=>[r.kp_code,Number(r.tonnage_kg||0)]).sort((a,b)=>b[1]-a[1]);
+  const pairs = rows
+    .map((r) => [r.kp_code, Number(r.tonnage_kg || 0)])
+    .sort((a, b) => b[1] - a[1]);
   resetPlotContainer("monitorKpChart");
-  Plotly.newPlot("monitorKpChart",[{
-    x:pairs.map(x=>x[1]),
-    y:pairs.map(x=>x[0]),
-    type:"bar",orientation:"h",
-    marker:{color:"#49de5f"},
-    hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
-  }],{
-    ...darkLayout,
-    margin:{t:18,l:74,r:18,b:38},
-    xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
-    yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
-    showlegend:false
-  },plotConfig);
+  Plotly.newPlot(
+    "monitorKpChart",
+    [
+      {
+        x: pairs.map((x) => x[1]),
+        y: pairs.map((x) => x[0]),
+        type: "bar",
+        orientation: "h",
+        marker: { color: "#49de5f" },
+        hovertemplate: "<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>",
+      },
+    ],
+    {
+      ...darkLayout,
+      margin: { t: 18, l: 74, r: 18, b: 38 },
+      xaxis: { ...darkLayout.xaxis, tickformat: "~s", fixedrange: true },
+      yaxis: { ...darkLayout.yaxis, autorange: "reversed", fixedrange: true },
+      showlegend: false,
+    },
+    plotConfig
+  );
 
-  $("monitorKpTable").innerHTML=table(
-    ["KP","Tonase","Trip","Sumber"],
-    pairs.map(([code,val])=>[code,kg(val),"—","Summary Bulanan"])
+  $("monitorKpTable").innerHTML = table(
+    ["KP", "Tonase", "Trip", "Sumber"],
+    pairs.map(([code, val]) => [code, kg(val), "—", "Summary Bulanan"])
   );
 }
 
-async function loadKPYearly(kp){
-  const year=Number($("monitorYear").value);
-  $("monitorChartTitle").textContent="TREND TONASE BULANAN JAN–DES";
-  $("monitorTableTitle").textContent="REKAP BULANAN TAHUNAN";
-  $("monitorSourceBadge").textContent="Historical Summary";
-  $("monitorRuleNote").textContent="Trip tidak tersedia pada histori tahunan";
+async function loadKPYearly(kp) {
+  const year = Number($("monitorYear").value);
+  $("monitorChartTitle").textContent = "TREND TONASE BULANAN JAN–DES";
+  $("monitorTableTitle").textContent = "REKAP BULANAN TAHUNAN";
+  $("monitorSourceBadge").textContent = "Historical Summary";
+  $("monitorRuleNote").textContent = "Trip tidak tersedia pada histori tahunan";
 
-  let q=db.from("historical_summary").select("month,kp_code,tonnage_kg").eq("year",year);
-  if(kp!=="ALL") q=q.eq("kp_code",kp);
-  const {data,error}=await q;
-  if(error){renderMonitorEmpty(error.message);return;}
-  const rows=data||[];
-  if(!rows.length){
-    setMonitorSummary({kp,period:String(year),tonnage:0,trips:null,coverage:"0 bulan",tonnageSub:"Belum ada histori",tripsSub:"Tidak tersedia di historical_summary",coverageSub:"Bulan dengan data"});
+  let q = db
+    .from("historical_summary")
+    .select("month,kp_code,tonnage_kg")
+    .eq("year", year);
+  if (kp !== "ALL") q = q.eq("kp_code", kp);
+  const { data, error } = await q;
+  if (error) {
+    renderMonitorEmpty(error.message);
+    return;
+  }
+  const rows = data || [];
+  if (!rows.length) {
+    setMonitorSummary({
+      kp,
+      period: String(year),
+      tonnage: 0,
+      trips: null,
+      coverage: "0 bulan",
+      tonnageSub: "Belum ada histori",
+      tripsSub: "Tidak tersedia di historical_summary",
+      coverageSub: "Bulan dengan data",
+    });
     renderMonitorEmpty("Belum ada histori tahunan untuk pilihan ini.");
     return;
   }
 
-  const monthly=Array(12).fill(0);
-  const monthsPresent=new Set();
-  rows.forEach(r=>{
-    const m=Number(r.month);
-    if(m>=1&&m<=12){
-      monthly[m-1]+=Number(r.tonnage_kg||0);
+  const monthly = Array(12).fill(0);
+  const monthsPresent = new Set();
+  rows.forEach((r) => {
+    const m = Number(r.month);
+    if (m >= 1 && m <= 12) {
+      monthly[m - 1] += Number(r.tonnage_kg || 0);
       monthsPresent.add(m);
     }
   });
-  const total=monthly.reduce((a,b)=>a+b,0);
-  const avg=monthsPresent.size?total/monthsPresent.size:0;
-  const labels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
+  const total = monthly.reduce((a, b) => a + b, 0);
+  const avg = monthsPresent.size ? total / monthsPresent.size : 0;
+  const labels = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Mei",
+    "Jun",
+    "Jul",
+    "Ags",
+    "Sep",
+    "Okt",
+    "Nov",
+    "Des",
+  ];
 
   setMonitorSummary({
-    kp,period:String(year),tonnage:total,trips:null,
-    coverage:`${monthsPresent.size} bulan`,
-    tonnageSub:`Rata-rata ${kg(avg)} / bulan tersedia`,
-    tripsSub:"Tidak tersedia pada data histori tahunan",
-    coverageSub:"Bulan dengan data"
+    kp,
+    period: String(year),
+    tonnage: total,
+    trips: null,
+    coverage: `${monthsPresent.size} bulan`,
+    tonnageSub: `Rata-rata ${kg(avg)} / bulan tersedia`,
+    tripsSub: "Tidak tersedia pada data histori tahunan",
+    coverageSub: "Bulan dengan data",
   });
 
   resetPlotContainer("monitorKpChart");
-  Plotly.newPlot("monitorKpChart",[{
-    x:labels,y:monthly,type:"bar",
-    text:monthly.map((v,i)=>monthsPresent.has(i+1)&&v>0?compactKg(v):""),
-    textposition:"outside",
-    cliponaxis:false,
-    marker:{color:monthly.map((v,i)=>monthsPresent.has(i+1)?"#49de5f":"rgba(255,255,255,.08)")},
-    hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
-  }],{
-    ...darkLayout,
-    margin:{t:22,l:58,r:18,b:42},
-    xaxis:{...darkLayout.xaxis,fixedrange:true},
-    yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
-    showlegend:false
-  },plotConfig);
+  Plotly.newPlot(
+    "monitorKpChart",
+    [
+      {
+        x: labels,
+        y: monthly,
+        type: "bar",
+        text: monthly.map((v, i) =>
+          monthsPresent.has(i + 1) && v > 0 ? compactKg(v) : ""
+        ),
+        textposition: "outside",
+        cliponaxis: false,
+        marker: {
+          color: monthly.map((v, i) =>
+            monthsPresent.has(i + 1) ? "#49de5f" : "rgba(255,255,255,.08)"
+          ),
+        },
+        hovertemplate: "<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>",
+      },
+    ],
+    {
+      ...darkLayout,
+      margin: { t: 22, l: 58, r: 18, b: 42 },
+      xaxis: { ...darkLayout.xaxis, fixedrange: true },
+      yaxis: {
+        ...darkLayout.yaxis,
+        rangemode: "tozero",
+        tickformat: "~s",
+        fixedrange: true,
+      },
+      showlegend: false,
+    },
+    plotConfig
+  );
 
-  $("monitorKpTable").innerHTML=table(
-    ["Bulan","Tonase","Status"],
-    labels.map((label,i)=>[
+  $("monitorKpTable").innerHTML = table(
+    ["Bulan", "Tonase", "Status"],
+    labels.map((label, i) => [
       label,
       kg(monthly[i]),
-      monthsPresent.has(i+1)?"Tersedia":"Belum ada data"
+      monthsPresent.has(i + 1) ? "Tersedia" : "Belum ada data",
     ])
   );
 }
-
 
 boot();
