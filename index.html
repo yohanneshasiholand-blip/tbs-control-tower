@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <div id="loginView" class="login-shell">
@@ -201,7 +202,7 @@
         <div class="page-head glass monitor-page-head">
           <div>
             <h2>Monitoring KP</h2>
-            <p>Analisis tonase per KP untuk periode harian, bulanan, dan tahunan.</p>
+            <p>Pilih periode monitoring untuk melihat dan mengelola data KP.</p>
           </div>
           <div class="monitor-mode-tabs">
             <button id="monitorModeDaily" class="monitor-tab active" onclick="setMonitorMode('daily')">Harian</button>
@@ -210,136 +211,235 @@
           </div>
         </div>
 
+        <!-- GLOBAL KP FILTER -->
         <article class="panel glass monitor-filter-panel">
-          <div class="monitor-filters">
+          <div class="monitor-filters monitor-global-filter">
             <label>
               <span>KP</span>
               <select id="monitorKp" onchange="loadKPMonitoring()">
                 <option value="ALL">Semua KP</option>
               </select>
             </label>
+
             <label id="monitorDateWrap">
               <span>Tanggal</span>
               <input id="monitorDate" type="date" onchange="loadKPMonitoring()">
             </label>
+
             <label id="monitorMonthWrap" class="hidden">
               <span>Bulan</span>
               <input id="monitorMonth" type="month" onchange="loadKPMonitoring()">
             </label>
+
             <label id="monitorYearWrap" class="hidden">
               <span>Tahun</span>
               <select id="monitorYear" onchange="loadKPMonitoring()"></select>
             </label>
+
             <button class="btn btn-primary monitor-refresh" onclick="loadKPMonitoring()">Refresh</button>
           </div>
         </article>
 
-        <div class="monitor-period-overview">
-          <article id="monitorPeriodDaily" class="trend-card glass monitor-period-card active" onclick="setMonitorMode('daily')">
-            <div class="trend-card-head">
-              <div>
-                <small>HARIAN</small>
-                <strong id="dailyTrendValue">0 kg</strong>
-              </div>
-              <span id="dailyTrendBadge" class="trend-badge neutral">—</span>
+        <!-- HARIAN -->
+        <div id="monitorDailyPanel" class="monitor-subpanel active">
+          <div class="monitor-subpanel-head">
+            <div>
+              <span class="subpanel-kicker">MONITORING HARIAN</span>
+              <h3>Snapshot 10.00 • 12.00 • 15.00 • 17.00</h3>
             </div>
-            <div id="dailyTrendMini" class="mini-trend-chart"></div>
-            <div class="trend-foot">
-              <span id="dailyTrendPeriod">10 / 12 / 15 / 17</span>
-              <span class="period-open">Buka Harian →</span>
-            </div>
-          </article>
+            <span class="monitor-source-badge">WhatsApp Snapshot</span>
+          </div>
 
-          <article id="monitorPeriodMonthly" class="trend-card glass monitor-period-card" onclick="setMonitorMode('monthly')">
-            <div class="trend-card-head">
-              <div>
-                <small>BULANAN</small>
-                <strong id="monthlyTrendValue">0 kg</strong>
-              </div>
-              <span id="monthlyTrendBadge" class="trend-badge neutral">—</span>
-            </div>
-            <div id="monthlyTrendMini" class="mini-trend-chart"></div>
-            <div class="trend-foot">
-              <span id="monthlyTrendPeriod">Jan – Des</span>
-              <span class="period-open">Buka Bulanan →</span>
-            </div>
-          </article>
-
-          <article id="monitorPeriodYearly" class="trend-card glass monitor-period-card" onclick="setMonitorMode('yearly')">
-            <div class="trend-card-head">
-              <div>
-                <small>TAHUNAN</small>
-                <strong id="yearlyTrendValue">0 kg</strong>
-              </div>
-              <span id="yearlyTrendBadge" class="trend-badge neutral">—</span>
-            </div>
-            <div id="yearlyTrendMini" class="mini-trend-chart"></div>
-            <div class="trend-foot">
-              <span id="yearlyTrendPeriod">Perbandingan tahun</span>
-              <span class="period-open">Buka Tahunan →</span>
-            </div>
-          </article>
-        </div>
-
-        <div class="monitor-kpi-grid">
-          <article class="monitor-kpi glass">
-            <small>KP DIPILIH</small>
-            <strong id="monitorKpiKp">Semua KP</strong>
-            <span id="monitorKpiPeriod">-</span>
-          </article>
-          <article class="monitor-kpi glass">
-            <small>TONASE</small>
-            <strong id="monitorKpiTonnage">0 kg</strong>
-            <span id="monitorKpiTonnageSub">-</span>
-          </article>
-          <article class="monitor-kpi glass">
-            <small>TRIP / MOBIL</small>
-            <strong id="monitorKpiTrips">0</strong>
-            <span id="monitorKpiTripsSub">-</span>
-          </article>
-          <article class="monitor-kpi glass">
-            <small>DATA TERSEDIA</small>
-            <strong id="monitorKpiCoverage">0</strong>
-            <span id="monitorKpiCoverageSub">-</span>
-          </article>
-        </div>
-
-        <div class="monitor-analytics-grid">
-          <article class="panel glass">
-            <div class="panel-head row-space">
-              <h3 id="monitorChartTitle">PERKEMBANGAN HARIAN</h3>
-              <span id="monitorSourceBadge" class="monitor-source-badge">Snapshot WhatsApp</span>
-            </div>
-            <div id="monitorKpChart" class="chart monitor-chart"></div>
-          </article>
-
-          <article class="panel glass">
-            <div class="panel-head row-space">
-              <h3 id="monitorTableTitle">DETAIL PERIODE</h3>
-              <span id="monitorRuleNote" class="monitor-rule-note"></span>
-            </div>
-            <div id="monitorKpTable" class="table-wrap monitor-table"></div>
-          </article>
-        </div>
-
-        <details class="monitor-input-details">
-          <summary>Input / Update Data Tonase WhatsApp</summary>
-          <div class="two-col monitor-input-grid">
-            <article class="panel glass">
-              <h3>Paste Tonase</h3>
-              <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
-              <div class="actions">
-                <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
-                <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
-              </div>
-              <pre id="tonnagePreview" class="preview"></pre>
+          <div class="monitor-kpi-grid">
+            <article class="monitor-kpi glass">
+              <small>KP DIPILIH</small>
+              <strong id="monitorKpiKp">Semua KP</strong>
+              <span id="monitorKpiPeriod">-</span>
             </article>
-            <article class="panel glass">
-              <h3>Snapshot Terbaru per KP</h3>
-              <div id="snapshotTable" class="table-wrap"></div>
+            <article class="monitor-kpi glass">
+              <small>TONASE</small>
+              <strong id="monitorKpiTonnage">0 kg</strong>
+              <span id="monitorKpiTonnageSub">-</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>TRIP / MOBIL</small>
+              <strong id="monitorKpiTrips">0</strong>
+              <span id="monitorKpiTripsSub">-</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>DATA TERSEDIA</small>
+              <strong id="monitorKpiCoverage">0</strong>
+              <span id="monitorKpiCoverageSub">-</span>
             </article>
           </div>
-        </details>
+
+          <div class="monitor-analytics-grid">
+            <article class="panel glass">
+              <div class="panel-head row-space">
+                <h3 id="monitorChartTitle">PROGRES HARIAN</h3>
+                <span id="monitorSourceBadge" class="monitor-source-badge">Snapshot WhatsApp</span>
+              </div>
+              <div id="monitorKpChart" class="chart monitor-chart"></div>
+            </article>
+
+            <article class="panel glass">
+              <div class="panel-head row-space">
+                <h3 id="monitorTableTitle">DETAIL HARIAN</h3>
+                <span id="monitorRuleNote" class="monitor-rule-note"></span>
+              </div>
+              <div id="monitorKpTable" class="table-wrap monitor-table"></div>
+            </article>
+          </div>
+
+          <details class="monitor-input-details" open>
+            <summary>Input / Update Tonase Harian dari WhatsApp</summary>
+            <div class="two-col monitor-input-grid">
+              <article class="panel glass">
+                <h3>Paste Tonase WhatsApp</h3>
+                <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
+                <div class="actions">
+                  <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
+                  <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
+                </div>
+                <pre id="tonnagePreview" class="preview"></pre>
+              </article>
+              <article class="panel glass">
+                <h3>Snapshot Terbaru per KP</h3>
+                <div id="snapshotTable" class="table-wrap"></div>
+              </article>
+            </div>
+          </details>
+        </div>
+
+        <!-- BULANAN -->
+        <div id="monitorMonthlyPanel" class="monitor-subpanel">
+          <div class="monitor-subpanel-head">
+            <div>
+              <span class="subpanel-kicker">MONITORING BULANAN</span>
+              <h3>Analisis Tonase per Hari dalam Bulan</h3>
+            </div>
+            <span class="monitor-source-badge">Excel Bulanan</span>
+          </div>
+
+          <article class="panel glass period-upload-panel">
+            <div class="period-upload-info">
+              <div>
+                <strong>Upload Data Excel Bulanan</strong>
+                <span>Gunakan file detail harian per KP atau rekap bulanan.</span>
+              </div>
+              <div class="period-upload-actions">
+                <label class="btn btn-primary file-btn">
+                  Pilih Excel Bulanan
+                  <input id="monthlyExcelFile" type="file" accept=".xlsx,.xls" onchange="previewMonthlyExcel(this.files[0])">
+                </label>
+                <button class="btn btn-secondary" onclick="saveMonthlyExcel()">Simpan Bulanan</button>
+              </div>
+            </div>
+            <pre id="monthlyExcelPreview" class="preview compact-preview">Belum ada file bulanan dipilih.</pre>
+          </article>
+
+          <div class="monitor-kpi-grid">
+            <article class="monitor-kpi glass">
+              <small>KP DIPILIH</small>
+              <strong id="monthlyKpiKp">Semua KP</strong>
+              <span id="monthlyKpiPeriod">-</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>TOTAL TONASE</small>
+              <strong id="monthlyKpiTonnage">0 kg</strong>
+              <span id="monthlyKpiTonnageSub">-</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>TOTAL TRIP</small>
+              <strong id="monthlyKpiTrips">—</strong>
+              <span id="monthlyKpiTripsSub">-</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>DATA TERSEDIA</small>
+              <strong id="monthlyKpiCoverage">0 hari</strong>
+              <span id="monthlyKpiCoverageSub">-</span>
+            </article>
+          </div>
+
+          <div class="monitor-analytics-grid">
+            <article class="panel glass">
+              <div class="panel-head row-space">
+                <h3>BARCHART BULANAN</h3>
+                <span class="monitor-source-badge">Per Tanggal</span>
+              </div>
+              <div id="monthlyMonitorChart" class="chart monitor-chart"></div>
+            </article>
+            <article class="panel glass">
+              <div class="panel-head"><h3>DETAIL BULANAN</h3></div>
+              <div id="monthlyMonitorTable" class="table-wrap monitor-table"></div>
+            </article>
+          </div>
+        </div>
+
+        <!-- TAHUNAN -->
+        <div id="monitorYearlyPanel" class="monitor-subpanel">
+          <div class="monitor-subpanel-head">
+            <div>
+              <span class="subpanel-kicker">MONITORING TAHUNAN</span>
+              <h3>Analisis Tonase Januari • Desember</h3>
+            </div>
+            <span class="monitor-source-badge">Historical Summary</span>
+          </div>
+
+          <article class="panel glass period-upload-panel">
+            <div class="period-upload-info">
+              <div>
+                <strong>Upload Data Excel Tahunan</strong>
+                <span>Gunakan file rekap KP x bulan atau format Tahun + KP + Jan–Des.</span>
+              </div>
+              <div class="period-upload-actions">
+                <label class="btn btn-primary file-btn">
+                  Pilih Excel Tahunan
+                  <input id="annualExcelFile" type="file" accept=".xlsx,.xls" onchange="previewAnnualExcel(this.files[0])">
+                </label>
+                <button class="btn btn-secondary" onclick="saveAnnualExcel()">Simpan Tahunan</button>
+              </div>
+            </div>
+            <pre id="annualExcelPreview" class="preview compact-preview">Belum ada file tahunan dipilih.</pre>
+          </article>
+
+          <div class="monitor-kpi-grid">
+            <article class="monitor-kpi glass">
+              <small>KP DIPILIH</small>
+              <strong id="yearlyKpiKp">Semua KP</strong>
+              <span id="yearlyKpiPeriod">-</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>TOTAL TONASE</small>
+              <strong id="yearlyKpiTonnage">0 kg</strong>
+              <span id="yearlyKpiTonnageSub">-</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>TRIP</small>
+              <strong>—</strong>
+              <span>Histori tahunan tidak menyimpan trip</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>DATA TERSEDIA</small>
+              <strong id="yearlyKpiCoverage">0 bulan</strong>
+              <span id="yearlyKpiCoverageSub">-</span>
+            </article>
+          </div>
+
+          <div class="monitor-analytics-grid">
+            <article class="panel glass">
+              <div class="panel-head row-space">
+                <h3>BARCHART TAHUNAN</h3>
+                <span class="monitor-source-badge">Jan – Des</span>
+              </div>
+              <div id="yearlyMonitorChart" class="chart monitor-chart"></div>
+            </article>
+            <article class="panel glass">
+              <div class="panel-head"><h3>DETAIL TAHUNAN</h3></div>
+              <div id="yearlyMonitorTable" class="table-wrap monitor-table"></div>
+            </article>
+          </div>
+        </div>
       </section>
 
       <section id="page-prices" class="page">
