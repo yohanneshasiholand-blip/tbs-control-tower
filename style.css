@@ -1,309 +1,290 @@
-<!doctype html>
-<html lang="id">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#10140f">
-  <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-</head>
-<body>
-  <div id="loginView" class="login-shell">
-    <div class="login-card glass">
-      <div class="brand-mini">
-        <div class="brand-orb">TBS</div>
-        <div>
-          <strong>TBS CONTROL TOWER</strong>
-          
-        </div>
-      </div>
-      <h1>Login Sistem</h1>
-      <p>Monitoring tonase, harga TBS, pengeluaran, dan histori secara real-time.</p>
-      <label>Email</label>
-      <input id="email" type="email" autocomplete="email" placeholder="operator@email.com">
-      <label>Password</label>
-      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••">
-      <button class="btn btn-primary wide" onclick="login()">Login</button>
-      <div id="loginMsg" class="msg"></div>
-    </div>
-  </div>
 
-  <div id="appView" class="app hidden">
-    <aside class="sidebar glass">
-      <div class="brand-block">
-        <div class="brand-logo">TBS</div>
-        <div class="brand-text">
-          <strong>TBS CONTROL TOWER</strong>
-          
-        </div>
-      </div>
+:root{
+  --bg:#0d110b;
+  --bg2:#11140f;
+  --text:#f7f4ea;
+  --muted:#c5bdb0;
+  --green:#49de5f;
+  --green2:#7cff86;
+  --blue:#3b95ff;
+  --gold:#f0b325;
+  --purple:#b36bff;
+  --red:#ff6a5c;
+  --glass:rgba(14,14,14,.58);
+  --glass-soft:rgba(24,24,24,.48);
+  --line:rgba(255,255,255,.08);
+  --shadow:0 16px 36px rgba(0,0,0,.25);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:Inter,Segoe UI,Arial,sans-serif;
+  color:var(--text);
+  background:#0b0d09;
+  min-height:100vh;
+  overflow-x:hidden;
+}
+body::before{
+  content:"";
+  position:fixed;inset:0;
+  background:
+    linear-gradient(90deg, rgba(7,7,7,.55) 0%, rgba(12,12,12,.25) 38%, rgba(12,12,12,.32) 100%),
+    url('bg-palm.jpg') center center / cover no-repeat;
+  z-index:-3;
+}
+body::after{
+  content:"";
+  position:fixed;inset:0;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(76,255,92,.09), transparent 28%),
+    radial-gradient(circle at 85% 20%, rgba(255,165,0,.08), transparent 26%),
+    radial-gradient(circle at 80% 80%, rgba(255,100,80,.06), transparent 22%);
+  backdrop-filter: blur(1px);
+  z-index:-2;
+}
+button,input,select,textarea{font:inherit}
+.hidden{display:none!important}
+.glass{
+  background:linear-gradient(180deg, rgba(28,28,28,.58), rgba(13,13,13,.56));
+  border:1px solid var(--line);
+  box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.04);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.glass-soft{
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06);
+  backdrop-filter: blur(10px);
+}
+.login-shell{
+  min-height:100vh;display:grid;place-items:center;padding:24px;
+}
+.login-card{
+  width:min(430px,94vw);border-radius:26px;padding:28px;
+}
+.brand-mini{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.brand-orb{
+  width:54px;height:54px;border-radius:16px;
+  display:grid;place-items:center;font-weight:900;
+  background:linear-gradient(135deg, rgba(73,222,95,.24), rgba(73,222,95,.08));
+  color:#b9ffbe;border:1px solid rgba(73,222,95,.35);
+}
+.brand-mini strong{display:block;font-size:15px}
+.brand-mini small{display:block;color:var(--muted);margin-top:3px}
+.login-card h1{margin:10px 0 6px;font-size:30px}
+.login-card p{margin:0 0 18px;color:var(--muted);line-height:1.5}
+label{display:block;font-size:12px;font-weight:700;margin:10px 0 6px;color:#ddd5c8}
+input,select,textarea{
+  width:100%;padding:13px 14px;border-radius:13px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(245,245,245,.07);color:var(--text);outline:none;
+}
+input:focus,select:focus,textarea:focus{
+  border-color:rgba(73,222,95,.45);
+  box-shadow:0 0 0 4px rgba(73,222,95,.08);
+}
+textarea{min-height:300px;resize:vertical;line-height:1.55}
+.btn,.wide,.logout-btn,.quick-btn,.ghost-link,.nav{cursor:pointer}
+.btn{
+  border:0;border-radius:12px;padding:12px 16px;font-weight:700;
+}
+.btn-primary{
+  background:linear-gradient(90deg,#2fc84c,#45e263);
+  color:#0f140e;
+}
+.btn-secondary{
+  background:rgba(255,255,255,.09);color:var(--text);
+  border:1px solid rgba(255,255,255,.08);
+}
+.wide{width:100%;margin-top:15px}
+.msg{margin-top:10px;font-size:12px;color:#ffb0a8}
 
-      <nav class="side-nav">
-        <button class="nav active" data-page="dashboard"><span>▦</span><b>Dashboard</b></button>
-        <button class="nav" data-page="monitoring"><span>◉</span><b>Monitoring Harian</b></button>
-        <button class="nav" data-page="prices"><span>Rp</span><b>Harga TBS</b></button>
-        <button class="nav" data-page="expenses"><span>↹</span><b>Pengeluaran</b></button>
-        <button class="nav" data-page="history"><span>▤</span><b>Histori Tahunan</b></button>
-        <button class="nav" data-page="master"><span>⚙</span><b>Master Data</b></button>
-      </nav>
+.app{display:flex;min-height:100vh}
+.sidebar{
+  width:295px;position:fixed;left:0;top:0;bottom:0;
+  padding:20px 18px;border-radius:0 26px 26px 0;
+  display:flex;flex-direction:column;
+}
+.brand-block{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.brand-logo{
+  width:64px;height:64px;border-radius:50%;
+  display:grid;place-items:center;font-weight:900;
+  border:2px solid rgba(255,255,255,.14);
+  background:linear-gradient(135deg, rgba(73,222,95,.25), rgba(73,222,95,.05));
+  color:#caffcf;
+}
+.brand-text strong{display:block;font-size:16px}
+.brand-text small{display:block;color:#ddd0c1;margin-top:4px}
+.side-nav{display:grid;gap:8px}
+.nav{
+  display:flex;align-items:center;gap:13px;padding:14px 14px;
+  background:transparent;border:1px solid transparent;border-radius:14px;
+  color:#f1ebdf;text-align:left;
+}
+.nav span{width:20px;text-align:center;color:#f2f2f2}
+.nav.active{
+  background:linear-gradient(90deg, rgba(62,201,73,.28), rgba(62,201,73,.08));
+  border-color:rgba(73,222,95,.24); color:#9cffac;
+  box-shadow:inset 3px 0 0 var(--green);
+}
+.nav:hover{background:rgba(255,255,255,.06)}
+.quick-box{margin-top:22px}
+.quick-title{font-size:12px;font-weight:700;color:#ddd0c1;margin-bottom:10px}
+.quick-btn{
+  width:100%;text-align:left;margin-bottom:10px;padding:14px 14px;border-radius:14px;
+  color:#efe8db;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.07);
+}
+.account-box{
+  margin-top:auto;padding:12px;border-radius:16px;display:flex;align-items:center;gap:12px
+}
+.avatar{
+  width:48px;height:48px;border-radius:50%;display:grid;place-items:center;
+  background:linear-gradient(135deg, rgba(73,222,95,.45), rgba(73,222,95,.16));
+  font-weight:800
+}
+.account-copy strong{display:block;font-size:14px}
+.account-copy small{display:block;color:#d4c7b8}
+.logout-btn{
+  margin-top:10px;background:transparent;color:#ff806d;border:0;
+  font-weight:700;text-align:left;padding:10px 4px;
+}
+.main{
+  margin-left:295px;width:calc(100% - 295px);padding:22px 20px 36px;
+}
+.hero{
+  border-radius:26px;padding:24px 28px;
+  display:flex;justify-content:space-between;align-items:center;gap:16px;
+}
+.hero h1{margin:0;font-size:28px;letter-spacing:.01em}
+.hero p{margin:8px 0 0;color:#9bff9d}
+.hero-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.live-chip,.meta-item{
+  padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.08);font-weight:700;
+}
+.live-chip i{
+  display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;
+  background:var(--green);box-shadow:0 0 12px rgba(73,222,95,.7);
+}
+.page{display:none}
+.page.active{display:block}
+.kpi-row{
+  margin-top:18px;
+  display:grid;grid-template-columns:repeat(5,1fr);gap:14px;
+}
+.kpi{
+  border-radius:20px;padding:18px 18px 14px;min-height:152px;position:relative;overflow:hidden
+}
+.kpi-title{font-weight:800;color:#ece2d6;font-size:16px}
+.kpi-value{font-size:26px;font-weight:900;margin-top:16px}
+.kpi-sub{color:#ddd0c1;font-size:14px;margin-top:12px}
+.spark{
+  position:absolute;right:18px;bottom:18px;width:74px;height:26px;opacity:.9;
+  background-repeat:no-repeat;background-position:center;background-size:contain;
+}
+.spark.green{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Cpath d='M4 32 C20 28, 26 26, 36 30 S56 14, 66 16 S84 7, 94 11 S106 14, 116 12' fill='none' stroke='%2349de5f' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E")}
+.spark.blue{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Cpath d='M4 31 L22 29 L40 17 L58 25 L76 9 L94 20 L116 21' fill='none' stroke='%233b95ff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E")}
+.spark.gold{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Cpath d='M4 30 L18 29 L32 18 L46 17 L60 8 L74 10 L88 21 L102 22 L116 23' fill='none' stroke='%23f0b325' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E")}
+.spark.purple{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Cpath d='M4 29 L18 24 L32 12 L46 19 L60 8 L74 19 L88 17 L102 19 L116 18' fill='none' stroke='%23b36bff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E")}
+.spark.red{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 40'%3E%3Cpath d='M4 29 L18 30 L32 18 L46 9 L60 21 L74 19 L88 27 L102 28 L116 25' fill='none' stroke='%23ff6a5c' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E")}
 
-      <div class="quick-box">
-        <div class="quick-title">QUICK INPUT</div>
-        <button class="quick-btn" onclick="goToPage('monitoring')">Paste Tonase</button>
-        <button class="quick-btn" onclick="goToPage('prices')">Paste Harga TBS</button>
-        <button class="quick-btn" onclick="goToPage('expenses')">Paste Pengeluaran</button>
-      </div>
+.grid-main{
+  display:grid;grid-template-columns:2fr 1.35fr 1.25fr;gap:14px;margin-top:16px;
+}
+.grid-secondary{
+  display:grid;grid-template-columns:1.45fr 1.55fr 1.2fr;gap:14px;margin-top:14px;
+}
+.panel{
+  border-radius:22px;padding:16px 18px 16px;
+}
+.panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.panel-head h3{margin:0;color:#4dff61;font-size:18px}
+.row-space{justify-content:space-between}
+.chart-lg{height:360px}
+.chart-md{height:270px}
+.chart-sm{height:190px}
+.intraday-footer{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px
+}
+.intraday-item{
+  padding:10px 10px 0 10px
+}
+.intraday-item small{display:block;color:#b4aa9c;font-size:11px}
+.intraday-item strong{display:block;margin-top:8px;font-size:24px;color:#f2efe8}
+.status-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px
+}
+.status-box{
+  border-radius:14px;padding:14px;border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);min-height:100px
+}
+.status-box.done{box-shadow:inset 0 0 0 1px rgba(73,222,95,.25)}
+.status-box .slot{font-size:14px;color:#77ff8a}
+.status-box .slot.wait{color:#8d8a84}
+.status-box .status-val{font-size:24px;font-weight:900;margin-top:8px}
+.status-box .status-sub{font-size:15px;color:#ddd2c6;margin-top:6px}
+.price-cards{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px
+}
+.mini-kpi{
+  min-height:138px;padding:16px;border-radius:16px;background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06)
+}
+.mini-kpi small{display:block;color:#f0e4d7;font-weight:700}
+.mini-kpi strong{display:block;font-size:34px;margin-top:18px}
+.mini-kpi span{display:block;margin-top:10px;color:#6bff7d;font-weight:700}
+.status-kpi strong{color:#7aff86}
+.status-kpi span{color:#ddd0c1}
+.split{display:grid;grid-template-columns:1.05fr .95fr;align-items:center;gap:10px}
+.expense-legend{display:grid;gap:12px;padding:8px 0}
+.legend-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+.dot{width:14px;height:14px;border-radius:50%}
+.legend-row small{display:block;color:#ddd0c1;font-size:15px}
+.legend-row b{display:block;margin-top:3px}
+.legend-row span{font-weight:800}
+.ghost-link{
+  margin-top:8px;border:0;background:transparent;color:#5dff6f;font-weight:800;padding:8px 0
+}
+.table-wrap{overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{padding:12px 10px;border-bottom:1px solid rgba(255,255,255,.07);white-space:nowrap;text-align:right}
+th{color:#d4c6b7;font-size:14px;text-transform:uppercase;background:rgba(255,255,255,.02)}
+td{color:#f1ecdf}
+th:first-child,td:first-child{text-align:left}
+tr:hover td{background:rgba(255,255,255,.03)}
+.total-row td{font-weight:900;color:#9cffac}
+.page-head{
+  margin-top:16px;padding:18px 20px;border-radius:22px
+}
+.page-head h2{margin:0 0 6px}
+.page-head p{margin:0;color:#ddd0c1}
+.two-col{
+  display:grid;grid-template-columns:1fr 1.2fr;gap:14px;margin-top:14px
+}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.preview{
+  margin-top:12px;white-space:pre-wrap;max-height:340px;overflow:auto;
+  background:rgba(0,0,0,.25);padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.06)
+}
+.filters{display:flex;gap:10px}
 
-      <div class="account-box glass-soft">
-        <div class="avatar">OP</div>
-        <div class="account-copy">
-          <strong id="userLabel">operator</strong>
-          <small>Operator</small>
-        </div>
-      </div>
-      <button class="logout-btn" onclick="logout()">Log Out</button>
-    </aside>
-
-    <main class="main">
-      <header class="hero glass">
-        <div>
-          <h1>TBS SUPPLY CONTROL TOWER</h1>
-          <p>Monitoring tonase, harga TBS, pengeluaran dan histori secara real-time</p>
-        </div>
-        <div class="hero-meta">
-          <div class="live-chip"><i></i> LIVE</div>
-          <div class="meta-item">📅 <span id="liveDate">-</span></div>
-          <div class="meta-item">🕒 <span id="liveClock">-</span> WIB</div>
-        </div>
-      </header>
-
-      <section id="page-dashboard" class="page active">
-        <div class="kpi-row">
-          <article class="kpi glass">
-            <div class="kpi-title">TONASE HARI INI</div>
-            <div class="kpi-value" id="kpiTonase">0 kg</div>
-            <div class="kpi-sub" id="kpiTonaseSub">Total tonase hingga -</div>
-            <div class="spark green"></div>
-          </article>
-          <article class="kpi glass">
-            <div class="kpi-title">TOTAL TRIP</div>
-            <div class="kpi-value" id="kpiTrips">0</div>
-            <div class="kpi-sub">Jumlah trip kendaraan</div>
-            <div class="spark blue"></div>
-          </article>
-          <article class="kpi glass">
-            <div class="kpi-title">KP AKTIF</div>
-            <div class="kpi-value" id="kpiActiveKP">0 / 0</div>
-            <div class="kpi-sub">KP berkontribusi hari ini</div>
-            <div class="spark gold"></div>
-          </article>
-          <article class="kpi glass">
-            <div class="kpi-title">HARGA RATA-RATA</div>
-            <div class="kpi-value" id="kpiAvgPrice">Rp0 /kg</div>
-            <div class="kpi-sub" id="kpiPriceSub">Weighted Average Price</div>
-            <div class="spark purple"></div>
-          </article>
-          <article class="kpi glass">
-            <div class="kpi-title">PENGELUARAN HARI INI</div>
-            <div class="kpi-value" id="kpiExpense">Rp0</div>
-            <div class="kpi-sub" id="kpiExpenseSub">Total pengeluaran</div>
-            <div class="spark red"></div>
-          </article>
-        </div>
-
-        <div class="grid-main">
-          <article class="panel glass">
-            <div class="panel-head">
-              <h3>INTRADAY PROGRESS (TONASE)</h3>
-            </div>
-            <div id="intradayChart" class="chart chart-lg"></div>
-            <div class="intraday-footer">
-              <div class="intraday-item">
-                <small>SNAPSHOT SELESAI</small>
-                <strong id="snapshotFinished">-</strong>
-              </div>
-              <div class="intraday-item">
-                <small>PROGRESS HARI INI</small>
-                <strong id="snapshotProgress">0 / 4</strong>
-              </div>
-              <div class="intraday-item">
-                <small>KEMAJUAN TERHADAP SEBELUMNYA</small>
-                <strong id="intradayDelta">Belum ada data sebelumnya</strong>
-              </div>
-            </div>
-          </article>
-
-          <article class="panel glass">
-            <div class="panel-head"><h3>TOP 8 KP SNAPSHOT (TONASE)</h3></div>
-            <div id="topKpChart" class="chart chart-lg"></div>
-          </article>
-
-          <article class="panel glass">
-            <div class="panel-head"><h3>PENGELUARAN HARI INI</h3></div>
-            <div class="split">
-              <div id="expenseDonut" class="chart chart-md"></div>
-              <div id="expenseLegend" class="expense-legend"></div>
-            </div>
-            <button class="ghost-link" onclick="goToPage('expenses')">Lihat Detail Pengeluaran →</button>
-          </article>
-        </div>
-
-        <div class="grid-secondary">
-          <article class="panel glass">
-            <div class="panel-head"><h3>SNAPSHOT STATUS HARI INI</h3></div>
-            <div id="snapshotStatus" class="status-grid"></div>
-          </article>
-
-          <article class="panel glass">
-            <div class="panel-head"><h3>HARGA TBS HARI INI (Rp/kg)</h3></div>
-            <div class="price-cards">
-              <div class="mini-kpi">
-                <small>HARGA TERENDAH</small>
-                <strong id="priceMin">Rp0</strong>
-                <span id="priceMinDelta">-</span>
-              </div>
-              <div class="mini-kpi">
-                <small>HARGA RATA-RATA</small>
-                <strong id="priceAvg2">Rp0</strong>
-                <span id="priceAvgDelta">-</span>
-              </div>
-              <div class="mini-kpi">
-                <small>HARGA TERTINGGI</small>
-                <strong id="priceMax">Rp0</strong>
-                <span id="priceMaxDelta">-</span>
-              </div>
-              <div class="mini-kpi status-kpi">
-                <small>STATUS</small>
-                <strong id="priceStatus">Aktif</strong>
-                <span id="priceActiveCount">0 supplier</span>
-              </div>
-            </div>
-          </article>
-
-          <article class="panel glass">
-            <div class="panel-head"><h3>PRICE WATCH (TREND 7 HARI)</h3></div>
-            <div id="priceTrendChart" class="chart chart-sm"></div>
-          </article>
-        </div>
-
-        <article class="panel glass">
-          <div class="panel-head row-space">
-            <h3 id="controlTitle">CONTROL TABLE - SNAPSHOT TERAKHIR</h3>
-            <button class="ghost-link" onclick="goToPage('monitoring')">Lihat Semua KP →</button>
-          </div>
-          <div id="controlTable" class="table-wrap"></div>
-        </article>
-      </section>
-
-      <section id="page-monitoring" class="page">
-        <div class="page-head glass">
-          <h2>Monitoring Harian</h2>
-          <p>Paste laporan tonase dari WhatsApp, lalu preview sebelum disimpan.</p>
-        </div>
-        <div class="two-col">
-          <article class="panel glass">
-            <h3>Paste Tonase</h3>
-            <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
-            <div class="actions">
-              <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
-              <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
-            </div>
-            <pre id="tonnagePreview" class="preview"></pre>
-          </article>
-          <article class="panel glass">
-            <h3>Snapshot Terbaru per KP</h3>
-            <div id="snapshotTable" class="table-wrap"></div>
-          </article>
-        </div>
-      </section>
-
-      <section id="page-prices" class="page">
-        <div class="page-head glass">
-          <h2>Harga TBS</h2>
-          <p>Paste informasi harga dari WhatsApp, sistem akan menyimpan tanggal efektif terbaru.</p>
-        </div>
-        <div class="two-col">
-          <article class="panel glass">
-            <h3>Paste Harga TBS</h3>
-            <textarea id="priceText" placeholder="Paste update harga WhatsApp di sini..."></textarea>
-            <div class="actions">
-              <button class="btn btn-primary" onclick="previewPrice()">Preview</button>
-              <button class="btn btn-secondary" onclick="savePrice()">Simpan Harga</button>
-            </div>
-            <pre id="pricePreview" class="preview"></pre>
-          </article>
-          <article class="panel glass">
-            <h3>Harga Aktif</h3>
-            <div id="priceTable" class="table-wrap"></div>
-          </article>
-        </div>
-      </section>
-
-      <section id="page-expenses" class="page">
-        <div class="page-head glass">
-          <h2>Pengeluaran</h2>
-          <p>Paste laporan biaya operasional dari WhatsApp untuk direkap otomatis per unit.</p>
-        </div>
-        <div class="two-col">
-          <article class="panel glass">
-            <h3>Paste Pengeluaran</h3>
-            <select id="expenseKp"><option value="">Pilih KP jika tidak terdeteksi otomatis</option></select>
-            <textarea id="expenseText" placeholder="Paste laporan biaya WhatsApp di sini..."></textarea>
-            <div class="actions">
-              <button class="btn btn-primary" onclick="previewExpense()">Preview</button>
-              <button class="btn btn-secondary" onclick="saveExpense()">Simpan Pengeluaran</button>
-            </div>
-            <pre id="expensePreview" class="preview"></pre>
-          </article>
-          <article class="panel glass">
-            <h3>Rekap Pengeluaran</h3>
-            <div id="expenseTable" class="table-wrap"></div>
-          </article>
-        </div>
-      </section>
-
-      <section id="page-history" class="page">
-        <div class="page-head glass row-space">
-          <div>
-            <h2>Histori Tahunan</h2>
-            <p>Analisis histori tonase per tahun, bulan, dan KP.</p>
-          </div>
-          <div class="filters">
-            <select id="historyYear" onchange="loadHistory()"></select>
-            <select id="historyKp" onchange="loadHistory()">
-              <option value="ALL">Semua KP</option>
-            </select>
-          </div>
-        </div>
-        <div class="two-col">
-          <article class="panel glass">
-            <h3>Tren Bulanan</h3>
-            <div id="historyChart" class="chart chart-lg"></div>
-          </article>
-          <article class="panel glass">
-            <h3>Top KP Histori</h3>
-            <div id="historyTopChart" class="chart chart-lg"></div>
-          </article>
-        </div>
-        <article class="panel glass">
-          <div id="historyTable" class="table-wrap"></div>
-        </article>
-      </section>
-
-      <section id="page-master" class="page">
-        <div class="page-head glass">
-          <h2>Master Data</h2>
-          <p>Daftar KP dan supplier yang aktif di sistem.</p>
-        </div>
-        <article class="panel glass">
-          <div id="masterTable" class="table-wrap"></div>
-        </article>
-      </section>
-    </main>
-  </div>
-
-  <script src="app.js"></script>
-</body>
-</html>
+@media(max-width:1500px){
+  .kpi-row{grid-template-columns:repeat(3,1fr)}
+  .grid-main{grid-template-columns:1fr 1fr}
+  .grid-main .panel:last-child{grid-column:span 2}
+  .grid-secondary{grid-template-columns:1fr}
+}
+@media(max-width:1100px){
+  .sidebar{position:static;width:100%;border-radius:0;padding-bottom:10px}
+  .main{margin-left:0;width:100%}
+  .app{display:block}
+  .kpi-row{grid-template-columns:1fr 1fr}
+  .hero{flex-direction:column;align-items:flex-start}
+  .grid-main,.grid-secondary,.two-col{grid-template-columns:1fr}
+  .grid-main .panel:last-child{grid-column:auto}
+}
+@media(max-width:700px){
+  .kpi-row,.price-cards,.status-grid,.intraday-footer{grid-template-columns:1fr}
+  .split{grid-template-columns:1fr}
+  .hero h1{font-size:22px}
+}
