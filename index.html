@@ -81,31 +81,31 @@
 
       <section id="page-dashboard" class="page active">
         <div class="kpi-row">
-          <article class="kpi glass">
+          <article class="kpi glass interactive-card" onclick="openDashboardDetail('monitoring','daily')" title="Klik untuk detail monitoring harian">
             <div class="kpi-title">TONASE HARI INI</div>
             <div class="kpi-value" id="kpiTonase">0 kg</div>
             <div class="kpi-sub" id="kpiTonaseSub">Total tonase hingga -</div>
             <div class="spark green"></div>
           </article>
-          <article class="kpi glass">
+          <article class="kpi glass interactive-card" onclick="openDashboardDetail('monitoring','daily')" title="Klik untuk detail trip harian">
             <div class="kpi-title">TOTAL TRIP</div>
             <div class="kpi-value" id="kpiTrips">0</div>
             <div class="kpi-sub">Jumlah trip kendaraan</div>
             <div class="spark blue"></div>
           </article>
-          <article class="kpi glass">
-            <div class="kpi-title">KP AKTIF</div>
+          <article class="kpi glass interactive-card" onclick="openDashboardDetail('monitoring','daily')" title="Klik untuk detail KP">
+            <div class="kpi-title" id="kpiActiveKPTitle">KP AKTIF</div>
             <div class="kpi-value" id="kpiActiveKP">0 / 0</div>
-            <div class="kpi-sub">KP berkontribusi hari ini</div>
+            <div class="kpi-sub" id="kpiActiveKPSub">KP berkontribusi hari ini</div>
             <div class="spark gold"></div>
           </article>
-          <article class="kpi glass">
+          <article class="kpi glass interactive-card" onclick="openDashboardDetail('prices')" title="Klik untuk detail harga TBS">
             <div class="kpi-title">HARGA RATA-RATA</div>
             <div class="kpi-value" id="kpiAvgPrice">Rp0 /kg</div>
             <div class="kpi-sub" id="kpiPriceSub">Weighted Average Price</div>
             <div class="spark purple"></div>
           </article>
-          <article class="kpi glass">
+          <article class="kpi glass interactive-card" onclick="openDashboardDetail('expenses')" title="Klik untuk detail pengeluaran">
             <div class="kpi-title">PENGELUARAN HARI INI</div>
             <div class="kpi-value" id="kpiExpense">Rp0</div>
             <div class="kpi-sub" id="kpiExpenseSub">Total pengeluaran</div>
@@ -113,10 +113,78 @@
           </article>
         </div>
 
+
+        <div class="dashboard-trend-head">
+          <div>
+            <span class="dashboard-trend-kicker">TONASE TREND INDICATORS</span>
+            <strong>Harian • Bulanan • Tahunan</strong>
+          </div>
+          <label class="dashboard-trend-filter">
+            <span>GLOBAL FILTER KP</span>
+            <select id="dashboardTrendKp" onchange="setDashboardGlobalKP(this.value)">
+              <option value="ALL">Semua KP</option>
+            </select>
+          </label>
+        </div>
+        <div class="dashboard-context-bar glass-soft">
+          <div>
+            <span class="context-dot"></span>
+            <span id="dashboardContextText">Semua KP • Snapshot terbaru</span>
+          </div>
+          <button id="dashboardResetFilter" class="context-reset hidden" onclick="setDashboardGlobalKP('ALL')">Reset ke Semua KP</button>
+        </div>
+
+        <div class="trend-indicator-row">
+          <article class="trend-card glass interactive-card" onclick="openTrendDetail('daily')">
+            <div class="trend-card-head">
+              <div>
+                <small>TONASE HARIAN</small>
+                <strong id="dailyTrendValue">0 kg</strong>
+              </div>
+              <span id="dailyTrendBadge" class="trend-badge neutral">—</span>
+            </div>
+            <div id="dailyTrendMini" class="mini-trend-chart"></div>
+            <div class="trend-foot">
+              <span id="dailyTrendPeriod">10 / 12 / 15 / 17</span>
+              <button onclick="event.stopPropagation();openTrendDetail('daily')">Detail →</button>
+            </div>
+          </article>
+
+          <article class="trend-card glass interactive-card" onclick="openTrendDetail('monthly')">
+            <div class="trend-card-head">
+              <div>
+                <small>TONASE BULANAN</small>
+                <strong id="monthlyTrendValue">0 kg</strong>
+              </div>
+              <span id="monthlyTrendBadge" class="trend-badge neutral">—</span>
+            </div>
+            <div id="monthlyTrendMini" class="mini-trend-chart"></div>
+            <div class="trend-foot">
+              <span id="monthlyTrendPeriod">Jan – Des</span>
+              <button onclick="event.stopPropagation();openTrendDetail('monthly')">Detail →</button>
+            </div>
+          </article>
+
+          <article class="trend-card glass interactive-card" onclick="openTrendDetail('yearly')">
+            <div class="trend-card-head">
+              <div>
+                <small>TONASE TAHUNAN</small>
+                <strong id="yearlyTrendValue">0 kg</strong>
+              </div>
+              <span id="yearlyTrendBadge" class="trend-badge neutral">—</span>
+            </div>
+            <div id="yearlyTrendMini" class="mini-trend-chart"></div>
+            <div class="trend-foot">
+              <span id="yearlyTrendPeriod">Perbandingan tahun</span>
+              <button onclick="event.stopPropagation();openTrendDetail('yearly')">Detail →</button>
+            </div>
+          </article>
+        </div>
+
         <div class="grid-main">
-          <article class="panel glass">
+          <article class="panel glass interactive-panel" title="Klik titik chart untuk drill-down snapshot">
             <div class="panel-head">
-              <h3>INTRADAY PROGRESS (TONASE)</h3>
+              <h3 id="intradayPanelTitle">INTRADAY PROGRESS (TONASE)</h3>
             </div>
             <div id="intradayChart" class="chart chart-lg"></div>
             <div class="intraday-footer">
@@ -135,29 +203,29 @@
             </div>
           </article>
 
-          <article class="panel glass">
-            <div class="panel-head"><h3>TOP 8 KP SNAPSHOT (TONASE)</h3></div>
+          <article class="panel glass interactive-panel" title="Klik bar KP untuk memfilter seluruh dashboard">
+            <div class="panel-head"><h3 id="topKpTitle">TOP 8 KP SNAPSHOT (TONASE)</h3></div>
             <div id="topKpChart" class="chart chart-lg"></div>
           </article>
 
-          <article class="panel glass">
-            <div class="panel-head"><h3>PENGELUARAN HARI INI</h3></div>
+          <article class="panel glass interactive-panel" onclick="openDashboardDetail('expenses')" title="Klik untuk detail pengeluaran">
+            <div class="panel-head"><h3 id="expensePanelTitle">PENGELUARAN HARI INI</h3></div>
             <div class="split">
               <div id="expenseDonut" class="chart chart-md"></div>
               <div id="expenseLegend" class="expense-legend"></div>
             </div>
-            <button class="ghost-link" onclick="goToPage('expenses')">Lihat Detail Pengeluaran →</button>
+            <button class="ghost-link" onclick="event.stopPropagation();goToPage('expenses')">Lihat Detail Pengeluaran →</button>
           </article>
         </div>
 
         <div class="grid-secondary">
-          <article class="panel glass">
-            <div class="panel-head"><h3>SNAPSHOT STATUS HARI INI</h3></div>
+          <article class="panel glass interactive-panel">
+            <div class="panel-head"><h3 id="snapshotPanelTitle">SNAPSHOT STATUS HARI INI</h3></div>
             <div id="snapshotStatus" class="status-grid"></div>
           </article>
 
-          <article class="panel glass">
-            <div class="panel-head"><h3>HARGA TBS HARI INI (Rp/kg)</h3></div>
+          <article class="panel glass interactive-panel" onclick="openDashboardDetail('prices')" title="Klik untuk detail harga">
+            <div class="panel-head"><h3 id="pricePanelTitle">HARGA TBS HARI INI (Rp/kg)</h3></div>
             <div class="price-cards">
               <div class="mini-kpi">
                 <small>HARGA TERENDAH</small>
@@ -182,41 +250,137 @@
             </div>
           </article>
 
-          <article class="panel glass">
-            <div class="panel-head"><h3>PRICE WATCH (TREND 7 HARI)</h3></div>
+          <article class="panel glass interactive-panel" onclick="openDashboardDetail('prices')" title="Klik untuk histori harga">
+            <div class="panel-head"><h3 id="priceWatchTitle">PRICE WATCH (TREND 7 HARI)</h3></div>
             <div id="priceTrendChart" class="chart chart-sm"></div>
           </article>
         </div>
 
-        <article class="panel glass">
+        <article class="panel glass insight-panel">
+          <div class="panel-head row-space">
+            <div>
+              <h3>CONTROL TOWER INSIGHT</h3>
+              <small id="insightContext">Ringkasan otomatis dari data operasional</small>
+            </div>
+            <span class="insight-live">AUTO INSIGHT</span>
+          </div>
+          <div id="dashboardInsights" class="insight-grid"></div>
+        </article>
+
+        <article class="panel glass control-panel-pro">
           <div class="panel-head row-space">
             <h3 id="controlTitle">CONTROL TABLE - SNAPSHOT TERAKHIR</h3>
-            <button class="ghost-link" onclick="goToPage('monitoring')">Lihat Semua KP →</button>
+            <div class="control-tools">
+              <input id="controlSearch" type="search" placeholder="Cari KP / supplier..." oninput="applyControlTableView()">
+              <select id="controlSort" onchange="applyControlTableView()">
+                <option value="tonnage_desc">Tonase terbesar</option>
+                <option value="trip_desc">Trip terbanyak</option>
+                <option value="cost_desc">Cost/kg tertinggi</option>
+                <option value="kp_asc">KP A-Z</option>
+              </select>
+              <button class="ghost-link" onclick="openDashboardDetail('monitoring','daily')">Detail →</button>
+            </div>
           </div>
           <div id="controlTable" class="table-wrap"></div>
         </article>
       </section>
 
       <section id="page-monitoring" class="page">
-        <div class="page-head glass">
-          <h2>Monitoring Harian</h2>
-          <p>Paste laporan tonase dari WhatsApp, lalu preview sebelum disimpan.</p>
+        <div class="page-head glass monitor-page-head">
+          <div>
+            <h2>Monitoring KP</h2>
+            <p>Analisis tonase per KP untuk periode harian, bulanan, dan tahunan.</p>
+          </div>
+          <div class="monitor-mode-tabs">
+            <button id="monitorModeDaily" class="monitor-tab active" onclick="setMonitorMode('daily')">Harian</button>
+            <button id="monitorModeMonthly" class="monitor-tab" onclick="setMonitorMode('monthly')">Bulanan</button>
+            <button id="monitorModeYearly" class="monitor-tab" onclick="setMonitorMode('yearly')">Tahunan</button>
+          </div>
         </div>
-        <div class="two-col">
+
+        <article class="panel glass monitor-filter-panel">
+          <div class="monitor-filters">
+            <label>
+              <span>KP</span>
+              <select id="monitorKp" onchange="loadKPMonitoring()">
+                <option value="ALL">Semua KP</option>
+              </select>
+            </label>
+            <label id="monitorDateWrap">
+              <span>Tanggal</span>
+              <input id="monitorDate" type="date" onchange="loadKPMonitoring()">
+            </label>
+            <label id="monitorMonthWrap" class="hidden">
+              <span>Bulan</span>
+              <input id="monitorMonth" type="month" onchange="loadKPMonitoring()">
+            </label>
+            <label id="monitorYearWrap" class="hidden">
+              <span>Tahun</span>
+              <select id="monitorYear" onchange="loadKPMonitoring()"></select>
+            </label>
+            <button class="btn btn-primary monitor-refresh" onclick="loadKPMonitoring()">Refresh</button>
+          </div>
+        </article>
+
+        <div class="monitor-kpi-grid">
+          <article class="monitor-kpi glass">
+            <small>KP DIPILIH</small>
+            <strong id="monitorKpiKp">Semua KP</strong>
+            <span id="monitorKpiPeriod">-</span>
+          </article>
+          <article class="monitor-kpi glass">
+            <small>TONASE</small>
+            <strong id="monitorKpiTonnage">0 kg</strong>
+            <span id="monitorKpiTonnageSub">-</span>
+          </article>
+          <article class="monitor-kpi glass">
+            <small>TRIP / MOBIL</small>
+            <strong id="monitorKpiTrips">0</strong>
+            <span id="monitorKpiTripsSub">-</span>
+          </article>
+          <article class="monitor-kpi glass">
+            <small>DATA TERSEDIA</small>
+            <strong id="monitorKpiCoverage">0</strong>
+            <span id="monitorKpiCoverageSub">-</span>
+          </article>
+        </div>
+
+        <div class="monitor-analytics-grid">
           <article class="panel glass">
-            <h3>Paste Tonase</h3>
-            <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
-            <div class="actions">
-              <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
-              <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
+            <div class="panel-head row-space">
+              <h3 id="monitorChartTitle">PERKEMBANGAN HARIAN</h3>
+              <span id="monitorSourceBadge" class="monitor-source-badge">Snapshot WhatsApp</span>
             </div>
-            <pre id="tonnagePreview" class="preview"></pre>
+            <div id="monitorKpChart" class="chart monitor-chart"></div>
           </article>
+
           <article class="panel glass">
-            <h3>Snapshot Terbaru per KP</h3>
-            <div id="snapshotTable" class="table-wrap"></div>
+            <div class="panel-head row-space">
+              <h3 id="monitorTableTitle">DETAIL PERIODE</h3>
+              <span id="monitorRuleNote" class="monitor-rule-note"></span>
+            </div>
+            <div id="monitorKpTable" class="table-wrap monitor-table"></div>
           </article>
         </div>
+
+        <details class="monitor-input-details">
+          <summary>Input / Update Data Tonase WhatsApp</summary>
+          <div class="two-col monitor-input-grid">
+            <article class="panel glass">
+              <h3>Paste Tonase</h3>
+              <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
+              <div class="actions">
+                <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
+                <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
+              </div>
+              <pre id="tonnagePreview" class="preview"></pre>
+            </article>
+            <article class="panel glass">
+              <h3>Snapshot Terbaru per KP</h3>
+              <div id="snapshotTable" class="table-wrap"></div>
+            </article>
+          </div>
+        </details>
       </section>
 
       <section id="page-prices" class="page">
