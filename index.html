@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.5">
+  <link rel="stylesheet" href="style.css?v=4.6">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -363,7 +363,7 @@
               <div class="period-upload-actions">
                 <label class="btn btn-primary file-btn">
                   Pilih Excel Bulanan
-                  <input id="monthlyExcelFile" type="file" accept=".xlsx,.xls" onchange="previewMonthlyExcel(this.files[0])">
+                  <input id="monthlyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewMonthlyExcels(this.files)">
                 </label>
                 <button class="btn btn-secondary" onclick="saveMonthlyExcel()">Simpan Bulanan</button>
               </div>
@@ -428,7 +428,7 @@
               <div class="period-upload-actions">
                 <label class="btn btn-primary file-btn">
                   Pilih Excel Tahunan
-                  <input id="annualExcelFile" type="file" accept=".xlsx,.xls" onchange="previewAnnualExcel(this.files[0])">
+                  <input id="annualExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewAnnualExcels(this.files)">
                 </label>
                 <button class="btn btn-secondary" onclick="saveAnnualExcel()">Simpan Tahunan</button>
               </div>
