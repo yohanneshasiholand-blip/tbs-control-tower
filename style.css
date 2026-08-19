@@ -1960,3 +1960,15 @@ select option:checked{
 .compact-preview{
   line-height:1.45;
 }
+
+
+/* Chart empty-state cleanup v4.6.1 */
+.chart-empty-state{
+  min-height:100%;
+  display:grid;
+  place-items:center;
+  padding:55px 20px;
+  text-align:center;
+  color:#c8bdaf;
+  font-size:12px;
+}
