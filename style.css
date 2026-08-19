@@ -1984,3 +1984,44 @@ select option:checked{
 #monthlyExcelPreview{
   white-space:pre-wrap;
 }
+
+
+/* Monthly report-period allocation v4.7.2 */
+#monthlyExcelPreview{
+  white-space:pre-wrap;
+}
+
+
+/* WhatsApp snapshot time fallback v4.7.3 */
+.snapshot-input-meta{
+  display:flex;
+  align-items:flex-end;
+  gap:12px;
+  flex-wrap:wrap;
+  margin:10px 0 4px;
+}
+.snapshot-input-meta label{
+  display:grid;
+  gap:5px;
+  min-width:220px;
+}
+.snapshot-input-meta label span{
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  opacity:.8;
+}
+.snapshot-input-meta select{
+  width:100%;
+  min-height:38px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(8,14,9,.78);
+  color:#f5f3ec;
+  padding:0 11px;
+}
+.snapshot-input-meta small{
+  opacity:.72;
+  padding-bottom:9px;
+}
