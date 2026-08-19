@@ -903,20 +903,49 @@ async function loadMonitoringTrendIndicators(){
 
 
 // =========================================================
-// EXCEL IMPORT: BULANAN / TAHUNAN
+// EXCEL IMPORT v4.6: MULTI-FILE + REPORT-STYLE XLS + ANNUAL
 // =========================================================
-function excelSerialToISO(v){
+const MONTH_ID = {
+  januari:1,februari:2,maret:3,april:4,mei:5,juni:6,juli:7,agustus:8,
+  september:9,oktober:10,november:11,desember:12,
+  jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,agst:8,
+  sep:9,sept:9,oct:10,okt:10,nov:11,dec:12,des:12
+};
+
+function parseExcelNumber(v){
   if(v==null || v==="") return null;
+  if(typeof v==="number") return Number.isFinite(v)?v:null;
+  const s=String(v).trim();
+  if(!s || /^#/.test(s)) return null;
+  // Indonesian thousands separator: 294.351 -> 294351
+  if(/^-?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(s)){
+    const n=Number(s.replace(/\./g,"").replace(",","."));
+    return Number.isFinite(n)?n:null;
+  }
+  const n=Number(s.replace(/\s/g,"").replace(",",".").replace(/[^\d.-]/g,""));
+  return Number.isFinite(n)?n:null;
+}
+function parseOperationalDate(v){
+  if(v==null || v==="") return null;
+  if(v instanceof Date && !isNaN(v)) return localISODate(v);
   if(typeof v==="number"){
     const p=XLSX.SSF.parse_date_code(v);
-    if(p) return `${p.y}-${String(p.m).padStart(2,"0")}-${String(p.d).padStart(2,"0")}`;
+    if(p?.y) return `${p.y}-${String(p.m).padStart(2,"0")}-${String(p.d).padStart(2,"0")}`;
   }
-  if(v instanceof Date && !isNaN(v)) return localISODate(v);
   const s=String(v).trim();
-  let m=s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+
+  let m=s.match(/^(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})$/i);
+  if(m){
+    const mon=MONTH_ID[m[2].toLowerCase()];
+    return `${m[3]}-${String(mon).padStart(2,"0")}-${String(+m[1]).padStart(2,"0")}`;
+  }
+  m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if(m){
+    let y=+m[3]; if(y<100) y+=2000;
+    return `${y}-${String(+m[2]).padStart(2,"0")}-${String(+m[1]).padStart(2,"0")}`;
+  }
+  m=s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
   if(m) return `${m[1]}-${String(+m[2]).padStart(2,"0")}-${String(+m[3]).padStart(2,"0")}`;
-  m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
-  if(m) return `${m[3]}-${String(+m[2]).padStart(2,"0")}-${String(+m[1]).padStart(2,"0")}`;
   return null;
 }
 function normalizeHeaderKey(s){
@@ -938,174 +967,349 @@ async function readWorkbookFile(file){
   const buf=await file.arrayBuffer();
   return XLSX.read(buf,{type:"array",cellDates:true});
 }
-function workbookRows(wb){
-  const out=[];
-  wb.SheetNames.forEach(name=>{
-    const sheet=wb.Sheets[name];
-    const rows=XLSX.utils.sheet_to_json(sheet,{defval:null,raw:false});
-    rows.forEach(r=>out.push({sheet:name,row:r}));
-  });
-  return out;
+function sheetAOA(sheet){
+  return XLSX.utils.sheet_to_json(sheet,{header:1,defval:null,raw:false,blankrows:false});
 }
-function parseMonthlyWorkbook(wb,fileName){
-  const rows=workbookRows(wb);
+function findTextCell(aoa, regex){
+  for(let r=0;r<aoa.length;r++){
+    for(let c=0;c<(aoa[r]||[]).length;c++){
+      const s=String(aoa[r][c]??"").trim();
+      if(regex.test(s)) return {r,c,value:s};
+    }
+  }
+  return null;
+}
+function inferKPFromText(text,fileName=""){
+  const all=(String(text||"")+" "+String(fileName||"")).toUpperCase();
+  if(/TKWL\s*2|TKWL\s*KANDIS/.test(all)) return "TKWL-2";
+  if(/TKWL\s*1|TKWL\s*SIAK/.test(all)) return "TKWL-1";
+  if(/ASMJ\s*2/.test(all)) return "ASMJ-2";
+  if(/ASMJ\s*1/.test(all)) return "ASMJ-1";
+  if(/MSB\s*2/.test(all)) return "MSB-2";
+  if(/\bKS\s*2\b|\bKS2\b/.test(all)) return "KS2";
+  if(/\bIIS\b|\bSSM\b/.test(all)) return "SSM";
+  if(/\bGSL\s*[- ]\s*INUMAN\b/.test(all)) return "GSL-INUMAN";
+  const candidates=FALLBACK_KP_CODES.slice().sort((a,b)=>b.length-a.length);
+  for(const code of candidates){
+    const variants=[code,code.replace("-"," "),code.replace("-","")];
+    if(variants.some(v=>all.includes(v))) return code;
+  }
+  if(/\bLBP\b|\bLPI\b/.test(all)) return "LBP";
+  return null;
+}
+function inferSupplierFromReport(aoa,fileName=""){
+  // Most operational files have a metadata row: Agen | FAJAR
+  for(let r=0;r<Math.min(40,aoa.length);r++){
+    const row=aoa[r]||[];
+    for(let c=0;c<row.length;c++){
+      if(/^agen$/i.test(String(row[c]??"").trim())){
+        for(let cc=c+1;cc<row.length;cc++){
+          const v=String(row[cc]??"").trim();
+          if(v) return v;
+        }
+        for(let rr=r+1;rr<Math.min(r+4,aoa.length);rr++){
+          const v=(aoa[rr]||[]).map(x=>String(x??"").trim()).find(Boolean);
+          if(v && !/^tanggal$/i.test(v)) return v;
+        }
+      }
+    }
+  }
+  // filename fallback: remove month/year and common words, then match master aliases/names
+  const f=String(fileName||"").replace(/\.(xlsx|xls)$/i,"").toUpperCase();
+  const allNames=(MASTER_SUPPLIER_DATA||[]).flatMap(s=>[s.name,...(s.aliases||[])]).filter(Boolean);
+  const hit=allNames.sort((a,b)=>String(b).length-String(a).length).find(n=>f.includes(String(n).toUpperCase()));
+  return hit || "UNKNOWN";
+}
+function findTonnageColumn(aoa){
+  for(let r=0;r<aoa.length;r++){
+    const row=aoa[r]||[];
+    for(let c=0;c<row.length;c++){
+      if(/\bTONASE\b/i.test(String(row[c]??""))) return {row:r,col:c};
+    }
+  }
+  return null;
+}
+function parseMonthlyReportSheet(sheet,sheetName,fileName){
+  const aoa=sheetAOA(sheet);
+  const flat=aoa.flat().filter(v=>v!=null).join(" ");
+  const kp=inferKPFromText(flat,fileName);
+  const supplier=inferSupplierFromReport(aoa,fileName);
+  const tonInfo=findTonnageColumn(aoa);
+
+  if(!kp || !tonInfo) return {daily:[],recognized:false,reason:!kp?"KP tidak terdeteksi":"Kolom TONASE tidak ditemukan"};
+
   const dailyMap=new Map();
-  const summaryMap=new Map();
-  const unknown=[];
+  let lastDate=null;
 
-  for(const item of rows){
-    const r=item.row;
-    const kp=canonKP(
-      pickField(r,["kp","kode kp","kantor pencairan","kantor","unit","kode unit"])
-    );
-    const date=excelSerialToISO(
-      pickField(r,["tanggal","date","tgl","report date"])
-    );
-    const tonRaw=pickField(r,["tonase kg","tonnage kg","tonase","tonnage","berat kg","berat"]);
-    const tripRaw=pickField(r,["trip","jumlah trip","mobil masuk","jumlah kendaraan","kendaraan"]);
-    const monthRaw=pickField(r,["bulan","month"]);
-    const yearRaw=pickField(r,["tahun","year"]);
+  for(let r=tonInfo.row+1;r<aoa.length;r++){
+    const row=aoa[r]||[];
 
-    let ton=Number(String(tonRaw??"").replace(/\./g,"").replace(",",".").replace(/[^\d.-]/g,""));
-    if(!Number.isFinite(ton)) ton=0;
-
-    let trips=parseInt(String(tripRaw??"").replace(/[^\d-]/g,""),10);
-    if(!Number.isFinite(trips)) trips=0;
-
-    if(kp && date && ton>0){
-      const key=`${date}|${kp}`;
-      const prev=dailyMap.get(key)||{report_date:date,kp_code:kp,tonnage_kg:0,trip_count:0,source_file:fileName};
-      prev.tonnage_kg+=ton;
-      prev.trip_count+=trips;
-      dailyMap.set(key,prev);
-
-      const [y,m]=date.split("-").map(Number);
-      const skey=`${y}|${m}|${kp}`;
-      const sp=summaryMap.get(skey)||{year:y,month:m,kp_code:kp,tonnage_kg:0,source_file:fileName};
-      sp.tonnage_kg+=ton;
-      summaryMap.set(skey,sp);
-      continue;
+    // Find date anywhere on row. Some reports merge/format date columns.
+    let rowDate=null;
+    for(const cell of row){
+      const d=parseOperationalDate(cell);
+      if(d){ rowDate=d; break; }
     }
+    if(rowDate) lastDate=rowDate;
 
-    // Allow already aggregated monthly rows.
-    const monthNum=parseInt(String(monthRaw??"").replace(/[^\d]/g,""),10);
-    const yearNum=parseInt(String(yearRaw??"").replace(/[^\d]/g,""),10);
-    if(kp && yearNum>=2000 && monthNum>=1 && monthNum<=12 && ton>0){
-      const skey=`${yearNum}|${monthNum}|${kp}`;
-      const sp=summaryMap.get(skey)||{year:yearNum,month:monthNum,kp_code:kp,tonnage_kg:0,source_file:fileName};
-      sp.tonnage_kg+=ton;
-      summaryMap.set(skey,sp);
-      continue;
-    }
+    // Only accept transaction row when tonnage column contains positive numeric value.
+    const ton=parseExcelNumber(row[tonInfo.col]);
+    if(!(ton>0) || !lastDate) continue;
 
-    if(Object.values(r).some(v=>v!=null && String(v).trim()!=="")) unknown.push({sheet:item.sheet,row:r});
+    // Ignore obvious total/subtotal lines.
+    const joined=row.map(x=>String(x??"")).join(" ").toUpperCase();
+    if(/\bTOTAL\b|\bJUMLAH\b/.test(joined) && !/NO\.?\s*BUKTI/.test(joined)) continue;
+
+    const key=`${lastDate}|${kp}|${supplier}`;
+    const prev=dailyMap.get(key)||{
+      report_date:lastDate,kp_code:kp,supplier_name:supplier,
+      tonnage_kg:0,trip_count:0,source_file:fileName
+    };
+    prev.tonnage_kg+=ton;
+    prev.trip_count+=1; // business rule: each transaction/trip = 1 mobil masuk
+    dailyMap.set(key,prev);
   }
 
-  return {
-    fileName,
-    daily:[...dailyMap.values()],
-    summary:[...summaryMap.values()],
-    unknownCount:unknown.length
-  };
+  return {daily:[...dailyMap.values()],recognized:true,kp,supplier};
 }
-function parseAnnualWorkbook(wb,fileName){
-  const rows=workbookRows(wb);
-  const summaryMap=new Map();
-  const monthNameMap={
-    januari:1,februari:2,maret:3,april:4,mei:5,juni:6,juli:7,agustus:8,
-    september:9,oktober:10,november:11,desember:12,
-    jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12
-  };
-
-  for(const item of rows){
-    const r=item.row;
-    let year=parseInt(String(pickField(r,["tahun","year"])??item.sheet).replace(/[^\d]/g,""),10);
+function parseMonthlySimpleTable(sheet,sheetName,fileName){
+  const rows=XLSX.utils.sheet_to_json(sheet,{defval:null,raw:false});
+  const out=[];
+  for(const r of rows){
     const kp=canonKP(pickField(r,["kp","kode kp","kantor pencairan","kantor","unit","kode unit"]));
-    const tonRaw=pickField(r,["tonase kg","tonnage kg","tonase","tonnage","berat kg","berat"]);
-    const monthRaw=pickField(r,["bulan","month"]);
-
-    let ton=Number(String(tonRaw??"").replace(/\./g,"").replace(",",".").replace(/[^\d.-]/g,""));
-    let monthNum=parseInt(String(monthRaw??"").replace(/[^\d]/g,""),10);
-
-    if(kp && Number.isFinite(year) && monthNum>=1 && monthNum<=12 && Number.isFinite(ton) && ton>0){
-      const key=`${year}|${monthNum}|${kp}`;
-      const prev=summaryMap.get(key)||{year,month:monthNum,kp_code:kp,tonnage_kg:0,source_file:fileName};
-      prev.tonnage_kg+=ton;
-      summaryMap.set(key,prev);
-      continue;
-    }
-
-    // Wide annual format: KP + Jan..Dec columns
-    if(kp && Number.isFinite(year)){
-      Object.entries(r).forEach(([key,val])=>{
-        const mk=normalizeHeaderKey(key);
-        const m=monthNameMap[mk];
-        if(!m) return;
-        let v=Number(String(val??"").replace(/\./g,"").replace(",",".").replace(/[^\d.-]/g,""));
-        if(Number.isFinite(v) && v>0){
-          const sk=`${year}|${m}|${kp}`;
-          const prev=summaryMap.get(sk)||{year,month:m,kp_code:kp,tonnage_kg:0,source_file:fileName};
-          prev.tonnage_kg+=v;
-          summaryMap.set(sk,prev);
-        }
+    const supplier=String(pickField(r,["supplier","agen","jenis spb","spb","do"])||"ALL").trim()||"ALL";
+    const date=parseOperationalDate(pickField(r,["tanggal","date","tgl","report date"]));
+    const ton=parseExcelNumber(pickField(r,["tonase kg","tonnage kg","tonase","tonnage","berat kg","berat"]));
+    const trip=parseExcelNumber(pickField(r,["trip","jumlah trip","mobil masuk","jumlah kendaraan","kendaraan"]));
+    if(kp && date && ton>0){
+      out.push({
+        report_date:date,kp_code:kp,supplier_name:supplier,
+        tonnage_kg:ton,trip_count:trip==null?1:Math.max(0,Math.round(trip)),
+        source_file:fileName
       });
     }
   }
-  return {fileName,summary:[...summaryMap.values()]};
+  return out;
 }
-async function previewMonthlyExcel(file){
+function combineDailyRows(rows){
+  const m=new Map();
+  rows.forEach(r=>{
+    const key=`${r.report_date}|${r.kp_code}|${r.supplier_name||"ALL"}`;
+    const p=m.get(key)||{...r,tonnage_kg:0,trip_count:0};
+    p.tonnage_kg+=Number(r.tonnage_kg||0);
+    p.trip_count+=Number(r.trip_count||0);
+    m.set(key,p);
+  });
+  return [...m.values()];
+}
+function parseMonthlyWorkbook(wb,fileName){
+  let daily=[];
+  let recognizedSheets=0;
+  const notes=[];
+  wb.SheetNames.forEach(name=>{
+    const sheet=wb.Sheets[name];
+    const report=parseMonthlyReportSheet(sheet,name,fileName);
+    if(report.recognized && report.daily.length){
+      daily.push(...report.daily);
+      recognizedSheets++;
+      notes.push(`${name}: ${report.kp} / ${report.supplier} / ${report.daily.length} hari`);
+      return;
+    }
+    const simple=parseMonthlySimpleTable(sheet,name,fileName);
+    if(simple.length){
+      daily.push(...simple);
+      recognizedSheets++;
+      notes.push(`${name}: tabel sederhana / ${simple.length} baris`);
+    }else{
+      notes.push(`${name}: belum dikenali`);
+    }
+  });
+  daily=combineDailyRows(daily);
+  return {fileName,daily,recognizedSheets,notes};
+}
+async function previewMonthlyExcels(fileList){
   try{
-    const wb=await readWorkbookFile(file);
-    MONTHLY_EXCEL_PREVIEW=parseMonthlyWorkbook(wb,file.name);
-    const p=MONTHLY_EXCEL_PREVIEW;
+    const files=[...(fileList||[])];
+    if(!files.length) throw Error("Pilih minimal 1 file.");
+    const previews=[];
+    let allDaily=[];
+    for(const file of files){
+      const wb=await readWorkbookFile(file);
+      const p=parseMonthlyWorkbook(wb,file.name);
+      previews.push(p);
+      allDaily.push(...p.daily);
+    }
+    allDaily=combineDailyRows(allDaily);
+    MONTHLY_EXCEL_PREVIEW={
+      files:files.map(f=>f.name),
+      daily:allDaily,
+      fileResults:previews
+    };
+    const kpSet=new Set(allDaily.map(r=>r.kp_code));
+    const supplierSet=new Set(allDaily.map(r=>`${r.kp_code}/${r.supplier_name}`));
+    const tripTotal=allDaily.reduce((a,r)=>a+Number(r.trip_count||0),0);
+    const tonTotal=allDaily.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
     $("monthlyExcelPreview").textContent=
-      `FILE: ${p.fileName}\n`+
-      `Detail harian: ${p.daily.length} baris KP/tanggal\n`+
-      `Summary bulanan: ${p.summary.length} baris KP/bulan\n`+
-      `Baris belum dikenali: ${p.unknownCount}\n\n`+
-      `Contoh:\n${JSON.stringify(p.daily.slice(0,5),null,2)}`;
+      `FILE DIPILIH: ${files.length}\n`+
+      `File terbaca: ${previews.filter(p=>p.daily.length).length}/${files.length}\n`+
+      `KP terdeteksi: ${kpSet.size}\n`+
+      `Supplier terdeteksi: ${supplierSet.size}\n`+
+      `Baris harian supplier: ${allDaily.length}\n`+
+      `Total trip: ${tripTotal.toLocaleString("id-ID")}\n`+
+      `Total tonase: ${kg(tonTotal)}\n\n`+
+      previews.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n");
   }catch(e){
     MONTHLY_EXCEL_PREVIEW=null;
     $("monthlyExcelPreview").textContent="ERROR: "+e.message;
   }
 }
+async function rebuildMonthlySummaries(dailyRows){
+  const affected=new Map();
+  dailyRows.forEach(r=>{
+    const [y,m]=r.report_date.split("-").map(Number);
+    affected.set(`${y}|${m}|${r.kp_code}`,{year:y,month:m,kp_code:r.kp_code});
+  });
+
+  for(const a of affected.values()){
+    const start=`${a.year}-${String(a.month).padStart(2,"0")}-01`;
+    const nextMonth=a.month===12?`${a.year+1}-01-01`:`${a.year}-${String(a.month+1).padStart(2,"0")}-01`;
+    const {data,error}=await db.from("kp_daily_history")
+      .select("tonnage_kg")
+      .eq("kp_code",a.kp_code)
+      .gte("report_date",start)
+      .lt("report_date",nextMonth);
+    if(error) throw error;
+    const total=(data||[]).reduce((s,r)=>s+Number(r.tonnage_kg||0),0);
+    const src=[...new Set(dailyRows.filter(r=>{
+      const [y,m]=r.report_date.split("-").map(Number);
+      return y===a.year && m===a.month && r.kp_code===a.kp_code;
+    }).map(r=>r.source_file).filter(Boolean))].join("; ");
+    const {error:e2}=await db.from("historical_summary").upsert({
+      year:a.year,month:a.month,kp_code:a.kp_code,tonnage_kg:total,source_file:src||"Excel Bulanan"
+    },{onConflict:"year,month,kp_code"});
+    if(e2) throw e2;
+  }
+}
 async function saveMonthlyExcel(){
   if(!MONTHLY_EXCEL_PREVIEW) return alert("Pilih dan preview Excel bulanan dahulu.");
   const p=MONTHLY_EXCEL_PREVIEW;
-  if(!p.daily.length && !p.summary.length) return alert("Tidak ada data yang dapat disimpan.");
+  if(!p.daily.length) return alert("Tidak ada transaksi yang dapat disimpan.");
 
-  if(p.daily.length){
-    const {error:e1}=await db.from("kp_daily_history")
-      .upsert(p.daily,{onConflict:"report_date,kp_code"});
-    if(e1) return alert("Gagal simpan detail harian: "+e1.message);
-  }
-  if(p.summary.length){
-    const {error:e2}=await db.from("historical_summary")
-      .upsert(p.summary,{onConflict:"year,month,kp_code"});
-    if(e2) return alert("Gagal simpan summary bulanan: "+e2.message);
+  // Chunk to keep Supabase requests stable for many files.
+  const chunkSize=500;
+  for(let i=0;i<p.daily.length;i+=chunkSize){
+    const chunk=p.daily.slice(i,i+chunkSize);
+    const {error}=await db.from("kp_daily_history")
+      .upsert(chunk,{onConflict:"report_date,kp_code,supplier_name"});
+    if(error) return alert("Gagal simpan detail bulanan: "+error.message);
   }
 
-  await db.from("upload_logs").insert({
-    upload_type:"monthly_excel",
-    source_file:p.fileName,
-    rows_count:p.daily.length+p.summary.length,
-    status:"success"
-  }).catch(()=>{});
+  try{
+    await rebuildMonthlySummaries(p.daily);
+  }catch(e){
+    return alert("Detail tersimpan, tetapi summary gagal dihitung: "+e.message);
+  }
 
-  alert(`Data bulanan tersimpan.\nHarian: ${p.daily.length}\nSummary: ${p.summary.length}`);
+  alert(`Upload bulanan berhasil.\nFile: ${p.files.length}\nBaris harian supplier: ${p.daily.length}`);
   MONTHLY_EXCEL_PREVIEW=null;
+  if($("monthlyExcelFile")) $("monthlyExcelFile").value="";
   $("monthlyExcelPreview").textContent="Belum ada file bulanan dipilih.";
   await loadKPMonthlyPanel($("monitorKp").value || "ALL");
 }
-async function previewAnnualExcel(file){
+
+// ---------- ANNUAL ----------
+function annualMonthColumns(aoa){
+  const map={};
+  for(let r=0;r<Math.min(12,aoa.length);r++){
+    (aoa[r]||[]).forEach((v,c)=>{
+      const key=normalizeHeaderKey(v);
+      const m=MONTH_ID[key];
+      if(m) map[m]=c;
+    });
+  }
+  // Known operational annual workbook fallback: C:N = Jan:Dec
+  if(Object.keys(map).length<6){
+    for(let m=1;m<=12;m++) map[m]=m+1;
+  }
+  return map;
+}
+function parseAnnualSheet(sheet,sheetName,fileName){
+  const aoa=sheetAOA(sheet);
+  const yearMatch=String(sheetName).match(/\b(20\d{2})\b/);
+  const titleText=aoa.slice(0,5).flat().join(" ");
+  const titleYear=titleText.match(/\b(20\d{2})\b/);
+  const year=Number(yearMatch?.[1]||titleYear?.[1]);
+  if(!year) return [];
+
+  const monthCols=annualMonthColumns(aoa);
+  const out=[];
+  for(let r=0;r<aoa.length;r++){
+    const row=aoa[r]||[];
+    let unit=String(row[1]??"").trim();
+    if(!unit || /^(unit|nama unit|total|jumlah)$/i.test(unit)) continue;
+
+    const kp=canonKP(unit);
+    if(!kp || kp.length>30) continue;
+
+    let numericMonths=0;
+    for(let m=1;m<=12;m++){
+      const c=monthCols[m];
+      const val=parseExcelNumber(row[c]);
+      if(val!=null && val>0){
+        numericMonths++;
+        out.push({year,month:m,kp_code:kp,tonnage_kg:val,source_file:fileName});
+      }
+    }
+    // If no monthly numeric cells, row was not a unit row.
+    if(!numericMonths){
+      for(let i=out.length-1;i>=0 && out[i]?.kp_code===kp && out[i]?.year===year;i--) out.splice(i,1);
+    }
+  }
+  return out;
+}
+function combineAnnualRows(rows){
+  const m=new Map();
+  rows.forEach(r=>{
+    const key=`${r.year}|${r.month}|${r.kp_code}`;
+    // Annual workbook should have one authoritative value per unit/month;
+    // if duplicate across files, latest selected file wins rather than sum.
+    m.set(key,r);
+  });
+  return [...m.values()];
+}
+function parseAnnualWorkbook(wb,fileName){
+  let summary=[];
+  const notes=[];
+  wb.SheetNames.forEach(name=>{
+    const rows=parseAnnualSheet(wb.Sheets[name],name,fileName);
+    summary.push(...rows);
+    notes.push(`${name}: ${rows.length} KP/bulan terbaca`);
+  });
+  return {fileName,summary:combineAnnualRows(summary),notes};
+}
+async function previewAnnualExcels(fileList){
   try{
-    const wb=await readWorkbookFile(file);
-    ANNUAL_EXCEL_PREVIEW=parseAnnualWorkbook(wb,file.name);
-    const p=ANNUAL_EXCEL_PREVIEW;
+    const files=[...(fileList||[])];
+    if(!files.length) throw Error("Pilih minimal 1 file.");
+    const all=[];
+    const fileResults=[];
+    for(const file of files){
+      const wb=await readWorkbookFile(file);
+      const p=parseAnnualWorkbook(wb,file.name);
+      all.push(...p.summary);
+      fileResults.push(p);
+    }
+    const summary=combineAnnualRows(all);
+    ANNUAL_EXCEL_PREVIEW={files:files.map(f=>f.name),summary,fileResults};
+
+    const years=[...new Set(summary.map(r=>r.year))].sort();
+    const units=new Set(summary.map(r=>r.kp_code));
     $("annualExcelPreview").textContent=
-      `FILE: ${p.fileName}\n`+
-      `Summary tahunan/bulanan: ${p.summary.length} baris\n\n`+
-      `Contoh:\n${JSON.stringify(p.summary.slice(0,8),null,2)}`;
+      `FILE DIPILIH: ${files.length}\n`+
+      `Tahun terbaca: ${years.join(", ")||"-"}\n`+
+      `Unit/KP historis: ${units.size}\n`+
+      `Baris KP/bulan: ${summary.length}\n\n`+
+      fileResults.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n");
   }catch(e){
     ANNUAL_EXCEL_PREVIEW=null;
     $("annualExcelPreview").textContent="ERROR: "+e.message;
@@ -1116,19 +1320,16 @@ async function saveAnnualExcel(){
   const p=ANNUAL_EXCEL_PREVIEW;
   if(!p.summary.length) return alert("Tidak ada data tahunan yang dapat disimpan.");
 
-  const {error}=await db.from("historical_summary")
-    .upsert(p.summary,{onConflict:"year,month,kp_code"});
-  if(error) return alert("Gagal simpan data tahunan: "+error.message);
+  const chunkSize=500;
+  for(let i=0;i<p.summary.length;i+=chunkSize){
+    const {error}=await db.from("historical_summary")
+      .upsert(p.summary.slice(i,i+chunkSize),{onConflict:"year,month,kp_code"});
+    if(error) return alert("Gagal simpan data tahunan: "+error.message);
+  }
 
-  await db.from("upload_logs").insert({
-    upload_type:"annual_excel",
-    source_file:p.fileName,
-    rows_count:p.summary.length,
-    status:"success"
-  }).catch(()=>{});
-
-  alert(`Data tahunan tersimpan: ${p.summary.length} baris KP/bulan.`);
+  alert(`Upload tahunan berhasil.\nFile: ${p.files.length}\nBaris KP/bulan: ${p.summary.length}`);
   ANNUAL_EXCEL_PREVIEW=null;
+  if($("annualExcelFile")) $("annualExcelFile").value="";
   $("annualExcelPreview").textContent="Belum ada file tahunan dipilih.";
   await initKPMonitoringFilters();
   await loadKPYearlyPanel($("monitorKp").value || "ALL");
@@ -1245,7 +1446,7 @@ async function loadKPMonthlyPanel(kp){
   const [year,monthNum]=month.split("-").map(Number);
 
   let dq=db.from("kp_daily_history")
-    .select("report_date,kp_code,tonnage_kg,trip_count")
+    .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count")
     .gte("report_date",start).lte("report_date",end)
     .order("report_date",{ascending:true});
   if(kp!=="ALL") dq=dq.eq("kp_code",kp);
@@ -1493,7 +1694,7 @@ async function loadKPMonthly(kp){
   $("monitorRuleNote").textContent="Sumber utama: kp_daily_history; fallback ke summary bulanan";
 
   let dq=db.from("kp_daily_history")
-    .select("report_date,kp_code,tonnage_kg,trip_count")
+    .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count")
     .gte("report_date",start).lte("report_date",end)
     .order("report_date",{ascending:true});
   if(kp!=="ALL") dq=dq.eq("kp_code",kp);
