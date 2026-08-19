@@ -83,15 +83,73 @@ function startClock(){
 function bindNav(){
   document.querySelectorAll(".nav").forEach(btn => btn.addEventListener("click", () => goToPage(btn.dataset.page)));
 }
+
+// =========================================================
+// SIDEBAR TREE NAVIGATION
+// =========================================================
+function closeSidebarGroups(exceptId=null){
+  ["monitoringGroup","priceGroup","expenseGroup"].forEach(id=>{
+    if(id!==exceptId) $(id)?.classList.remove("open");
+  });
+}
+function toggleSidebarGroup(id){
+  const el=$(id);
+  if(!el) return;
+  const willOpen=!el.classList.contains("open");
+  closeSidebarGroups(id);
+  el.classList.toggle("open",willOpen);
+}
+function setSidebarMonitoringActive(mode){
+  ["daily","monthly","yearly"].forEach(m=>{
+    const id=m==="daily"?"sideDaily":m==="monthly"?"sideMonthly":"sideYearly";
+    $(id)?.classList.toggle("active",m===mode);
+  });
+  $("monitoringGroup")?.classList.add("open");
+}
+async function openMonitoringSub(mode){
+  setSidebarMonitoringActive(mode);
+  await goToPage("monitoring");
+  setMonitorMode(mode);
+}
+async function openParentPage(page,groupId){
+  closeSidebarGroups(groupId);
+  $(groupId)?.classList.add("open");
+  await goToPage(page);
+}
+async function focusPageInput(page,inputId){
+  await openParentPage(page,page==="prices"?"priceGroup":"expenseGroup");
+  setTimeout(()=>{
+    const el=$(inputId);
+    if(el){
+      el.scrollIntoView({behavior:"smooth",block:"center"});
+      el.focus();
+    }
+  },80);
+}
+
 function goToPage(page){
   document.querySelectorAll(".nav").forEach(x => x.classList.toggle("active", x.dataset.page===page));
   document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
   $("page-" + page).classList.add("active");
-  if(page==="dashboard") loadDashboard();
-  if(page==="monitoring") loadKPMonitoring();
-  if(page==="prices") loadPrices();
-  if(page==="expenses") loadExpenses();
+
+  if(page==="dashboard" || page==="master"){
+    closeSidebarGroups();
+  }
+  if(page==="monitoring"){
+    $("monitoringGroup")?.classList.add("open");
+    setSidebarMonitoringActive(MONITOR_MODE);
+    loadKPMonitoring();
+  }
+  if(page==="prices"){
+    $("priceGroup")?.classList.add("open");
+    loadPrices();
+  }
+  if(page==="expenses"){
+    $("expenseGroup")?.classList.add("open");
+    loadExpenses();
+  }
   if(page==="history") loadHistory();
+  if(page==="dashboard") loadDashboard();
 }
 
 function canonKP(k){
@@ -1044,15 +1102,25 @@ async function initKPMonitoringFilters(){
 }
 function setMonitorMode(mode){
   MONITOR_MODE=mode;
+  setSidebarMonitoringActive(mode);
+
   ["daily","monthly","yearly"].forEach(m=>{
-    const id=m==="daily"?"monitorModeDaily":m==="monthly"?"monitorModeMonthly":"monitorModeYearly";
-    $(id)?.classList.toggle("active",m===mode);
     const panelId=m==="daily"?"monitorDailyPanel":m==="monthly"?"monitorMonthlyPanel":"monitorYearlyPanel";
     $(panelId)?.classList.toggle("active",m===mode);
   });
+
   $("monitorDateWrap").classList.toggle("hidden",mode!=="daily");
   $("monitorMonthWrap").classList.toggle("hidden",mode!=="monthly");
   $("monitorYearWrap").classList.toggle("hidden",mode!=="yearly");
+
+  const titleMap={
+    daily:["Monitoring • Harian","Snapshot operasional per KP pada 10.00, 12.00, 15.00, dan 17.00."],
+    monthly:["Monitoring • Bulanan","Analisis tonase bulanan per KP dan upload Excel data bulanan."],
+    yearly:["Monitoring • Tahunan","Analisis tonase tahunan per KP dan upload Excel data tahunan."]
+  };
+  if($("monitorPageTitle")) $("monitorPageTitle").textContent=titleMap[mode][0];
+  if($("monitorPageSubtitle")) $("monitorPageSubtitle").textContent=titleMap[mode][1];
+
   loadKPMonitoring();
 }
 function setMonitorSummary({kp,period,tonnage,trips,coverage,tonnageSub,tripsSub,coverageSub}){
