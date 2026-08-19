@@ -1972,3 +1972,9 @@ select option:checked{
   color:#c8bdaf;
   font-size:12px;
 }
+
+
+/* Monthly validation v4.7 */
+#monthlyExcelPreview{
+  border-color:rgba(73,222,95,.13);
+}
