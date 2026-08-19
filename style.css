@@ -1402,3 +1402,303 @@ select option:checked{
   .period-upload-actions{width:100%}
   .period-upload-actions .btn,.period-upload-actions .file-btn{flex:1}
 }
+
+
+/* =========================================================
+   SIDEBAR TREE — MONITORING 3 SUB-PANELS v4.3
+   ========================================================= */
+.tree-nav{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.nav-tree-group{
+  border-radius:10px;
+  overflow:hidden;
+  border:1px solid transparent;
+}
+.nav-parent{
+  width:100%;
+  border:0;
+  display:grid;
+  grid-template-columns:22px minmax(0,1fr) 16px;
+  align-items:center;
+  gap:7px;
+  padding:9px 10px;
+  border-radius:9px;
+  background:transparent;
+  color:#cfc8bd;
+  cursor:pointer;
+  text-align:left;
+  transition:.16s ease;
+}
+.nav-parent:hover{
+  background:rgba(255,255,255,.045);
+  color:#fff;
+}
+.nav-parent b{
+  font-size:10px;
+  font-weight:800;
+}
+.nav-parent-icon{
+  font-size:10px;
+  color:#63ef72;
+  text-align:center;
+}
+.nav-chevron{
+  text-align:center;
+  font-size:11px;
+  color:#8f877c;
+  transition:transform .16s ease;
+}
+.nav-tree-group.open{
+  border-color:rgba(73,222,95,.08);
+  background:rgba(7,10,7,.16);
+}
+.nav-tree-group.open > .nav-parent{
+  color:#fff;
+  background:rgba(73,222,95,.055);
+}
+.nav-tree-group.open > .nav-parent .nav-chevron{
+  transform:rotate(180deg);
+  color:#63ef72;
+}
+.nav-children{
+  display:none;
+  padding:2px 5px 6px 29px;
+  position:relative;
+}
+.nav-tree-group.open .nav-children{display:block}
+.nav-children::before{
+  content:"";
+  position:absolute;
+  left:16px;
+  top:2px;
+  bottom:8px;
+  width:1px;
+  background:rgba(255,255,255,.08);
+}
+.nav-child{
+  width:100%;
+  border:0;
+  background:transparent;
+  text-align:left;
+  color:#a9a093;
+  cursor:pointer;
+  border-radius:7px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 7px 6px 8px;
+  transition:.14s ease;
+}
+.nav-child span{
+  color:#586255;
+  font-size:7px;
+}
+.nav-child b{
+  font-size:9px;
+  font-weight:800;
+}
+.nav-child:hover{
+  color:#fff;
+  background:rgba(255,255,255,.035);
+}
+.nav-child.active{
+  color:#72ef7d;
+  background:rgba(73,222,95,.075);
+}
+.nav-child.active span{color:#63ef72}
+.side-nav > .nav{margin-top:1px}
+
+/* Old Quick Input is no longer needed */
+.quick-box{display:none !important}
+
+@media (min-width:1100px) and (max-width:1499px){
+  .tree-nav{gap:1px}
+  .nav-tree-group{border-radius:7px}
+  .nav-parent{
+    grid-template-columns:16px minmax(0,1fr) 11px;
+    gap:4px;
+    padding:5px 6px;
+    border-radius:6px;
+  }
+  .nav-parent b{font-size:7px}
+  .nav-parent-icon{font-size:7px}
+  .nav-chevron{font-size:8px}
+  .nav-children{padding:1px 3px 4px 21px}
+  .nav-children::before{left:11px;bottom:5px}
+  .nav-child{
+    gap:3px;
+    padding:4px 4px 4px 5px;
+  }
+  .nav-child b{font-size:6px}
+  .nav-child span{font-size:5px}
+}
+
+
+/* =========================================================
+   CLASSIC NESTED SIDEBAR v4.4
+   Inspired by conventional enterprise tree navigation.
+   ========================================================= */
+.classic-tree-nav{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.classic-group{
+  border-radius:10px;
+  overflow:hidden;
+  background:transparent;
+}
+
+.classic-parent{
+  width:100%;
+  border:0;
+  display:grid;
+  grid-template-columns:24px minmax(0,1fr) 18px;
+  align-items:center;
+  gap:7px;
+  padding:10px 10px;
+  color:#d7d0c5;
+  background:transparent;
+  cursor:pointer;
+  text-align:left;
+  border-radius:9px;
+  transition:background .16s ease,color .16s ease;
+}
+.classic-parent:hover{
+  color:#fff;
+  background:rgba(255,255,255,.045);
+}
+.classic-parent-icon{
+  font-size:11px;
+  color:#aeb4aa;
+  text-align:center;
+}
+.classic-parent b{
+  font-size:10px;
+  font-weight:800;
+}
+.classic-caret{
+  color:#8d877e;
+  font-size:10px;
+  text-align:center;
+  transition:transform .18s ease;
+}
+
+.classic-group.open{
+  background:rgba(4,7,4,.30);
+  border:1px solid rgba(255,255,255,.045);
+}
+.classic-group.open > .classic-parent{
+  border-radius:9px 9px 0 0;
+  background:
+    linear-gradient(90deg,rgba(73,222,95,.13),rgba(73,222,95,.035));
+  color:#fff;
+  box-shadow:inset 3px 0 0 #49de5f;
+}
+.classic-group.open > .classic-parent .classic-parent-icon{
+  color:#67ef75;
+}
+.classic-group.open > .classic-parent .classic-caret{
+  transform:rotate(180deg);
+  color:#67ef75;
+}
+
+.classic-submenu{
+  display:none;
+  padding:5px 6px 7px 30px;
+  background:
+    linear-gradient(180deg,rgba(5,8,5,.30),rgba(5,8,5,.16));
+}
+.classic-group.open .classic-submenu{
+  display:block;
+}
+
+.classic-child{
+  width:100%;
+  border:0;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  position:relative;
+  color:#bcb4a8;
+  background:transparent;
+  padding:8px 8px;
+  cursor:pointer;
+  text-align:left;
+  border-radius:7px;
+  transition:background .14s ease,color .14s ease,padding-left .14s ease;
+}
+.classic-child:hover{
+  color:#fff;
+  background:rgba(255,255,255,.035);
+  padding-left:11px;
+}
+.classic-list-icon{
+  color:#8e968b;
+  font-size:11px;
+  min-width:13px;
+}
+.classic-child b{
+  font-size:9px;
+  font-weight:800;
+}
+.classic-child.active{
+  color:#71ef7d;
+  background:rgba(73,222,95,.08);
+}
+.classic-child.active::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:5px;
+  bottom:5px;
+  width:3px;
+  border-radius:3px;
+  background:#49de5f;
+}
+.classic-child.active .classic-list-icon{
+  color:#69ec76;
+}
+
+/* remove old tree visuals to avoid duplicate styling */
+.tree-nav,
+.nav-tree-group,
+.nav-parent,
+.nav-children,
+.nav-child{
+  all:unset;
+}
+.tree-nav{display:block}
+
+/* Keep dashboard/master native nav buttons */
+.classic-tree-nav > .nav{
+  width:100%;
+}
+
+/* Hide obsolete Quick Input block */
+.quick-box{display:none !important}
+
+@media (min-width:1100px) and (max-width:1499px){
+  .classic-tree-nav{gap:2px}
+  .classic-group{border-radius:7px}
+  .classic-parent{
+    grid-template-columns:17px minmax(0,1fr) 12px;
+    gap:4px;
+    padding:6px 6px;
+    border-radius:6px;
+  }
+  .classic-parent b{font-size:7px}
+  .classic-parent-icon,.classic-caret{font-size:7px}
+  .classic-submenu{padding:3px 4px 4px 22px}
+  .classic-child{
+    gap:5px;
+    padding:5px 5px;
+    border-radius:5px;
+  }
+  .classic-child b{font-size:6px}
+  .classic-list-icon{font-size:7px;min-width:9px}
+}
