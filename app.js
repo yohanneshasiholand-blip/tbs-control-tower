@@ -1045,46 +1045,81 @@ function inferSupplierFromReport(aoa,fileName="",kp=""){
   return "UNKNOWN";
 }
 function findReportColumns(aoa){
+  // Operational reports often use a 2-row header, e.g.
+  // row 1: NO. BUKTI | NO. POLISI | PEMBELIAN | TANGGAL BAYAR
+  // row 2:                         TONASE | HARGA | NILAI PEMBELIAN
+  // Therefore inspect each column across up to 3 consecutive header rows.
   for(let r=0;r<Math.min(80,aoa.length);r++){
-    const row=aoa[r]||[];
-    let bukti=-1, polisi=-1, tonase=-1;
-    row.forEach((v,c)=>{
-      const s=String(v??"").trim().toUpperCase().replace(/\s+/g," ");
+    const maxCols=Math.max(
+      (aoa[r]||[]).length,
+      (aoa[r+1]||[]).length,
+      (aoa[r+2]||[]).length
+    );
+    let no=-1,bukti=-1,polisi=-1,tonase=-1,date=-1;
+
+    for(let c=0;c<maxCols;c++){
+      const parts=[0,1,2].map(off=>String((aoa[r+off]||[])[c]??"").trim()).filter(Boolean);
+      const s=parts.join(" ").toUpperCase().replace(/\s+/g," ");
+
+      if(/^NO$/.test(s) || /^NO\s/.test(s) && !/BUKTI|POLISI/.test(s)) no=c;
       if(/NO\.?\s*BUKTI/.test(s)) bukti=c;
       if(/NO\.?\s*POLISI/.test(s)) polisi=c;
-      if(/^TONASE$/.test(s)) tonase=c;
-    });
-    if(bukti>=0 && tonase>=0) return {row:r,bukti,polisi,tonase};
+      if(/\bTONASE\b/.test(s)) tonase=c;
+      if(/TANGGAL\s*BAYAR|^TANGGAL$|\bTGL\b/.test(s)) date=c;
+    }
+
+    // For ASMJ-style reports, proof may exist but is not mandatory on every transaction.
+    if(no>=0 && polisi>=0 && tonase>=0){
+      return {row:r,headerRows:3,no,bukti,polisi,tonase,date};
+    }
   }
   return null;
 }
-function isTransactionProof(v){
-  const s=String(v??"").trim().toUpperCase();
-  if(!s || /NO\.?\s*BUKTI|TOTAL|JUMLAH|SUBTOTAL/.test(s)) return false;
-  // Operational proof numbers contain digits and separators, e.g. KP08/2607/00005.
-  return /\d/.test(s) && /[\/\-]/.test(s);
+function isTransactionSequence(v){
+  if(typeof v==="number") return Number.isFinite(v) && v>0;
+  const s=String(v??"").trim();
+  return /^\d+$/.test(s) && Number(s)>0;
 }
-function transactionTonnageKg(rawValue,formattedValue){
-  // Prefer raw numeric cell because it lets us distinguish 9.962 ton from 9,962 kg.
+function reportTonnageKg(rawValue,formattedValue){
+  // In operational purchase reports, TONASE is already stored as kilograms:
+  // examples: 4892, 8512, 26469. Do NOT multiply by 1000.
   if(typeof rawValue==="number" && Number.isFinite(rawValue) && rawValue>0){
-    // A single TBS vehicle is normally represented as decimal tonnage in these reports.
-    // Values below 100 are therefore interpreted as metric tons and converted to kg.
-    if(rawValue<100) return Math.round(rawValue*1000);
-    // If the workbook stores kg directly, keep it as kg.
     return Math.round(rawValue);
   }
-
-  const s=String(formattedValue??"").trim();
-  if(!s) return 0;
-
-  // 9,962 or 9.962 can be a decimal-ton display depending on workbook locale.
-  const normalized=Number(s.replace(/\s/g,"").replace(",","." ).replace(/[^\d.-]/g,""));
-  if(Number.isFinite(normalized) && normalized>0 && normalized<100){
-    return Math.round(normalized*1000);
+  const n=parseExcelNumber(formattedValue);
+  return n>0 ? Math.round(n) : 0;
+}
+function findPeriodStartDate(aoa){
+  for(let r=0;r<Math.min(25,aoa.length);r++){
+    for(const cell of (aoa[r]||[])){
+      const s=String(cell??"").trim();
+      // Handles: "01 Agustus 2026 s.d 13 Agustus 2026"
+      const m=s.match(/(\d{1,2}\s+(?:Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4})/i);
+      if(m){
+        const d=parseOperationalDate(m[1]);
+        if(d) return d;
+      }
+    }
   }
-
-  const parsed=parseExcelNumber(formattedValue);
-  return parsed>0 ? Math.round(parsed) : 0;
+  return null;
+}
+function findNextTransactionDate(aoa,startRow,dateCol,limit=80){
+  if(dateCol<0) return null;
+  for(let r=startRow+1;r<Math.min(aoa.length,startRow+limit);r++){
+    const d=parseOperationalDate((aoa[r]||[])[dateCol]);
+    if(d) return d;
+  }
+  return null;
+}
+function findDeclaredReportTotal(aoa,rawAoa,cols){
+  for(let r=cols.row+1;r<aoa.length;r++){
+    const first=String((aoa[r]||[])[cols.no]??"").trim().toUpperCase();
+    if(/^TOTAL$|^JUMLAH$/.test(first)){
+      const kg=reportTonnageKg((rawAoa[r]||[])[cols.tonase],(aoa[r]||[])[cols.tonase]);
+      if(kg>0) return kg;
+    }
+  }
+  return null;
 }
 function parseMonthlyReportSheet(sheet,sheetName,fileName){
   const aoa=sheetAOA(sheet);
@@ -1096,7 +1131,9 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
   if(!kp || !cols){
     return {
       daily:[],recognized:false,
-      reason:!kp?"KP tidak terdeteksi":"Header NO. BUKTI / TONASE tidak ditemukan"
+      reason:!kp
+        ? "KP tidak terdeteksi"
+        : "Header transaksi bertingkat (No / No Polisi / Tonase) tidak ditemukan"
     };
   }
 
@@ -1105,39 +1142,53 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
     return {daily:[],recognized:false,reason:"Supplier/Agen tidak terdeteksi"};
   }
 
+  const periodStart=findPeriodStartDate(aoa);
   const dailyMap=new Map();
   let lastDate=null;
   let acceptedTransactions=0;
-  let rejectedNumericRows=0;
+  let blankProofTransactions=0;
+  let skippedNumericRows=0;
 
-  for(let r=cols.row+1;r<aoa.length;r++){
+  // Header may span 2 rows; start after the detected header block.
+  const dataStart=cols.row+1;
+
+  for(let r=dataStart;r<aoa.length;r++){
     const row=aoa[r]||[];
     const rawRow=rawAoa[r]||[];
 
-    // Date is taken from formatted cells only; prevents ordinary numeric cells
-    // from being interpreted as Excel date serials.
-    let rowDate=null;
-    for(const cell of row){
-      if(typeof cell!=="string") continue;
-      const d=parseOperationalDate(cell);
-      if(d){ rowDate=d; break; }
-    }
-    if(rowDate) lastDate=rowDate;
+    const seq=row[cols.no];
+    const plate=String(row[cols.polisi]??"").trim();
+    const tonKg=reportTonnageKg(rawRow[cols.tonase],row[cols.tonase]);
 
-    const proof=row[cols.bukti];
-    const tonKg=transactionTonnageKg(rawRow[cols.tonase],row[cols.tonase]);
+    // A real vehicle transaction is defined by:
+    // numeric sequence + vehicle plate + positive tonnage.
+    // This excludes subtotal/total rows without requiring NO. BUKTI.
+    const validTransaction=isTransactionSequence(seq) && !!plate && tonKg>0;
 
-    // Critical rule: a numeric TONASE row is NOT enough.
-    // Only a row with a transaction proof number counts as 1 trip.
-    if(tonKg>0 && !isTransactionProof(proof)){
-      rejectedNumericRows++;
+    if(!validTransaction){
+      if(tonKg>0) skippedNumericRows++;
       continue;
     }
-    if(!(tonKg>0) || !lastDate || !isTransactionProof(proof)) continue;
 
-    const key=`${lastDate}|${kp}|${supplier}`;
+    let rowDate=cols.date>=0 ? parseOperationalDate(row[cols.date]) : null;
+    if(rowDate){
+      lastDate=rowDate;
+    }else if(lastDate){
+      rowDate=lastDate;
+    }else{
+      // First transaction can have blank TANGGAL BAYAR.
+      // Use the next dated transaction; if none, use report period start.
+      rowDate=findNextTransactionDate(aoa,r,cols.date) || periodStart;
+    }
+
+    if(!rowDate) continue;
+
+    const proof=cols.bukti>=0 ? String(row[cols.bukti]??"").trim() : "";
+    if(!proof) blankProofTransactions++;
+
+    const key=`${rowDate}|${kp}|${supplier}`;
     const prev=dailyMap.get(key)||{
-      report_date:lastDate,
+      report_date:rowDate,
       kp_code:kp,
       supplier_name:supplier,
       tonnage_kg:0,
@@ -1150,12 +1201,23 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
     acceptedTransactions++;
   }
 
+  const daily=[...dailyMap.values()];
+  const parsedTotal=daily.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const declaredTotal=findDeclaredReportTotal(aoa,rawAoa,cols);
+  const totalDiff=declaredTotal==null ? null : parsedTotal-declaredTotal;
+  const integrityOk=declaredTotal==null ? true : Math.abs(totalDiff)<=1;
+
   return {
-    daily:[...dailyMap.values()],
+    daily,
     recognized:acceptedTransactions>0,
     kp,supplier,
     acceptedTransactions,
-    rejectedNumericRows,
+    blankProofTransactions,
+    skippedNumericRows,
+    parsedTotal,
+    declaredTotal,
+    totalDiff,
+    integrityOk,
     reason:acceptedTransactions?"":"Tidak ada baris transaksi valid"
   };
 }
@@ -1198,17 +1260,31 @@ function parseMonthlyWorkbook(wb,fileName){
   let daily=[];
   let recognizedSheets=0;
   const notes=[];
+  const integrityIssues=[];
+
   wb.SheetNames.forEach(name=>{
     const sheet=wb.Sheets[name];
     const report=parseMonthlyReportSheet(sheet,name,fileName);
+
     if(report.recognized && report.daily.length){
       daily.push(...report.daily);
       recognizedSheets++;
+
       notes.push(
         `${name}: ${report.kp} / ${report.supplier}`+
         ` / ${report.acceptedTransactions} transaksi`+
-        ` / ${report.rejectedNumericRows} subtotal/angka diabaikan`
+        ` / ${report.blankProofTransactions} transaksi tanpa No. Bukti`+
+        ` / ${report.skippedNumericRows} baris angka non-transaksi diabaikan`+
+        (report.declaredTotal!=null
+          ? ` / Total Excel ${kg(report.declaredTotal)} → ${report.integrityOk?"COCOK":"SELISIH"}`
+          : "")
       );
+
+      if(!report.integrityOk){
+        integrityIssues.push(
+          `${name}: hasil parser ${kg(report.parsedTotal)} ≠ Total Excel ${kg(report.declaredTotal)}`
+        );
+      }
       return;
     }
 
@@ -1221,8 +1297,13 @@ function parseMonthlyWorkbook(wb,fileName){
       notes.push(`${name}: belum dikenali (${report.reason||"format tidak sesuai"})`);
     }
   });
+
   daily=combineDailyRows(daily);
-  return {fileName,daily,recognizedSheets,notes};
+  return {
+    fileName,daily,recognizedSheets,notes,
+    integrityOk:integrityIssues.length===0,
+    integrityIssues
+  };
 }
 function monthlyGroupKey(r){
   const [y,m]=String(r.report_date).split("-").map(Number);
@@ -1308,12 +1389,14 @@ async function previewMonthlyExcels(fileList){
 
     allDaily=combineDailyRows(allDaily);
     const validation=await validateMonthlyAgainstAnnual(allDaily);
+    const integrityBlocked=previews.filter(p=>!p.integrityOk);
 
     MONTHLY_EXCEL_PREVIEW={
       files:files.map(f=>f.name),
       daily:allDaily,
       fileResults:previews,
-      validation
+      validation,
+      integrityBlocked
     };
 
     const kpSet=new Set(allDaily.map(r=>r.kp_code));
@@ -1357,6 +1440,15 @@ async function saveMonthlyExcel(){
   if(!MONTHLY_EXCEL_PREVIEW) return alert("Pilih dan preview Excel bulanan dahulu.");
   const p=MONTHLY_EXCEL_PREVIEW;
   if(!p.daily.length) return alert("Tidak ada transaksi yang dapat disimpan.");
+
+  const badFiles=(p.integrityBlocked||[]);
+  if(badFiles.length){
+    return alert(
+      "SIMPAN DIBLOKIR.\n\n"+
+      badFiles.map(f=>`${f.fileName}: ${f.integrityIssues.join("; ")}`).join("\n")+
+      "\n\nTotal transaksi parser belum sama dengan Total Excel."
+    );
+  }
 
   const blocked=(p.validation||[]).filter(v=>v.block);
   if(blocked.length){
