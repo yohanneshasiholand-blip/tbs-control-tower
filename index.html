@@ -37,25 +37,63 @@
         <div class="brand-logo">TBS</div>
         <div class="brand-text">
           <strong>TBS CONTROL TOWER</strong>
-          
         </div>
       </div>
 
-      <nav class="side-nav">
-        <button class="nav active" data-page="dashboard"><span>▦</span><b>Dashboard</b></button>
-        <button class="nav" data-page="monitoring"><span>◉</span><b>Monitoring Harian</b></button>
-        <button class="nav" data-page="prices"><span>Rp</span><b>Harga TBS</b></button>
-        <button class="nav" data-page="expenses"><span>↹</span><b>Pengeluaran</b></button>
-        <button class="nav" data-page="history"><span>▤</span><b>Histori Tahunan</b></button>
-        <button class="nav" data-page="master"><span>⚙</span><b>Master Data</b></button>
-      </nav>
+      <nav class="side-nav classic-tree-nav">
+        <button class="nav active" data-page="dashboard">
+          <span>▦</span><b>Dashboard</b>
+        </button>
 
-      <div class="quick-box">
-        <div class="quick-title">QUICK INPUT</div>
-        <button class="quick-btn" onclick="goToPage('monitoring')">Paste Tonase</button>
-        <button class="quick-btn" onclick="goToPage('prices')">Paste Harga TBS</button>
-        <button class="quick-btn" onclick="goToPage('expenses')">Paste Pengeluaran</button>
-      </div>
+        <div class="classic-group open" id="monitoringGroup">
+          <button class="classic-parent" onclick="toggleSidebarGroup('monitoringGroup')">
+            <span class="classic-parent-icon">◉</span>
+            <b>Monitoring</b>
+            <span class="classic-caret">▾</span>
+          </button>
+          <div class="classic-submenu">
+            <button class="classic-child active" id="sideDaily" onclick="openMonitoringSub('daily')">
+              <span class="classic-list-icon">☷</span><b>Harian</b>
+            </button>
+            <button class="classic-child" id="sideMonthly" onclick="openMonitoringSub('monthly')">
+              <span class="classic-list-icon">☷</span><b>Bulanan</b>
+            </button>
+            <button class="classic-child" id="sideYearly" onclick="openMonitoringSub('yearly')">
+              <span class="classic-list-icon">☷</span><b>Tahunan</b>
+            </button>
+          </div>
+        </div>
+
+        <div class="classic-group" id="priceGroup">
+          <button class="classic-parent" onclick="toggleSidebarGroup('priceGroup'); openParentPage('prices','priceGroup')">
+            <span class="classic-parent-icon">Rp</span>
+            <b>Harga TBS</b>
+            <span class="classic-caret">▾</span>
+          </button>
+          <div class="classic-submenu">
+            <button class="classic-child" onclick="focusPageInput('prices','priceText')">
+              <span class="classic-list-icon">☷</span><b>Paste Harga TBS</b>
+            </button>
+          </div>
+        </div>
+
+        <div class="classic-group" id="expenseGroup">
+          <button class="classic-parent" onclick="toggleSidebarGroup('expenseGroup'); openParentPage('expenses','expenseGroup')">
+            <span class="classic-parent-icon">↹</span>
+            <b>Pengeluaran</b>
+            <span class="classic-caret">▾</span>
+          </button>
+          <div class="classic-submenu">
+            <button class="classic-child" onclick="focusPageInput('expenses','expenseText')">
+              <span class="classic-list-icon">☷</span><b>Paste Pengeluaran</b>
+            </button>
+          </div>
+        </div>
+
+        <button class="nav" data-page="master">
+          <span>⚙</span><b>Master Data</b>
+        </button>
+      </nav>
 
       <div class="account-box glass-soft">
         <div class="avatar">OP</div>
@@ -201,13 +239,8 @@
       <section id="page-monitoring" class="page">
         <div class="page-head glass monitor-page-head">
           <div>
-            <h2>Monitoring KP</h2>
-            <p>Pilih periode monitoring untuk melihat dan mengelola data KP.</p>
-          </div>
-          <div class="monitor-mode-tabs">
-            <button id="monitorModeDaily" class="monitor-tab active" onclick="setMonitorMode('daily')">Harian</button>
-            <button id="monitorModeMonthly" class="monitor-tab" onclick="setMonitorMode('monthly')">Bulanan</button>
-            <button id="monitorModeYearly" class="monitor-tab" onclick="setMonitorMode('yearly')">Tahunan</button>
+            <h2 id="monitorPageTitle">Monitoring • Harian</h2>
+            <p id="monitorPageSubtitle">Snapshot operasional per KP pada 10.00, 12.00, 15.00, dan 17.00.</p>
           </div>
         </div>
 
