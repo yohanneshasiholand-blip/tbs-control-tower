@@ -2025,3 +2025,17 @@ select option:checked{
   opacity:.72;
   padding-bottom:9px;
 }
+
+
+/* Expense parser validation v4.7.4 */
+#expensePreview{
+  white-space:pre-wrap;
+  line-height:1.5;
+}
+
+
+/* Price parser preview v4.7.5 */
+#pricePreview{
+  white-space:pre-wrap;
+  line-height:1.5;
+}
