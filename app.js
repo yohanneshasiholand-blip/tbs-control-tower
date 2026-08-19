@@ -20,10 +20,12 @@ let MASTER_KP_COUNT = 0;
 let TONNAGE_PREVIEW = null, PRICE_PREVIEW = null, EXPENSE_PREVIEW = null;
 let MONTHLY_EXCEL_PREVIEW = null, ANNUAL_EXCEL_PREVIEW = null;
 let MONITOR_MODE = "daily";
+let MASTER_DIRECTORY_DATA = [];
+let MASTER_SUPPLIER_DATA = [];
 
 const FALLBACK_KP_CODES = [
   "ASMJ-1","ASMJ-2","BMK","BSN","BSS","FAA","GSL","GSL-INUMAN",
-  "GSS","HKBS","KIP","KS2","KWP","LPI","LSHP","MAN","MSB-2","PSM",
+  "GSS","HKBS","KIP","KS2","KWP","LBP","LSHP","MAN","MSB-2","PSM",
   "SISL","SKA","SSL","SSM","TKWL-1","TKWL-2"
 ];
 
@@ -160,7 +162,8 @@ function canonKP(k){
     .replace(/^TKWL\s*([12])$/,"TKWL-$1")
     .replace(/^MSB\s*2$/,"MSB-2")
     .replace(/^KS\s*2$/,"KS2")
-    .replace(/^IIS$/,"SSM");
+    .replace(/^IIS$/,"SSM")
+    .replace(/^LPI$/,"LBP");
 }
 function parseHeader(text){
   let m=text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4}).*?Pukul\s*(10|12|15|17)[\.:]00/is);
@@ -287,15 +290,95 @@ async function saveExpense(){
   await loadDashboard();
 }
 
+function masterProvinceFromAddress(address){
+  const a=String(address||"").toLowerCase();
+  if(a.includes("riau")) return "Riau";
+  if(a.includes("aceh")) return "Aceh";
+  if(a.includes("sumatera utara")) return "Sumatera Utara";
+  if(a.includes("sumatera selatan")) return "Sumatera Selatan";
+  if(a.includes("lampung")) return "Lampung";
+  return "Lainnya";
+}
+function renderMasterDirectory(){
+  if(!$("masterDirectory")) return;
+
+  const search=($("masterSearch")?.value||"").trim().toLowerCase();
+  const filter=$("masterFilter")?.value||"ALL";
+
+  let units=MASTER_DIRECTORY_DATA.map(u=>({
+    ...u,
+    suppliers:MASTER_SUPPLIER_DATA.filter(s=>s.kp_id===u.id)
+  }));
+
+  if(filter==="WITH_PIC") units=units.filter(u=>u.unit_head||u.manager_ffb);
+  if(filter==="NO_PIC") units=units.filter(u=>!u.unit_head&&!u.manager_ffb);
+
+  if(search){
+    units=units.filter(u=>{
+      const supplierText=u.suppliers.map(s=>`${s.name} ${s.full_name||""} ${s.category||""}`).join(" ");
+      return `${u.code} ${u.name||""} ${u.address||""} ${u.unit_head||""} ${u.manager_ffb||""} ${supplierText}`.toLowerCase().includes(search);
+    });
+  }
+
+  $("masterDirectory").innerHTML=units.length?units.map(u=>`
+    <div class="master-unit-card">
+      <div class="master-unit-card-head">
+        <div class="master-unit-code">
+          <strong>${u.code}</strong>
+          <div>
+            <span class="master-unit-name">${u.name||u.code}</span>
+          </div>
+        </div>
+        <span class="master-status">${u.active?"AKTIF":"NONAKTIF"}</span>
+      </div>
+      <div class="master-unit-address">${u.address||"Alamat belum tersedia"}</div>
+      <div class="master-unit-meta">
+        <div class="master-meta-item">
+          <small>Pimpinan Unit</small>
+          <b>${u.unit_head||"—"}</b>
+        </div>
+        <div class="master-meta-item">
+          <small>Manager FFB</small>
+          <b>${u.manager_ffb||"—"}</b>
+        </div>
+      </div>
+      <div class="master-unit-suppliers">
+        ${u.suppliers.length
+          ? u.suppliers.map(s=>`<span class="master-supplier-chip" title="${s.full_name||s.name} • ${s.category||"Kategori belum tersedia"}">${s.name}${s.full_name&&s.full_name!==s.name?` • ${s.full_name}`:""}</span>`).join("")
+          : '<span class="master-supplier-chip">Belum ada SPB</span>'
+        }
+      </div>
+    </div>`).join("")
+    : '<div class="master-empty">Tidak ada master data yang cocok dengan filter.</div>';
+
+  const allUnits=MASTER_DIRECTORY_DATA;
+  const regions=new Set(allUnits.map(u=>masterProvinceFromAddress(u.address)).filter(x=>x!=="Lainnya"));
+  $("masterUnitCount").textContent=allUnits.filter(u=>u.active).length;
+  $("masterSupplierCount").textContent=MASTER_SUPPLIER_DATA.filter(s=>s.active).length;
+  $("masterHeadCount").textContent=allUnits.filter(u=>u.unit_head).length;
+  $("masterRegionCount").textContent=regions.size;
+
+  $("masterSupplierTable").innerHTML=table(
+    ["KP","Kode SPB / DO","Nama Lengkap","Kategori Buah","Status"],
+    MASTER_SUPPLIER_DATA
+      .filter(s=>s.active)
+      .sort((a,b)=>(a.master_kp?.code||"").localeCompare(b.master_kp?.code||"")||a.name.localeCompare(b.name))
+      .map(s=>[
+        s.master_kp?.code||"",
+        s.name,
+        s.full_name||s.name,
+        s.category||"—",
+        s.active?"Aktif":"Nonaktif"
+      ])
+  );
+}
 async function loadMaster(){
   const {data:kps,error:kpError}=await db.from("master_kp")
-    .select("code")
+    .select("id,code,name,address,unit_head,manager_ffb,active")
     .eq("active",true)
     .order("code");
 
-  // Supabase adalah sumber utama. Fallback hanya menjaga UI agar dropdown
-  // tidak pernah terlihat kosong jika koneksi/policy/load master bermasalah.
-  const codes = (!kpError && kps?.length)
+  const codes=(!kpError && kps?.length)
     ? kps.map(x=>x.code).filter(Boolean)
     : [...FALLBACK_KP_CODES];
 
@@ -303,7 +386,6 @@ async function loadMaster(){
 
   const optionsAll='<option value="ALL">Semua KP</option>' +
     codes.map(code=>`<option value="${code}">${code}</option>`).join("");
-
   const optionsExpense='<option value="">Pilih KP jika tidak terdeteksi otomatis</option>' +
     codes.map(code=>`<option value="${code}">${code}</option>`).join("");
 
@@ -311,29 +393,21 @@ async function loadMaster(){
   if($("historyKp")) $("historyKp").innerHTML=optionsAll;
   if($("monitorKp")) $("monitorKp").innerHTML=optionsAll;
 
-  if($("dashboardTrendKp")){
-    $("dashboardTrendKp").innerHTML=optionsAll;
-    const savedKP=localStorage.getItem("tbs_dashboard_kp") || "ALL";
-    const validKP=savedKP==="ALL" || codes.includes(savedKP);
-    DASHBOARD_KP=validKP?savedKP:"ALL";
-    $("dashboardTrendKp").value=DASHBOARD_KP;
-  }
-
   if(kpError){
-    console.warn("Master KP Supabase gagal dimuat; memakai fallback UI.", kpError);
+    console.warn("Master KP Supabase gagal dimuat; memakai fallback dropdown.",kpError);
+    MASTER_DIRECTORY_DATA=codes.map((code,i)=>({id:-(i+1),code,name:code,address:null,unit_head:null,manager_ffb:null,active:true}));
+  }else{
+    MASTER_DIRECTORY_DATA=kps||[];
   }
 
   await initKPMonitoringFilters();
 
   const {data:s,error:supplierError}=await db.from("master_supplier")
-    .select("name,master_kp(code)")
+    .select("id,kp_id,name,full_name,category,aliases,active,master_kp(code)")
     .order("name");
 
-  if($("masterTable")){
-    $("masterTable").innerHTML = supplierError
-      ? table(["KP","Supplier"], [["-","Master supplier belum dapat dimuat"]])
-      : table(["KP","Supplier"], (s||[]).map(x=>[x.master_kp?.code || "", x.name]));
-  }
+  MASTER_SUPPLIER_DATA=supplierError?[]:(s||[]);
+  renderMasterDirectory();
 }
 
 async function getLatestEffectivePrices(date){
