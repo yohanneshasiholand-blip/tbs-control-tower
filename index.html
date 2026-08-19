@@ -1,56 +1,309 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TBS Control Tower Web</title><link rel="stylesheet" href="style.css"><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script></head><body><div id="loginView" class="login-shell"><div class="login-card"><h1>TBS Control Tower</h1><p>Web Edition</p><input id="email" type="email" placeholder="Email"><input id="password" type="password" placeholder="Password"><button onclick="login()">Masuk</button><div id="loginMsg" class="msg"></div></div></div><div id="appView" class="app hidden"><aside class="sidebar"><div class="brand">TBS CONTROL TOWER</div><button class="nav active" data-page="dashboard">▣ Dashboard</button><button class="nav" data-page="monitoring">◉ Monitoring Harian</button><button class="nav" data-page="prices">Rp Harga TBS</button><button class="nav" data-page="expenses">▤ Pengeluaran</button><button class="nav" data-page="history">▦ Histori Tahunan</button><button class="nav" data-page="master">⚙ Master Data</button><div class="sidebar-bottom"><div id="userLabel"></div><button class="logout" onclick="logout()">Keluar</button></div></aside><main class="main"><header class="hero"><div><h1>TBS Supply Control Tower</h1><p>Monitoring tonase, harga TBS, pengeluaran dan histori.</p></div><span class="badge">ONLINE</span></header><section id="page-dashboard" class="page active"><div class="section-title">Executive Summary</div><div class="cards"><div class="card"><small>Tonase Snapshot Terakhir</small><strong id="kpiTonase">0 kg</strong></div><div class="card"><small>Mobil / Trip</small><strong id="kpiTrips">0</strong></div><div class="card"><small>Harga Aktif</small><strong id="kpiPrices">0</strong></div><div class="card"><small>Pengeluaran Bulan Ini</small><strong id="kpiExpense">Rp0</strong></div></div><div class="grid"><div class="panel"><h3>Perkembangan Intraday</h3><div id="intradayChart"></div></div><div class="panel"><h3>Top KP Snapshot</h3><div id="topKpChart"></div></div></div></section><section id="page-monitoring" class="page"><div class="section-title">Import Monitoring Tonase dari WhatsApp</div><div class="panel"><textarea id="tonnageText" placeholder="Paste laporan WhatsApp tonase lengkap di sini..."></textarea><div class="actions"><button onclick="previewTonnage()">Preview</button><button class="secondary" onclick="saveTonnage()">Simpan Snapshot</button></div><pre id="tonnagePreview" class="preview"></pre></div><div class="panel"><h3>Snapshot Terbaru — Detail per KP</h3><div id="snapshotTable"></div></div></section><section id="page-prices" class="page"><div class="section-title">Update Harga TBS</div><div class="panel"><textarea id="priceText" placeholder="Paste update HARGA WILAYAH 2 dari WhatsApp..."></textarea><div class="actions"><button onclick="previewPrice()">Preview</button><button class="secondary" onclick="savePrice()">Simpan Harga</button></div><pre id="pricePreview" class="preview"></pre></div><div class="panel"><h3>Harga Terakhir</h3><div id="priceTable"></div></div></section><section id="page-expenses" class="page"><div class="section-title">Pengeluaran Unit</div><div class="panel"><select id="expenseKp"><option value="">Pilih KP jika tidak terdeteksi otomatis</option></select><textarea id="expenseText" placeholder="Paste laporan biaya WhatsApp..."></textarea><div class="actions"><button onclick="previewExpense()">Preview</button><button class="secondary" onclick="saveExpense()">Simpan Pengeluaran</button></div><pre id="expensePreview" class="preview"></pre></div><div class="panel"><h3>Rekap Bulanan per Unit</h3><div id="expenseTable"></div></div></section><section id="page-history" class="page"><div class="section-title">Histori Tahunan</div><div class="filters"><select id="historyYear" onchange="loadHistory()"></select><select id="historyKp" onchange="loadHistory()"><option value="ALL">Semua KP</option></select></div><div class="grid"><div class="panel"><h3>Tren Bulanan</h3><div id="historyChart"></div></div><div class="panel"><h3>Top Unit/KP</h3><div id="historyTopChart"></div></div></div><div class="panel"><div id="historyTable"></div></div></section><section id="page-master" class="page"><div class="section-title">Master KP & Supplier</div><div class="panel"><div id="masterTable"></div></div></section></main></div><script src="app.js"></script>
-<script>
-// Patch v1.1: tampilkan detail KP pada Snapshot Terbaru
-loadDashboard = async function(){
-  const {data:s}=await db.from("monitoring_snapshots").select("*").order("report_date",{ascending:false}).order("snapshot_time",{ascending:false}).limit(20);
-  const latest=s?.[0];
-  kpiTonase.textContent=kg(latest?.total_tonnage_kg);
-  kpiTrips.textContent=latest?.total_trips||0;
-  const today=new Date().toISOString().slice(0,10);
-  const {data:p}=await db.from("daily_prices").select("id").lte("effective_date",today).eq("status","active");
-  kpiPrices.textContent=(p||[]).length;
-  const month=today.slice(0,7)+"-01";
-  const {data:e}=await db.from("unit_expenses").select("amount").gte("expense_date",month).lte("expense_date",today);
-  kpiExpense.textContent=rupiah((e||[]).reduce((a,b)=>a+Number(b.amount),0));
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10140f">
+  <title>TBS Supply Control Tower</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+  <div id="loginView" class="login-shell">
+    <div class="login-card glass">
+      <div class="brand-mini">
+        <div class="brand-orb">TBS</div>
+        <div>
+          <strong>TBS CONTROL TOWER</strong>
+          <small>Simpel Transit NGMP</small>
+        </div>
+      </div>
+      <h1>Login Sistem</h1>
+      <p>Monitoring tonase, harga TBS, pengeluaran, dan histori secara real-time.</p>
+      <label>Email</label>
+      <input id="email" type="email" autocomplete="email" placeholder="operator@email.com">
+      <label>Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••">
+      <button class="btn btn-primary wide" onclick="login()">Login</button>
+      <div id="loginMsg" class="msg"></div>
+    </div>
+  </div>
 
-  const day=latest?.report_date;
-  const intr=(s||[]).filter(x=>x.report_date===day).sort((a,b)=>a.snapshot_time.localeCompare(b.snapshot_time));
-  Plotly.newPlot("intradayChart",[{x:intr.map(x=>x.snapshot_time.slice(0,5)),y:intr.map(x=>x.total_tonnage_kg),type:"scatter",mode:"lines+markers"}],{margin:{t:10,l:50,r:15,b:40}},{displayModeBar:false,responsive:true});
+  <div id="appView" class="app hidden">
+    <aside class="sidebar glass">
+      <div class="brand-block">
+        <div class="brand-logo">TBS</div>
+        <div class="brand-text">
+          <strong>TBS CONTROL TOWER</strong>
+          <small>Simpel Transit NGMP</small>
+        </div>
+      </div>
 
-  if(latest){
-    const {data:d,error:detailError}=await db.from("monitoring_snapshot_details").select("kp_code,tonnage_kg,trip_count").eq("snapshot_id",latest.id);
-    if(detailError){
-      snapshotTable.innerHTML='<div class="msg">Gagal memuat detail KP: '+detailError.message+'</div>';
-      return;
-    }
-    const agg={};
-    (d||[]).forEach(x=>{
-      if(!agg[x.kp_code]) agg[x.kp_code]={tonnage:0,trips:0};
-      agg[x.kp_code].tonnage += Number(x.tonnage_kg||0);
-      agg[x.kp_code].trips += Number(x.trip_count||0);
-    });
-    const kpRows=Object.entries(agg).sort((a,b)=>b[1].tonnage-a[1].tonnage);
+      <nav class="side-nav">
+        <button class="nav active" data-page="dashboard"><span>▦</span><b>Dashboard</b></button>
+        <button class="nav" data-page="monitoring"><span>◉</span><b>Monitoring Harian</b></button>
+        <button class="nav" data-page="prices"><span>Rp</span><b>Harga TBS</b></button>
+        <button class="nav" data-page="expenses"><span>↹</span><b>Pengeluaran</b></button>
+        <button class="nav" data-page="history"><span>▤</span><b>Histori Tahunan</b></button>
+        <button class="nav" data-page="master"><span>⚙</span><b>Master Data</b></button>
+      </nav>
 
-    Plotly.newPlot("topKpChart",[{x:kpRows.slice(0,10).map(x=>x[1].tonnage),y:kpRows.slice(0,10).map(x=>x[0]),type:"bar",orientation:"h"}],{margin:{t:10,l:80,r:15,b:40},yaxis:{autorange:"reversed"}},{displayModeBar:false,responsive:true});
+      <div class="quick-box">
+        <div class="quick-title">QUICK INPUT</div>
+        <button class="quick-btn" onclick="goToPage('monitoring')">Paste Tonase</button>
+        <button class="quick-btn" onclick="goToPage('prices')">Paste Harga TBS</button>
+        <button class="quick-btn" onclick="goToPage('expenses')">Paste Pengeluaran</button>
+      </div>
 
-    const detailRows=kpRows.map(([kp,v])=>[
-      latest.report_date,
-      latest.snapshot_time.slice(0,5),
-      '<strong>'+kp+'</strong>',
-      kg(v.tonnage),
-      v.trips
-    ]);
-    detailRows.push([
-      latest.report_date,
-      latest.snapshot_time.slice(0,5),
-      '<strong>TOTAL</strong>',
-      '<strong>'+kg(latest.total_tonnage_kg)+'</strong>',
-      '<strong>'+latest.total_trips+'</strong>'
-    ]);
-    snapshotTable.innerHTML=table(["Tanggal","Jam","KP","Tonase","Mobil"],detailRows);
-  } else {
-    snapshotTable.innerHTML=table(["Tanggal","Jam","KP","Tonase","Mobil"],[]);
-    Plotly.purge("topKpChart");
-  }
-};
-</script></body></html>
+      <div class="account-box glass-soft">
+        <div class="avatar">OP</div>
+        <div class="account-copy">
+          <strong id="userLabel">operator</strong>
+          <small>Operator</small>
+        </div>
+      </div>
+      <button class="logout-btn" onclick="logout()">Log Out</button>
+    </aside>
+
+    <main class="main">
+      <header class="hero glass">
+        <div>
+          <h1>TBS SUPPLY CONTROL TOWER</h1>
+          <p>Monitoring tonase, harga TBS, pengeluaran dan histori secara real-time</p>
+        </div>
+        <div class="hero-meta">
+          <div class="live-chip"><i></i> LIVE</div>
+          <div class="meta-item">📅 <span id="liveDate">-</span></div>
+          <div class="meta-item">🕒 <span id="liveClock">-</span> WIB</div>
+        </div>
+      </header>
+
+      <section id="page-dashboard" class="page active">
+        <div class="kpi-row">
+          <article class="kpi glass">
+            <div class="kpi-title">TONASE HARI INI</div>
+            <div class="kpi-value" id="kpiTonase">0 kg</div>
+            <div class="kpi-sub" id="kpiTonaseSub">Total tonase hingga -</div>
+            <div class="spark green"></div>
+          </article>
+          <article class="kpi glass">
+            <div class="kpi-title">TOTAL TRIP</div>
+            <div class="kpi-value" id="kpiTrips">0</div>
+            <div class="kpi-sub">Jumlah trip kendaraan</div>
+            <div class="spark blue"></div>
+          </article>
+          <article class="kpi glass">
+            <div class="kpi-title">KP AKTIF</div>
+            <div class="kpi-value" id="kpiActiveKP">0 / 0</div>
+            <div class="kpi-sub">KP berkontribusi hari ini</div>
+            <div class="spark gold"></div>
+          </article>
+          <article class="kpi glass">
+            <div class="kpi-title">HARGA RATA-RATA</div>
+            <div class="kpi-value" id="kpiAvgPrice">Rp0 /kg</div>
+            <div class="kpi-sub" id="kpiPriceSub">Weighted Average Price</div>
+            <div class="spark purple"></div>
+          </article>
+          <article class="kpi glass">
+            <div class="kpi-title">PENGELUARAN HARI INI</div>
+            <div class="kpi-value" id="kpiExpense">Rp0</div>
+            <div class="kpi-sub" id="kpiExpenseSub">Total pengeluaran</div>
+            <div class="spark red"></div>
+          </article>
+        </div>
+
+        <div class="grid-main">
+          <article class="panel glass">
+            <div class="panel-head">
+              <h3>INTRADAY PROGRESS (TONASE)</h3>
+            </div>
+            <div id="intradayChart" class="chart chart-lg"></div>
+            <div class="intraday-footer">
+              <div class="intraday-item">
+                <small>SNAPSHOT SELESAI</small>
+                <strong id="snapshotFinished">-</strong>
+              </div>
+              <div class="intraday-item">
+                <small>PROGRESS HARI INI</small>
+                <strong id="snapshotProgress">0 / 4</strong>
+              </div>
+              <div class="intraday-item">
+                <small>KEMAJUAN TERHADAP SEBELUMNYA</small>
+                <strong id="intradayDelta">Belum ada data sebelumnya</strong>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel glass">
+            <div class="panel-head"><h3>TOP 8 KP SNAPSHOT (TONASE)</h3></div>
+            <div id="topKpChart" class="chart chart-lg"></div>
+          </article>
+
+          <article class="panel glass">
+            <div class="panel-head"><h3>PENGELUARAN HARI INI</h3></div>
+            <div class="split">
+              <div id="expenseDonut" class="chart chart-md"></div>
+              <div id="expenseLegend" class="expense-legend"></div>
+            </div>
+            <button class="ghost-link" onclick="goToPage('expenses')">Lihat Detail Pengeluaran →</button>
+          </article>
+        </div>
+
+        <div class="grid-secondary">
+          <article class="panel glass">
+            <div class="panel-head"><h3>SNAPSHOT STATUS HARI INI</h3></div>
+            <div id="snapshotStatus" class="status-grid"></div>
+          </article>
+
+          <article class="panel glass">
+            <div class="panel-head"><h3>HARGA TBS HARI INI (Rp/kg)</h3></div>
+            <div class="price-cards">
+              <div class="mini-kpi">
+                <small>HARGA TERENDAH</small>
+                <strong id="priceMin">Rp0</strong>
+                <span id="priceMinDelta">-</span>
+              </div>
+              <div class="mini-kpi">
+                <small>HARGA RATA-RATA</small>
+                <strong id="priceAvg2">Rp0</strong>
+                <span id="priceAvgDelta">-</span>
+              </div>
+              <div class="mini-kpi">
+                <small>HARGA TERTINGGI</small>
+                <strong id="priceMax">Rp0</strong>
+                <span id="priceMaxDelta">-</span>
+              </div>
+              <div class="mini-kpi status-kpi">
+                <small>STATUS</small>
+                <strong id="priceStatus">Aktif</strong>
+                <span id="priceActiveCount">0 supplier</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel glass">
+            <div class="panel-head"><h3>PRICE WATCH (TREND 7 HARI)</h3></div>
+            <div id="priceTrendChart" class="chart chart-sm"></div>
+          </article>
+        </div>
+
+        <article class="panel glass">
+          <div class="panel-head row-space">
+            <h3 id="controlTitle">CONTROL TABLE - SNAPSHOT TERAKHIR</h3>
+            <button class="ghost-link" onclick="goToPage('monitoring')">Lihat Semua KP →</button>
+          </div>
+          <div id="controlTable" class="table-wrap"></div>
+        </article>
+      </section>
+
+      <section id="page-monitoring" class="page">
+        <div class="page-head glass">
+          <h2>Monitoring Harian</h2>
+          <p>Paste laporan tonase dari WhatsApp, lalu preview sebelum disimpan.</p>
+        </div>
+        <div class="two-col">
+          <article class="panel glass">
+            <h3>Paste Tonase</h3>
+            <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
+            <div class="actions">
+              <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
+              <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
+            </div>
+            <pre id="tonnagePreview" class="preview"></pre>
+          </article>
+          <article class="panel glass">
+            <h3>Snapshot Terbaru per KP</h3>
+            <div id="snapshotTable" class="table-wrap"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="page-prices" class="page">
+        <div class="page-head glass">
+          <h2>Harga TBS</h2>
+          <p>Paste informasi harga dari WhatsApp, sistem akan menyimpan tanggal efektif terbaru.</p>
+        </div>
+        <div class="two-col">
+          <article class="panel glass">
+            <h3>Paste Harga TBS</h3>
+            <textarea id="priceText" placeholder="Paste update harga WhatsApp di sini..."></textarea>
+            <div class="actions">
+              <button class="btn btn-primary" onclick="previewPrice()">Preview</button>
+              <button class="btn btn-secondary" onclick="savePrice()">Simpan Harga</button>
+            </div>
+            <pre id="pricePreview" class="preview"></pre>
+          </article>
+          <article class="panel glass">
+            <h3>Harga Aktif</h3>
+            <div id="priceTable" class="table-wrap"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="page-expenses" class="page">
+        <div class="page-head glass">
+          <h2>Pengeluaran</h2>
+          <p>Paste laporan biaya operasional dari WhatsApp untuk direkap otomatis per unit.</p>
+        </div>
+        <div class="two-col">
+          <article class="panel glass">
+            <h3>Paste Pengeluaran</h3>
+            <select id="expenseKp"><option value="">Pilih KP jika tidak terdeteksi otomatis</option></select>
+            <textarea id="expenseText" placeholder="Paste laporan biaya WhatsApp di sini..."></textarea>
+            <div class="actions">
+              <button class="btn btn-primary" onclick="previewExpense()">Preview</button>
+              <button class="btn btn-secondary" onclick="saveExpense()">Simpan Pengeluaran</button>
+            </div>
+            <pre id="expensePreview" class="preview"></pre>
+          </article>
+          <article class="panel glass">
+            <h3>Rekap Pengeluaran</h3>
+            <div id="expenseTable" class="table-wrap"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="page-history" class="page">
+        <div class="page-head glass row-space">
+          <div>
+            <h2>Histori Tahunan</h2>
+            <p>Analisis histori tonase per tahun, bulan, dan KP.</p>
+          </div>
+          <div class="filters">
+            <select id="historyYear" onchange="loadHistory()"></select>
+            <select id="historyKp" onchange="loadHistory()">
+              <option value="ALL">Semua KP</option>
+            </select>
+          </div>
+        </div>
+        <div class="two-col">
+          <article class="panel glass">
+            <h3>Tren Bulanan</h3>
+            <div id="historyChart" class="chart chart-lg"></div>
+          </article>
+          <article class="panel glass">
+            <h3>Top KP Histori</h3>
+            <div id="historyTopChart" class="chart chart-lg"></div>
+          </article>
+        </div>
+        <article class="panel glass">
+          <div id="historyTable" class="table-wrap"></div>
+        </article>
+      </section>
+
+      <section id="page-master" class="page">
+        <div class="page-head glass">
+          <h2>Master Data</h2>
+          <p>Daftar KP dan supplier yang aktif di sistem.</p>
+        </div>
+        <article class="panel glass">
+          <div id="masterTable" class="table-wrap"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
