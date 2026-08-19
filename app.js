@@ -19,9 +19,13 @@ const slots = ["10:00","12:00","15:00","17:00"];
 let MASTER_KP_COUNT = 0;
 let TONNAGE_PREVIEW = null, PRICE_PREVIEW = null, EXPENSE_PREVIEW = null;
 let MONITOR_MODE = "daily";
-let DASHBOARD_KP = "ALL";
-let DASHBOARD_CONTROL_ROWS = [];
-let DASHBOARD_LATEST_DATE = null;
+
+const FALLBACK_KP_CODES = [
+  "ASMJ-1","ASMJ-2","BMK","BSN","BSS","FAA","GSL","GSL-INUMAN",
+  "GSS","HKBS","KIP","KS2","KWP","LPI","LSHP","MAN","MSB-2","PSM",
+  "SISL","SKA","SSL","SSM","TKWL-1","TKWL-2"
+];
+
 
 const plotConfig = {displayModeBar:false, responsive:true};
 const darkLayout = {
@@ -225,21 +229,52 @@ async function saveExpense(){
 }
 
 async function loadMaster(){
-  const {data:kps}=await db.from("master_kp").select("code").eq("active",true).order("code");
-  MASTER_KP_COUNT=(kps||[]).length;
-  $("expenseKp").innerHTML='<option value="">Pilih KP jika tidak terdeteksi otomatis</option>' + (kps||[]).map(x=>`<option>${x.code}</option>`).join("");
-  $("historyKp").innerHTML='<option value="ALL">Semua KP</option>' + (kps||[]).map(x=>`<option>${x.code}</option>`).join("");
-  if($("monitorKp")) $("monitorKp").innerHTML='<option value="ALL">Semua KP</option>' + (kps||[]).map(x=>`<option>${x.code}</option>`).join("");
+  const {data:kps,error:kpError}=await db.from("master_kp")
+    .select("code")
+    .eq("active",true)
+    .order("code");
+
+  // Supabase adalah sumber utama. Fallback hanya menjaga UI agar dropdown
+  // tidak pernah terlihat kosong jika koneksi/policy/load master bermasalah.
+  const codes = (!kpError && kps?.length)
+    ? kps.map(x=>x.code).filter(Boolean)
+    : [...FALLBACK_KP_CODES];
+
+  MASTER_KP_COUNT=codes.length;
+
+  const optionsAll='<option value="ALL">Semua KP</option>' +
+    codes.map(code=>`<option value="${code}">${code}</option>`).join("");
+
+  const optionsExpense='<option value="">Pilih KP jika tidak terdeteksi otomatis</option>' +
+    codes.map(code=>`<option value="${code}">${code}</option>`).join("");
+
+  if($("expenseKp")) $("expenseKp").innerHTML=optionsExpense;
+  if($("historyKp")) $("historyKp").innerHTML=optionsAll;
+  if($("monitorKp")) $("monitorKp").innerHTML=optionsAll;
+
   if($("dashboardTrendKp")){
-    $("dashboardTrendKp").innerHTML='<option value="ALL">Semua KP</option>' + (kps||[]).map(x=>`<option>${x.code}</option>`).join("");
+    $("dashboardTrendKp").innerHTML=optionsAll;
     const savedKP=localStorage.getItem("tbs_dashboard_kp") || "ALL";
-    const validKP=savedKP==="ALL" || (kps||[]).some(x=>x.code===savedKP);
+    const validKP=savedKP==="ALL" || codes.includes(savedKP);
     DASHBOARD_KP=validKP?savedKP:"ALL";
     $("dashboardTrendKp").value=DASHBOARD_KP;
   }
+
+  if(kpError){
+    console.warn("Master KP Supabase gagal dimuat; memakai fallback UI.", kpError);
+  }
+
   await initKPMonitoringFilters();
-  const {data:s}=await db.from("master_supplier").select("name,master_kp(code)").order("name");
-  $("masterTable").innerHTML=table(["KP","Supplier"], (s||[]).map(x=>[x.master_kp?.code || "", x.name]));
+
+  const {data:s,error:supplierError}=await db.from("master_supplier")
+    .select("name,master_kp(code)")
+    .order("name");
+
+  if($("masterTable")){
+    $("masterTable").innerHTML = supplierError
+      ? table(["KP","Supplier"], [["-","Master supplier belum dapat dimuat"]])
+      : table(["KP","Supplier"], (s||[]).map(x=>[x.master_kp?.code || "", x.name]));
+  }
 }
 
 async function getLatestEffectivePrices(date){
@@ -252,318 +287,105 @@ async function getLatestEffectivePrices(date){
   return Object.values(latest);
 }
 
-function dashboardSelectedKP(){
-  return $("dashboardTrendKp")?.value || DASHBOARD_KP || "ALL";
-}
-async function setDashboardGlobalKP(kp){
-  DASHBOARD_KP=kp || "ALL";
-  localStorage.setItem("tbs_dashboard_kp",DASHBOARD_KP);
-  if($("dashboardTrendKp")) $("dashboardTrendKp").value=DASHBOARD_KP;
-  await loadDashboard();
-}
+
+
 async function openDashboardDetail(page,mode=null){
-  const kp=dashboardSelectedKP();
-  if(page==="monitoring" && $("monitorKp")) $("monitorKp").value=kp;
+  if(page==="monitoring" && $("monitorKp") && !$("monitorKp").value) $("monitorKp").value="ALL";
   await goToPage(page);
   if(page==="monitoring" && mode) setMonitorMode(mode);
 }
-function bindDashboardPlotClicks(latestDate){
-  const intraday=$("intradayChart");
-  if(intraday?.on){
-    intraday.removeAllListeners?.("plotly_click");
-    intraday.on("plotly_click", async ev=>{
-      const kp=dashboardSelectedKP();
-      if($("monitorKp")) $("monitorKp").value=kp;
-      if($("monitorDate")) $("monitorDate").value=latestDate;
-      await goToPage("monitoring");
-      setMonitorMode("daily");
-    });
-  }
-  const top=$("topKpChart");
-  if(top?.on){
-    top.removeAllListeners?.("plotly_click");
-    top.on("plotly_click", async ev=>{
-      const selected=dashboardSelectedKP();
-      if(selected==="ALL"){
-        const kp=ev?.points?.[0]?.y;
-        if(kp) await setDashboardGlobalKP(kp);
-      }else{
-        if($("monitorKp")) $("monitorKp").value=selected;
-        await goToPage("monitoring");
-        setMonitorMode("daily");
-      }
-    });
-  }
-  const pchart=$("priceTrendChart");
-  if(pchart?.on){
-    pchart.removeAllListeners?.("plotly_click");
-    pchart.on("plotly_click",()=>openDashboardDetail("prices"));
-  }
-  const edonut=$("expenseDonut");
-  if(edonut?.on){
-    edonut.removeAllListeners?.("plotly_click");
-    edonut.on("plotly_click",()=>openDashboardDetail("expenses"));
-  }
-}
-function updateDashboardContext(kp,date){
-  const label=kp==="ALL"?"Semua KP":kp;
-  if($("dashboardContextText")) $("dashboardContextText").textContent=`${label} • Snapshot ${date || "-"}`;
-  if($("dashboardResetFilter")) $("dashboardResetFilter").classList.toggle("hidden",kp==="ALL");
-  if($("intradayPanelTitle")) $("intradayPanelTitle").textContent=`INTRADAY PROGRESS • ${label}`;
-  if($("snapshotPanelTitle")) $("snapshotPanelTitle").textContent=`SNAPSHOT STATUS • ${label}`;
-  if($("pricePanelTitle")) $("pricePanelTitle").textContent=`HARGA TBS • ${label}`;
-  if($("priceWatchTitle")) $("priceWatchTitle").textContent=`PRICE WATCH 7 HARI • ${label}`;
-  if($("expensePanelTitle")) $("expensePanelTitle").textContent=`PENGELUARAN • ${label}`;
-}
-function renderDashboardInsights(ctx){
-  const {
-    kp,totalAll,totalSelected,trips,activeKPCount,totalKP,
-    delta,pct,latestTime,activePriceCount,priceCoveragePct,
-    expenseTotal,costKg,leaderKP,leaderSupplier
-  }=ctx;
-  const items=[];
 
-  if(delta!=null){
-    const positive=delta>=0;
-    items.push({
-      type:positive?"positive":"attention",
-      label:positive?"Positive":"Attention",
-      text:`Tonase snapshot ${latestTime} ${positive?"naik":"turun"} ${Math.abs(pct||0).toFixed(1)}% (${positive?"+":""}${compactKg(delta)} kg) dibanding snapshot sebelumnya.`,
-      sub:"Klik untuk melihat perkembangan intraday.",
-      action:"monitoring"
-    });
-  }else{
-    items.push({
-      type:"opportunity",label:"Monitoring",
-      text:"Baru satu snapshot tersedia. Tren intraday akan semakin jelas setelah snapshot berikutnya masuk.",
-      sub:"Menunggu pembanding snapshot.",
-      action:"monitoring"
-    });
-  }
 
-  if(kp==="ALL"){
-    const inactive=Math.max(0,totalKP-activeKPCount);
-    items.push({
-      type:inactive>0?"attention":"positive",
-      label:inactive>0?"Attention":"Positive",
-      text:inactive>0
-        ? `${inactive} dari ${totalKP} KP belum berkontribusi pada snapshot terakhir. ${leaderKP?`${leaderKP} menjadi kontributor tertinggi.`:""}`
-        : `Seluruh ${totalKP} KP sudah berkontribusi pada snapshot terakhir.`,
-      sub:"Klik bar Top KP untuk memfilter dashboard.",
-      action:"monitoring"
-    });
-  }else{
-    const share=totalAll?totalSelected/totalAll*100:0;
-    items.push({
-      type:share>0?"positive":"attention",
-      label:"KP Insight",
-      text:`${kp} menyumbang ${share.toFixed(1)}% dari total tonase snapshot perusahaan.${leaderSupplier?` Supplier terbesar: ${leaderSupplier}.`:""}`,
-      sub:`${trips.toLocaleString("id-ID")} trip pada snapshot terakhir.`,
-      action:"monitoring"
-    });
-  }
 
-  if(activePriceCount===0){
-    items.push({
-      type:"attention",label:"Price Coverage",
-      text:`Belum ada harga aktif yang cocok untuk ${kp==="ALL"?"supplier pada dashboard":"KP "+kp}.`,
-      sub:"Periksa input harga atau kecocokan nama supplier.",
-      action:"prices"
-    });
-  }else{
-    items.push({
-      type:priceCoveragePct<70?"opportunity":"positive",
-      label:priceCoveragePct<70?"Opportunity":"Price Coverage",
-      text:`Cakupan harga terhadap tonase yang memiliki pasangan harga sekitar ${priceCoveragePct.toFixed(0)}%. Pengeluaran periode ini ${rupiah(expenseTotal)}${costKg>0?` dengan cost/kg ${rupiah(costKg)}`:""}.`,
-      sub:"Klik untuk melihat detail harga.",
-      action:"prices"
-    });
-  }
 
-  $("dashboardInsights").innerHTML=items.slice(0,3).map(x=>`
-    <div class="insight-item ${x.type}" onclick="openDashboardDetail('${x.action}','${x.action==="monitoring"?"daily":""}')">
-      <div class="insight-label"><span>●</span>${x.label}</div>
-      <p>${x.text}</p>
-      <small>${x.sub}</small>
-    </div>`).join("");
-  $("insightContext").textContent=`${kp==="ALL"?"Semua KP":kp} • ${DASHBOARD_LATEST_DATE || "-"}`;
-}
-function applyControlTableView(){
-  const search=($("controlSearch")?.value || "").trim().toLowerCase();
-  const sort=$("controlSort")?.value || "tonnage_desc";
-  let rows=[...DASHBOARD_CONTROL_ROWS];
-  if(search){
-    rows=rows.filter(r=>`${r.kp} ${r.supplier}`.toLowerCase().includes(search));
-  }
-  if(sort==="tonnage_desc") rows.sort((a,b)=>b.tonnage-a.tonnage);
-  if(sort==="trip_desc") rows.sort((a,b)=>b.trips-a.trips);
-  if(sort==="cost_desc") rows.sort((a,b)=>b.costkg-a.costkg);
-  if(sort==="kp_asc") rows.sort((a,b)=>a.kp.localeCompare(b.kp)||b.tonnage-a.tonnage);
-
-  $("controlTable").innerHTML=`<table>
-    <thead><tr>
-      <th>NO</th><th>KP</th><th>SUPPLIER</th><th>TONASE (KG)</th><th>TRIP</th>
-      <th>HARGA (RP/KG)</th><th>NILAI TBS (RP)</th><th>PENGELUARAN KP (RP)</th><th>COST/KG KP (RP)</th>
-    </tr></thead>
-    <tbody>${rows.map((r,i)=>`
-      <tr onclick="setDashboardGlobalKP('${r.kp}')" title="Klik untuk memfilter dashboard ke ${r.kp}">
-        <td>${i+1}</td>
-        <td><span class="control-filtered-kp">${r.kp}</span></td>
-        <td>${r.supplier}</td>
-        <td>${r.tonnage.toLocaleString("id-ID")}</td>
-        <td>${r.trips.toLocaleString("id-ID")}</td>
-        <td>${r.price?r.price.toLocaleString("id-ID"):"-"}</td>
-        <td>${r.value?r.value.toLocaleString("id-ID"):"-"}</td>
-        <td>${r.expense?r.expense.toLocaleString("id-ID"):"-"}</td>
-        <td>${r.costkg?r.costkg.toLocaleString("id-ID",{minimumFractionDigits:2,maximumFractionDigits:2}):"-"}</td>
-      </tr>`).join("")}</tbody>
-    </table>`;
-}
 
 async function loadDashboard(){
-  const kp=dashboardSelectedKP();
-  DASHBOARD_KP=kp;
-
-  const {data:s} = await db.from("monitoring_snapshots")
-    .select("*")
-    .order("report_date",{ascending:false})
-    .order("snapshot_time",{ascending:false})
-    .limit(80);
-
+  const {data:s} = await db.from("monitoring_snapshots").select("*").order("report_date",{ascending:false}).order("snapshot_time",{ascending:false}).limit(50);
   const latest=s?.[0];
-  const todayDate=latest?.report_date || localISODate();
-  DASHBOARD_LATEST_DATE=todayDate;
-  updateDashboardContext(kp,todayDate);
+  const todayDate = latest?.report_date || new Date().toISOString().slice(0,10);
 
-  // -------- Latest detail and operational view --------
-  let detailRows=[];
-  let byKP={};
-  let kpPairs=[];
-  let selectedRows=[];
-  let selectedTonnage=0;
-  let selectedTrips=0;
-  let latestAllTonnage=Number(latest?.total_tonnage_kg||0);
-  let latestAllTrips=Number(latest?.total_trips||0);
+  // Prices
+  const latestPrices = await getLatestEffectivePrices(todayDate);
+  const activePrices = latestPrices.filter(x=>x.status==="active" && x.price_per_kg != null);
+  const pricesOnly = activePrices.map(x=>Number(x.price_per_kg));
+  const avgPrice = pricesOnly.length ? pricesOnly.reduce((a,b)=>a+b,0)/pricesOnly.length : 0;
+  const minPrice = pricesOnly.length ? Math.min(...pricesOnly) : 0;
+  const maxPrice = pricesOnly.length ? Math.max(...pricesOnly) : 0;
 
-  if(latest){
-    const {data:d}=await db.from("monitoring_snapshot_details")
-      .select("kp_code,supplier_name,tonnage_kg,trip_count")
-      .eq("snapshot_id",latest.id);
-    detailRows=d||[];
-    detailRows.forEach(r=>{
-      if(!byKP[r.kp_code]) byKP[r.kp_code]={tonnage:0,trips:0};
-      byKP[r.kp_code].tonnage+=Number(r.tonnage_kg||0);
-      byKP[r.kp_code].trips+=Number(r.trip_count||0);
-    });
-    kpPairs=Object.entries(byKP).sort((a,b)=>b[1].tonnage-a[1].tonnage);
-    selectedRows=kp==="ALL"?detailRows:detailRows.filter(r=>r.kp_code===kp);
-    selectedTonnage=kp==="ALL"?latestAllTonnage:selectedRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
-    selectedTrips=kp==="ALL"?latestAllTrips:selectedRows.reduce((a,r)=>a+Number(r.trip_count||0),0);
-  }
+  $("kpiAvgPrice").textContent = rupiah(avgPrice) + " /kg";
+  $("kpiPriceSub").textContent = activePrices.length + " supplier aktif";
+  $("priceMin").textContent = rupiah(minPrice);
+  $("priceAvg2").textContent = rupiah(avgPrice);
+  $("priceMax").textContent = rupiah(maxPrice);
+  $("priceStatus").textContent = activePrices.length ? "Aktif" : "Belum Ada";
+  $("priceActiveCount").textContent = activePrices.length + " supplier";
+  $("priceMinDelta").textContent = pricesOnly.length ? "Harga minimum aktif" : "-";
+  $("priceAvgDelta").textContent = pricesOnly.length ? "Rata-rata tertimbang" : "-";
+  $("priceMaxDelta").textContent = pricesOnly.length ? "Harga maksimum aktif" : "-";
 
-  // -------- Prices, filtered by global KP --------
-  const allLatestPrices=await getLatestEffectivePrices(todayDate);
-  const latestPrices=kp==="ALL"?allLatestPrices:allLatestPrices.filter(x=>x.kp_code===kp);
-  const activePrices=latestPrices.filter(x=>x.status==="active" && x.price_per_kg!=null);
-  const priceMap={};
-  allLatestPrices.forEach(x=>priceMap[x.kp_code+"|"+x.supplier_name]=x);
-
-  const pricesOnly=activePrices.map(x=>Number(x.price_per_kg));
-  const minPrice=pricesOnly.length?Math.min(...pricesOnly):0;
-  const maxPrice=pricesOnly.length?Math.max(...pricesOnly):0;
-
-  let weightedValue=0,weightedKg=0;
-  selectedRows.forEach(r=>{
-    const p=priceMap[r.kp_code+"|"+r.supplier_name];
-    if(p?.status==="active" && p.price_per_kg!=null){
-      const t=Number(r.tonnage_kg||0);
-      weightedKg+=t;
-      weightedValue+=t*Number(p.price_per_kg);
-    }
-  });
-  const simpleAvg=pricesOnly.length?pricesOnly.reduce((a,b)=>a+b,0)/pricesOnly.length:0;
-  const avgPrice=weightedKg?weightedValue/weightedKg:simpleAvg;
-  const priceCoveragePct=selectedTonnage?weightedKg/selectedTonnage*100:0;
-
-  $("kpiAvgPrice").textContent=rupiah(avgPrice)+" /kg";
-  $("kpiPriceSub").textContent=activePrices.length
-    ? `${activePrices.length} supplier aktif • coverage ${priceCoveragePct.toFixed(0)}%`
-    : "Belum ada harga aktif";
-  $("priceMin").textContent=rupiah(minPrice);
-  $("priceAvg2").textContent=rupiah(avgPrice);
-  $("priceMax").textContent=rupiah(maxPrice);
-  $("priceStatus").textContent=activePrices.length?"Aktif":"Belum Ada";
-  $("priceActiveCount").textContent=activePrices.length+" supplier";
-  $("priceMinDelta").textContent=pricesOnly.length?"Harga minimum aktif":"-";
-  $("priceAvgDelta").textContent=weightedKg?"Weighted by tonnage":"Simple average";
-  $("priceMaxDelta").textContent=pricesOnly.length?"Harga maksimum aktif":"-";
-
-  // -------- Price watch 7 dates, filtered by KP --------
-  let pq=db.from("daily_prices").select("effective_date,kp_code,price_per_kg,status");
-  if(kp!=="ALL") pq=pq.eq("kp_code",kp);
-  const {data:priceRows}=await pq;
+  // Price trend 7 days
+  const {data:priceRows} = await db.from("daily_prices").select("effective_date,price_per_kg,status");
   const trendMap={};
   (priceRows||[]).forEach(x=>{
     if(x.status!=="active" || x.price_per_kg==null) return;
     if(!trendMap[x.effective_date]) trendMap[x.effective_date]=[];
     trendMap[x.effective_date].push(Number(x.price_per_kg));
   });
-  const trendDays=Object.keys(trendMap).sort().slice(-7);
-  const trendVals=trendDays.map(d=>trendMap[d].reduce((a,b)=>a+b,0)/trendMap[d].length);
-  if(trendDays.length){
-    Plotly.newPlot("priceTrendChart",[{
-      x:trendDays.map(d=>d.slice(8,10)+"/"+d.slice(5,7)),
-      y:trendVals,type:"scatter",mode:"lines+markers",
-      line:{width:3,color:"#49de5f",shape:"spline"},
-      marker:{size:8,color:"#62ff74"},
-      fill:"tozeroy",fillcolor:"rgba(73,222,95,.08)",
-      hovertemplate:"<b>%{x}</b><br>Rp%{y:,.0f}/kg<extra></extra>"
-    }],{
-      ...darkLayout,margin:{t:10,l:52,r:14,b:30},
-      yaxis:{...darkLayout.yaxis,fixedrange:true},
-      xaxis:{...darkLayout.xaxis,fixedrange:true}
-    },plotConfig);
-  }else{
-    Plotly.purge("priceTrendChart");
-    $("priceTrendChart").innerHTML="<div style='padding:35px 10px;text-align:center;color:#9f9588'>Belum ada histori harga.</div>";
-  }
+  const trendDays = Object.keys(trendMap).sort().slice(-7);
+  const trendVals = trendDays.map(d=>trendMap[d].reduce((a,b)=>a+b,0)/trendMap[d].length);
+  Plotly.newPlot("priceTrendChart", [{
+    x:trendDays.map(d=>d.slice(8,10)+"/"+d.slice(5,7)),
+    y:trendVals,
+    type:"scatter", mode:"lines+markers",
+    line:{width:3,color:"#49de5f",shape:"spline"},
+    marker:{size:9,color:"#62ff74"},
+    fill:"tozeroy", fillcolor:"rgba(73,222,95,.08)",
+    hovertemplate:"<b>%{x}</b><br>Rp%{y:,.0f}/kg<extra></extra>"
+  }], {
+    ...darkLayout,
+    margin:{t:10,l:52,r:14,b:30},
+    yaxis:{...darkLayout.yaxis, fixedrange:true},
+    xaxis:{...darkLayout.xaxis, fixedrange:true}
+  }, plotConfig);
 
-  // -------- Expenses aligned to dashboard snapshot date --------
-  let eq=db.from("unit_expenses").select("*").eq("expense_date",todayDate);
-  if(kp!=="ALL") eq=eq.eq("kp_code",kp);
-  const {data:expRows}=await eq;
-  const dailyExpenses=expRows||[];
-  const dailyExpenseTotal=dailyExpenses.reduce((a,b)=>a+Number(b.amount||0),0);
-  $("kpiExpense").textContent=rupiah(dailyExpenseTotal);
-  $("kpiExpenseSub").textContent=dailyExpenseTotal?`Pengeluaran ${todayDate}`:"Belum ada pengeluaran pada tanggal snapshot";
+  // Expenses
+  const {data:expRows} = await db.from("unit_expenses").select("*").eq("expense_date",todayDate);
+  const dailyExpenses = expRows || [];
+  const dailyExpenseTotal = dailyExpenses.reduce((a,b)=>a+Number(b.amount||0),0);
+  $("kpiExpense").textContent = rupiah(dailyExpenseTotal);
+  $("kpiExpenseSub").textContent = dailyExpenseTotal ? "Total pengeluaran " + todayDate : "Belum ada pengeluaran pada tanggal snapshot";
 
   const expCat={};
-  dailyExpenses.forEach(x=>{
-    const k=x.category||"Lainnya";
-    expCat[k]=(expCat[k]||0)+Number(x.amount||0);
-  });
-  const expLabels=Object.keys(expCat);
-  const expValues=Object.values(expCat);
-  const expColors=["#3b95ff","#45d367","#f0b325","#c9984f","#ff6a5c","#b36bff"];
+  dailyExpenses.forEach(x=>{ const k=x.category || "Lainnya"; expCat[k]=(expCat[k]||0)+Number(x.amount||0); });
+  const expLabels = Object.keys(expCat);
+  const expValues = Object.values(expCat);
+  const expColors = ["#3b95ff","#45d367","#f0b325","#c9984f","#ff6a5c","#b36bff"];
   if(expValues.length){
-    Plotly.newPlot("expenseDonut",[{
-      labels:expLabels,values:expValues,type:"pie",hole:.62,
-      marker:{colors:expLabels.map((_,i)=>expColors[i%expColors.length])},
+    Plotly.newPlot("expenseDonut", [{
+      labels:expLabels, values:expValues, type:"pie", hole:.62,
+      marker:{colors:expLabels.map((_,i)=>expColors[i % expColors.length])},
       textinfo:"none",
       hovertemplate:"<b>%{label}</b><br>Rp%{value:,.0f}<extra></extra>"
-    }],{
-      paper_bgcolor:"rgba(0,0,0,0)",plot_bgcolor:"rgba(0,0,0,0)",
-      margin:{t:0,l:0,r:0,b:0},showlegend:false,
-      annotations:[{text:`<b>${rupiah(dailyExpenseTotal)}</b>`,showarrow:false,font:{size:14,color:"#fff"},x:.5,y:.52}]
-    },plotConfig);
-    $("expenseLegend").innerHTML=expLabels.map((label,i)=>{
-      const val=expCat[label],pct=dailyExpenseTotal?val/dailyExpenseTotal*100:0;
-      return `<div class="legend-row"><div class="dot" style="background:${expColors[i%expColors.length]}"></div><div><small>${label}</small><b>${rupiah(val)}</b></div><span>${pct.toFixed(1)}%</span></div>`;
+    }], {
+      paper_bgcolor:"rgba(0,0,0,0)",
+      plot_bgcolor:"rgba(0,0,0,0)",
+      margin:{t:0,l:0,r:0,b:0},
+      showlegend:false,
+      annotations:[{
+        text:`<b>${rupiah(dailyExpenseTotal).replace("Rp","Rp")}<\/b>`,
+        showarrow:false,font:{size:16,color:"#fff"},x:0.5,y:0.52
+      },{
+        text:"Juta", showarrow:false, font:{size:12,color:"#ddd0c1"}, x:0.5, y:0.40
+      }]
+    }, plotConfig);
+    $("expenseLegend").innerHTML = expLabels.map((label,i)=>{
+      const val = expCat[label];
+      const pct = dailyExpenseTotal ? ((val/dailyExpenseTotal)*100).toFixed(1) : "0.0";
+      return `<div class="legend-row"><div class="dot" style="background:${expColors[i%expColors.length]}"></div><div><small>${label}</small><b>${rupiah(val)}</b></div><span>${pct}%</span></div>`;
     }).join("");
-  }else{
-    Plotly.purge("expenseDonut");
-    $("expenseDonut").innerHTML="<div style='padding:40px 8px;text-align:center;color:#9f9588'>Belum ada pengeluaran.</div>";
-    $("expenseLegend").innerHTML="";
+  } else {
+    $("expenseDonut").innerHTML = "<div style='padding:40px;color:#ddd0c1'>Belum ada pengeluaran.</div>";
+    $("expenseLegend").innerHTML = "";
   }
 
   if(!latest){
@@ -571,171 +393,152 @@ async function loadDashboard(){
     $("kpiTonaseSub").textContent="Belum ada snapshot";
     $("kpiTrips").textContent="0";
     $("kpiActiveKP").textContent=`0 / ${MASTER_KP_COUNT}`;
-    $("kpiActiveKPTitle").textContent="KP AKTIF";
-    $("kpiActiveKPSub").textContent="Belum ada snapshot";
-    renderStatusBoxes([],null,kp);
-    DASHBOARD_CONTROL_ROWS=[];
-    applyControlTableView();
-    renderDashboardInsights({
-      kp,totalAll:0,totalSelected:0,trips:0,activeKPCount:0,totalKP:MASTER_KP_COUNT,
-      delta:null,pct:0,latestTime:"-",activePriceCount:activePrices.length,priceCoveragePct,
-      expenseTotal:dailyExpenseTotal,costKg:0,leaderKP:null,leaderSupplier:null
-    });
-    await loadDashboardTrendIndicators(todayDate);
+    renderStatusBoxes([]);
+    $("controlTable").innerHTML = table(["NO","KP","SUPPLIER","TONASE (KG)","TRIP","HARGA (RP/KG)","NILAI TBS (RP)","PENGELUARAN (RP)","COST/KG"], []);
     return;
   }
 
-  // -------- Main KPI cards --------
-  $("kpiTonase").textContent=kg(selectedTonnage);
-  $("kpiTonaseSub").textContent=`${kp==="ALL"?"Total":"KP "+kp} hingga ${latest.snapshot_time.slice(0,5)}`;
-  $("kpiTrips").textContent=selectedTrips.toLocaleString("id-ID");
-  if(kp==="ALL"){
-    $("kpiActiveKPTitle").textContent="KP AKTIF";
-    $("kpiActiveKP").textContent=kpPairs.length+" / "+MASTER_KP_COUNT;
-    $("kpiActiveKPSub").textContent="KP berkontribusi snapshot terakhir";
-  }else{
-    $("kpiActiveKPTitle").textContent="STATUS KP";
-    $("kpiActiveKP").textContent=selectedTonnage>0?"AKTIF":"BELUM AKTIF";
-    $("kpiActiveKPSub").textContent=`${kp} • ${selectedRows.filter(r=>Number(r.tonnage_kg||0)>0).length} supplier berkontribusi`;
+  $("kpiTonase").textContent = kg(latest.total_tonnage_kg);
+  $("kpiTonaseSub").textContent = "Total tonase hingga " + latest.snapshot_time.slice(0,5);
+  $("kpiTrips").textContent = latest.total_trips;
+
+  const daySnapshots = (s||[]).filter(x=>x.report_date===latest.report_date).sort((a,b)=>a.snapshot_time.localeCompare(b.snapshot_time));
+  const slotMap = {};
+  daySnapshots.forEach(x=>slotMap[x.snapshot_time.slice(0,5)] = Number(x.total_tonnage_kg));
+  const y = slots.map(slot=>slotMap[slot] ?? null);
+
+  const doneCount = daySnapshots.length;
+  $("snapshotFinished").textContent = latest.snapshot_time.slice(0,5) + " WIB";
+  $("snapshotProgress").textContent = doneCount + " / 4";
+
+  const actual = daySnapshots.map(x=>Number(x.total_tonnage_kg));
+  if(actual.length > 1){
+    const delta = actual.at(-1) - actual.at(-2);
+    const pct = actual.at(-2) ? (delta/actual.at(-2))*100 : 0;
+    $("intradayDelta").textContent = (delta>=0?"+":"") + compactKg(delta) + " • " + (pct>=0?"+":"") + pct.toFixed(1) + "%";
+  } else {
+    $("intradayDelta").textContent = "Belum ada data sebelumnya";
   }
 
-  // -------- Intraday values filtered by KP --------
-  const daySnapshots=(s||[]).filter(x=>x.report_date===latest.report_date).sort((a,b)=>a.snapshot_time.localeCompare(b.snapshot_time));
-  let selectedBySnapshot={};
-  if(kp==="ALL"){
-    daySnapshots.forEach(x=>selectedBySnapshot[x.id]={tonnage:Number(x.total_tonnage_kg||0),trips:Number(x.total_trips||0)});
-  }else if(daySnapshots.length){
-    const ids=daySnapshots.map(x=>x.id);
-    const {data:dayDetail}=await db.from("monitoring_snapshot_details")
-      .select("snapshot_id,tonnage_kg,trip_count")
-      .in("snapshot_id",ids)
-      .eq("kp_code",kp);
-    ids.forEach(id=>selectedBySnapshot[id]={tonnage:0,trips:0});
-    (dayDetail||[]).forEach(r=>{
-      selectedBySnapshot[r.snapshot_id].tonnage+=Number(r.tonnage_kg||0);
-      selectedBySnapshot[r.snapshot_id].trips+=Number(r.trip_count||0);
-    });
-  }
-
-  const slotMap={};
-  daySnapshots.forEach(x=>slotMap[x.snapshot_time.slice(0,5)]=selectedBySnapshot[x.id]?.tonnage??0);
-  const y=slots.map(slot=>slotMap[slot]??null);
-  const actual=daySnapshots.map(x=>selectedBySnapshot[x.id]?.tonnage??0);
-  let delta=null,pct=0;
-  if(actual.length>1){
-    delta=actual.at(-1)-actual.at(-2);
-    pct=actual.at(-2)?delta/actual.at(-2)*100:0;
-    $("intradayDelta").textContent=`${delta>=0?"+":""}${compactKg(delta)} • ${pct>=0?"+":""}${pct.toFixed(1)}%`;
-  }else{
-    $("intradayDelta").textContent="Belum ada data sebelumnya";
-  }
-  $("snapshotFinished").textContent=latest.snapshot_time.slice(0,5)+" WIB";
-  $("snapshotProgress").textContent=daySnapshots.length+" / 4";
-
-  Plotly.newPlot("intradayChart",[{
-    x:slots,y,type:"scatter",mode:"lines+markers",
-    line:{width:3,color:"#49de5f",shape:"spline"},
-    marker:{size:11,color:y.map(v=>v==null?"rgba(255,255,255,.18)":"#61ef70"),line:{width:2,color:"#315535"}},
-    connectgaps:false,
-    hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<br>Klik untuk detail<extra></extra>"
-  }],{
-    ...darkLayout,margin:{t:28,l:60,r:18,b:42},
-    xaxis:{...darkLayout.xaxis,fixedrange:true,type:"category",categoryorder:"array",categoryarray:slots},
-    yaxis:{...darkLayout.yaxis,fixedrange:true,tickformat:"~s",rangemode:"tozero"},
+  Plotly.newPlot("intradayChart", [
+    {
+      x:slots, y:y, type:"scatter", mode:"lines+markers+text",
+      text:y.map((v,i)=>v==null ? "Menunggu" : (i===0 || y[i-1]==null ? compactKg(v)+" kg" : "")),
+      textposition:"top center",
+      line:{width:3,color:"#c6c6c6",dash:"dash",shape:"spline"},
+      marker:{
+        size:12,
+        color:y.map(v=>v==null ? "rgba(255,255,255,.18)" : "#49de5f"),
+        line:{width:2,color:y.map(v=>v==null ? "rgba(255,255,255,.28)" : "#49de5f")}
+      },
+      hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
+    }
+  ], {
+    ...darkLayout,
+    margin:{t:38,l:64,r:18,b:46},
+    xaxis:{...darkLayout.xaxis, fixedrange:true, type:"category", categoryorder:"array", categoryarray:slots},
+    yaxis:{...darkLayout.yaxis, fixedrange:true, tickformat:"~s", rangemode:"tozero"},
     showlegend:false
-  },plotConfig);
+  }, plotConfig);
 
-  // -------- Top chart: KP ranking or supplier drilldown --------
-  if(kp==="ALL"){
-    const top8=kpPairs.slice(0,8);
-    $("topKpTitle").textContent="TOP 8 KP SNAPSHOT • KLIK UNTUK FILTER";
-    Plotly.newPlot("topKpChart",[{
-      x:top8.map(x=>x[1].tonnage),y:top8.map(x=>x[0]),
-      type:"bar",orientation:"h",marker:{color:"#4bd85c"},
-      hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<br>Klik untuk filter KP<extra></extra>"
-    }],{
-      ...darkLayout,margin:{t:10,l:82,r:10,b:36},
-      yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
-      xaxis:{...darkLayout.xaxis,fixedrange:true,tickformat:"~s"},showlegend:false
-    },plotConfig);
-  }else{
-    const suppliers=selectedRows
-      .filter(r=>Number(r.tonnage_kg||0)>0)
-      .sort((a,b)=>Number(b.tonnage_kg||0)-Number(a.tonnage_kg||0))
-      .slice(0,8);
-    $("topKpTitle").textContent=`TOP SUPPLIER ${kp} • SNAPSHOT ${latest.snapshot_time.slice(0,5)}`;
-    Plotly.newPlot("topKpChart",[{
-      x:suppliers.map(r=>Number(r.tonnage_kg||0)),y:suppliers.map(r=>r.supplier_name),
-      type:"bar",orientation:"h",marker:{color:"#4bd85c"},
-      hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
-    }],{
-      ...darkLayout,margin:{t:10,l:90,r:10,b:36},
-      yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
-      xaxis:{...darkLayout.xaxis,fixedrange:true,tickformat:"~s"},showlegend:false
-    },plotConfig);
+  const {data:detailRows} = await db.from("monitoring_snapshot_details").select("kp_code,supplier_name,tonnage_kg,trip_count").eq("snapshot_id", latest.id);
+  const byKP = {};
+  (detailRows||[]).forEach(r=>{
+    if(!byKP[r.kp_code]) byKP[r.kp_code] = {tonnage:0, trips:0};
+    byKP[r.kp_code].tonnage += Number(r.tonnage_kg||0);
+    byKP[r.kp_code].trips += Number(r.trip_count||0);
+  });
+  const kpPairs = Object.entries(byKP).sort((a,b)=>b[1].tonnage-a[1].tonnage);
+  $("kpiActiveKP").textContent = kpPairs.length + " / " + MASTER_KP_COUNT;
+
+  const top8 = kpPairs.slice(0,8);
+  Plotly.newPlot("topKpChart", [{
+    x:top8.map(x=>x[1].tonnage),
+    y:top8.map(x=>x[0]),
+    type:"bar", orientation:"h",
+    marker:{color:"#4bd85c"},
+    hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
+  }], {
+    ...darkLayout,
+    margin:{t:10,l:82,r:10,b:36},
+    yaxis:{...darkLayout.yaxis, autorange:"reversed", fixedrange:true},
+    xaxis:{...darkLayout.xaxis, fixedrange:true, tickformat:"~s"},
+    showlegend:false
+  }, plotConfig);
+
+  renderStatusBoxes(daySnapshots);
+
+  const topChart=$("topKpChart");
+  if(topChart?.on){
+    topChart.removeAllListeners?.("plotly_click");
+    topChart.on("plotly_click", async ev=>{
+      const code=ev?.points?.[0]?.y;
+      if(code && $("monitorKp")){
+        $("monitorKp").value=code;
+        await goToPage("monitoring");
+        setMonitorMode("daily");
+      }
+    });
   }
 
-  renderStatusBoxes(daySnapshots,selectedBySnapshot,kp);
-
-  // -------- Control table, searchable/sortable/clickable --------
-  const expenseByKP={};
-  dailyExpenses.forEach(x=>expenseByKP[x.kp_code]=(expenseByKP[x.kp_code]||0)+Number(x.amount||0));
-  const tonnageByKP={};
-  detailRows.forEach(r=>tonnageByKP[r.kp_code]=(tonnageByKP[r.kp_code]||0)+Number(r.tonnage_kg||0));
-
-  DASHBOARD_CONTROL_ROWS=selectedRows
-    .filter(r=>Number(r.tonnage_kg||0)>0 || Number(r.trip_count||0)>0)
-    .map(r=>{
-      const price=Number(priceMap[r.kp_code+"|"+r.supplier_name]?.price_per_kg||0);
-      const tonnage=Number(r.tonnage_kg||0);
-      const expense=expenseByKP[r.kp_code]||0;
-      const kpTon=tonnageByKP[r.kp_code]||0;
-      const costkg=kpTon?expense/kpTon:0;
-      return {
-        kp:r.kp_code,supplier:r.supplier_name,
-        tonnage,trips:Number(r.trip_count||0),price,
-        value:tonnage*price,expense,costkg
-      };
+  const intraday=$("intradayChart");
+  if(intraday?.on){
+    intraday.removeAllListeners?.("plotly_click");
+    intraday.on("plotly_click", async ()=>{
+      if($("monitorKp")) $("monitorKp").value="ALL";
+      if($("monitorDate")) $("monitorDate").value=latest.report_date;
+      await goToPage("monitoring");
+      setMonitorMode("daily");
     });
+  }
 
-  $("controlTitle").textContent=`CONTROL TABLE • ${kp==="ALL"?"SEMUA KP":kp} • ${latest.snapshot_time.slice(0,5)}`;
-  applyControlTableView();
+  // Control table
+  const priceMap = {};
+  latestPrices.forEach(x=>priceMap[x.kp_code + "|" + x.supplier_name] = x);
+  const expenseByKP = {};
+  dailyExpenses.forEach(x=>expenseByKP[x.kp_code] = (expenseByKP[x.kp_code] || 0) + Number(x.amount || 0));
 
-  // Monitoring snapshot table mirrors global selection.
-  const snapRows=(kp==="ALL"?kpPairs:kpPairs.filter(([code])=>code===kp))
-    .map(([code,v])=>[code,kg(v.tonnage),v.trips,latest.snapshot_time.slice(0,5)]);
-  if(kp==="ALL") snapRows.push(["TOTAL",kg(latest.total_tonnage_kg),latest.total_trips,latest.snapshot_time.slice(0,5)]);
-  $("snapshotTable").innerHTML=table(["KP","Tonase","Mobil / Trip","Jam"],snapRows,kp==="ALL");
+  const controlRows = (detailRows||[])
+    .filter(r=>Number(r.tonnage_kg||0) > 0 || Number(r.trip_count||0) > 0)
+    .sort((a,b)=>Number(b.tonnage_kg)-Number(a.tonnage_kg))
+    .map((r,i)=>{
+      const price = priceMap[r.kp_code + "|" + r.supplier_name]?.price_per_kg || 0;
+      const value = Number(r.tonnage_kg || 0) * Number(price || 0);
+      const exp = expenseByKP[r.kp_code] || 0;
+      const costkg = Number(r.tonnage_kg || 0) ? (exp / Number(r.tonnage_kg || 0)) : 0;
+      return [
+        i+1,
+        r.kp_code,
+        r.supplier_name,
+        Number(r.tonnage_kg || 0).toLocaleString("id-ID"),
+        r.trip_count || 0,
+        price ? Number(price).toLocaleString("id-ID") : "-",
+        value ? Number(value).toLocaleString("id-ID") : "-",
+        exp ? exp.toLocaleString("id-ID") : "-",
+        costkg ? costkg.toLocaleString("id-ID", {minimumFractionDigits:2, maximumFractionDigits:2}) : "-"
+      ];
+    });
+  $("controlTitle").textContent = `CONTROL TABLE - SNAPSHOT TERAKHIR (${latest.snapshot_time.slice(0,5)})`;
+  $("controlTable").innerHTML = table(
+    ["NO","KP","SUPPLIER","TONASE (KG)","TRIP","HARGA (RP/KG)","NILAI TBS (RP)","PENGELUARAN (RP)","COST/KG (RP)"],
+    controlRows
+  );
 
-  // -------- Insight context --------
-  const costKg=selectedTonnage?dailyExpenseTotal/selectedTonnage:0;
-  const leaderKP=kpPairs[0]?.[0]||null;
-  const leaderSupplier=kp!=="ALL"
-    ? selectedRows.filter(r=>Number(r.tonnage_kg||0)>0).sort((a,b)=>Number(b.tonnage_kg||0)-Number(a.tonnage_kg||0))[0]?.supplier_name
-    : null;
-
-  renderDashboardInsights({
-    kp,totalAll:latestAllTonnage,totalSelected:selectedTonnage,trips:selectedTrips,
-    activeKPCount:kpPairs.length,totalKP:MASTER_KP_COUNT,
-    delta,pct,latestTime:latest.snapshot_time.slice(0,5),
-    activePriceCount:activePrices.length,priceCoveragePct,
-    expenseTotal:dailyExpenseTotal,costKg,leaderKP,leaderSupplier
-  });
-
-  await loadDashboardTrendIndicators(todayDate);
-  bindDashboardPlotClicks(todayDate);
+  // Snapshot table in monitoring page
+  const snapRows = kpPairs.map(([kp,v])=>[kp, kg(v.tonnage), v.trips, latest.snapshot_time.slice(0,5)]);
+  snapRows.push(["TOTAL", kg(latest.total_tonnage_kg), latest.total_trips, latest.snapshot_time.slice(0,5)]);
+  $("snapshotTable").innerHTML = table(["KP","Tonase","Mobil / Trip","Jam"], snapRows, true);
 }
 
-function renderStatusBoxes(daySnapshots,selectedBySnapshot=null,kp="ALL"){
-  const map={};
-  daySnapshots.forEach(x=>map[x.snapshot_time.slice(0,5)]=x);
-  $("snapshotStatus").innerHTML=slots.map(slot=>{
-    const s=map[slot];
-    const v=s ? (selectedBySnapshot?.[s.id] || {tonnage:Number(s.total_tonnage_kg||0),trips:Number(s.total_trips||0)}) : null;
-    return `<div class="status-box ${s?"done":""}" onclick="openDashboardDetail('monitoring','daily')" title="Klik untuk detail snapshot ${slot}">
-      <div class="slot ${s?"":"wait"}">${slot}</div>
-      <div class="status-val">${s?compactKg(v.tonnage):"Menunggu"}</div>
-      <div class="status-sub">${s?`${v.trips} trip`:"Menunggu"}</div>
+function renderStatusBoxes(daySnapshots){
+  const map = {};
+  daySnapshots.forEach(x=>map[x.snapshot_time.slice(0,5)] = x);
+  $("snapshotStatus").innerHTML = slots.map(slot=>{
+    const s = map[slot];
+    return `<div class="status-box ${s ? "done" : ""}">
+      <div class="slot ${s ? "" : "wait"}">${slot}</div>
+      <div class="status-val">${s ? compactKg(s.total_tonnage_kg) : "Menunggu"}</div>
+      <div class="status-sub">${s ? (s.total_trips + " trip") : "Menunggu"}</div>
     </div>`;
   }).join("");
 }
@@ -863,20 +666,15 @@ async function openTrendDetail(mode){
   await goToPage("monitoring");
   setMonitorMode(mode);
 }
-async function loadDashboardTrendIndicators(forceDate=null){
-  if(!$("dashboardTrendKp")) return;
+async function loadMonitoringTrendIndicators(){
+  if(!$("monitorKp")) return;
+  const kp=$("monitorKp").value || "ALL";
 
-  const kp=$("dashboardTrendKp").value || "ALL";
-
-  // -------------------------------------------------------
-  // 1) HARIAN: snapshot intraday pada tanggal operasional terbaru
-  // -------------------------------------------------------
-  let dailyDate=forceDate;
+  // HARIAN: tanggal operasional dari filter Monitoring.
+  let dailyDate=$("monitorDate")?.value;
   if(!dailyDate){
     const {data:lastSnap}=await db.from("monitoring_snapshots")
-      .select("report_date")
-      .order("report_date",{ascending:false})
-      .limit(1);
+      .select("report_date").order("report_date",{ascending:false}).limit(1);
     dailyDate=lastSnap?.[0]?.report_date || localISODate();
   }
 
@@ -910,13 +708,10 @@ async function loadDashboardTrendIndicators(forceDate=null){
   trendBadge("dailyTrendBadge",dailyCurrent,dailyPrevious,"vs snapshot");
   renderMiniTrend("dailyTrendMini",slots,dailyY);
 
-  // -------------------------------------------------------
-  // 2) BULANAN: Jan-Dec pada tahun histori terbaru
-  // -------------------------------------------------------
-  let histQuery=db.from("historical_summary").select("year,month,kp_code,tonnage_kg");
-  if(kp!=="ALL") histQuery=histQuery.eq("kp_code",kp);
-  const {data:hist}=await histQuery;
-
+  // BULANAN + TAHUNAN: historical_summary / monthly summary.
+  let hq=db.from("historical_summary").select("year,month,kp_code,tonnage_kg");
+  if(kp!=="ALL") hq=hq.eq("kp_code",kp);
+  const {data:hist}=await hq;
   const rows=hist||[];
   const years=[...new Set(rows.map(r=>Number(r.year)))].sort((a,b)=>a-b);
   const latestYear=years.at(-1);
@@ -933,24 +728,19 @@ async function loadDashboardTrendIndicators(forceDate=null){
   for(let i=11;i>=0;i--){
     if(monthTotals[i]>0){latestMonthIndex=i;break;}
   }
+  const monthLabels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
   const monthlyCurrent=latestMonthIndex>=0?monthTotals[latestMonthIndex]:0;
   let previousMonthIndex=latestMonthIndex-1;
   while(previousMonthIndex>=0 && monthTotals[previousMonthIndex]===0) previousMonthIndex--;
   const monthlyPrevious=previousMonthIndex>=0?monthTotals[previousMonthIndex]:0;
-  const monthLabels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
 
   $("monthlyTrendValue").textContent=kg(monthlyCurrent);
   $("monthlyTrendPeriod").textContent=latestYear
     ? `${kp==="ALL"?"Semua KP":kp} • ${monthLabels[Math.max(latestMonthIndex,0)]} ${latestYear}`
-    : `${kp==="ALL"?"Semua KP":kp} • Belum ada histori`;
+    : `${kp==="ALL"?"Semua KP":kp} • Belum ada data`;
   trendBadge("monthlyTrendBadge",monthlyCurrent,monthlyPrevious,"vs bulan");
   renderMiniTrend("monthlyTrendMini",monthLabels,monthTotals,"#f0b325");
 
-  // -------------------------------------------------------
-  // 3) TAHUNAN: total per tahun.
-  // Badge membandingkan latest year YTD dengan periode bulan
-  // yang sama pada tahun sebelumnya agar tidak misleading.
-  // -------------------------------------------------------
   const byYear={};
   rows.forEach(r=>{
     const y=Number(r.year),m=Number(r.month),v=Number(r.tonnage_kg||0);
@@ -964,27 +754,20 @@ async function loadDashboardTrendIndicators(forceDate=null){
   const annualLatest=annualYears.at(-1);
   const annualPrev=annualYears.length>1?annualYears.at(-2):null;
   const annualCurrent=annualLatest?byYear[annualLatest].total:0;
-
-  let comparablePrev=0;
-  let latestMonths=[];
-  if(annualLatest){
-    latestMonths=Object.keys(byYear[annualLatest].months)
-      .map(Number)
-      .filter(m=>byYear[annualLatest].months[m]>0)
-      .sort((a,b)=>a-b);
-  }
-  if(annualPrev && latestMonths.length){
-    comparablePrev=latestMonths.reduce((sum,m)=>sum+(byYear[annualPrev].months[m]||0),0);
-  }
+  const latestMonths=annualLatest
+    ? Object.keys(byYear[annualLatest].months).map(Number).filter(m=>byYear[annualLatest].months[m]>0)
+    : [];
+  const comparablePrev=annualPrev
+    ? latestMonths.reduce((sum,m)=>sum+(byYear[annualPrev].months[m]||0),0)
+    : 0;
 
   $("yearlyTrendValue").textContent=kg(annualCurrent);
   $("yearlyTrendPeriod").textContent=annualLatest
     ? `${kp==="ALL"?"Semua KP":kp} • ${annualLatest}${latestMonths.length<12?` YTD ${latestMonths.length} bln`:""}`
-    : `${kp==="ALL"?"Semua KP":kp} • Belum ada histori`;
+    : `${kp==="ALL"?"Semua KP":kp} • Belum ada data`;
   trendBadge("yearlyTrendBadge",annualCurrent,comparablePrev,annualPrev?`vs ${annualPrev}`:"");
   renderMiniTrend("yearlyTrendMini",annualYears.map(String),annualY,"#b36bff");
 }
-
 
 // =========================================================
 // KP MONITORING: HARIAN / BULANAN / TAHUNAN
@@ -1031,6 +814,8 @@ function setMonitorMode(mode){
   ["daily","monthly","yearly"].forEach(m=>{
     const id=m==="daily"?"monitorModeDaily":m==="monthly"?"monitorModeMonthly":"monitorModeYearly";
     $(id)?.classList.toggle("active",m===mode);
+    const cardId=m==="daily"?"monitorPeriodDaily":m==="monthly"?"monitorPeriodMonthly":"monitorPeriodYearly";
+    $(cardId)?.classList.toggle("active",m===mode);
   });
   $("monitorDateWrap").classList.toggle("hidden",mode!=="daily");
   $("monitorMonthWrap").classList.toggle("hidden",mode!=="monthly");
@@ -1055,6 +840,7 @@ function renderMonitorEmpty(message){
 async function loadKPMonitoring(){
   if(!$("monitorKp")) return;
   const kp=$("monitorKp").value || "ALL";
+  await loadMonitoringTrendIndicators();
   if(MONITOR_MODE==="daily") return loadKPDaily(kp);
   if(MONITOR_MODE==="monthly") return loadKPMonthly(kp);
   return loadKPYearly(kp);
