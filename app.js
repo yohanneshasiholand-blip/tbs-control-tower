@@ -18,6 +18,7 @@ const monthMap = {januari:1,februari:2,maret:3,april:4,mei:5,juni:6,juli:7,agust
 const slots = ["10:00","12:00","15:00","17:00"];
 let MASTER_KP_COUNT = 0;
 let TONNAGE_PREVIEW = null, PRICE_PREVIEW = null, EXPENSE_PREVIEW = null;
+let MONTHLY_EXCEL_PREVIEW = null, ANNUAL_EXCEL_PREVIEW = null;
 let MONITOR_MODE = "daily";
 
 const FALLBACK_KP_CODES = [
@@ -638,18 +639,16 @@ function trendBadge(id,current,previous,comparisonLabel=""){
 function renderMiniTrend(containerId,x,y,color="#49de5f"){
   const el=$(containerId);
   if(!el) return;
-  const hasData=y.some(v=>v!=null && Number(v)>0);
+  const clean=y.map(v=>v==null?0:Number(v||0));
+  const hasData=clean.some(v=>v>0);
   if(!hasData){
     Plotly.purge(containerId);
     el.innerHTML='<div style="padding:17px 5px;text-align:center;color:#9f9588;font-size:7px">Belum ada data</div>';
     return;
   }
   Plotly.newPlot(containerId,[{
-    x,y,type:"scatter",mode:"lines",
-    connectgaps:false,
-    line:{width:2,color,shape:"spline"},
-    fill:"tozeroy",
-    fillcolor:"rgba(73,222,95,.075)",
+    x,y:clean,type:"bar",
+    marker:{color:clean.map(v=>v>0?color:"rgba(255,255,255,.08)")},
     hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
   }],{
     paper_bgcolor:"rgba(0,0,0,0)",
@@ -657,6 +656,7 @@ function renderMiniTrend(containerId,x,y,color="#49de5f"){
     margin:{t:3,l:2,r:2,b:2},
     xaxis:{visible:false,fixedrange:true},
     yaxis:{visible:false,rangemode:"tozero",fixedrange:true},
+    bargap:.38,
     showlegend:false
   },plotConfig);
 }
@@ -769,6 +769,239 @@ async function loadMonitoringTrendIndicators(){
   renderMiniTrend("yearlyTrendMini",annualYears.map(String),annualY,"#b36bff");
 }
 
+
+// =========================================================
+// EXCEL IMPORT: BULANAN / TAHUNAN
+// =========================================================
+function excelSerialToISO(v){
+  if(v==null || v==="") return null;
+  if(typeof v==="number"){
+    const p=XLSX.SSF.parse_date_code(v);
+    if(p) return `${p.y}-${String(p.m).padStart(2,"0")}-${String(p.d).padStart(2,"0")}`;
+  }
+  if(v instanceof Date && !isNaN(v)) return localISODate(v);
+  const s=String(v).trim();
+  let m=s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(m) return `${m[1]}-${String(+m[2]).padStart(2,"0")}-${String(+m[3]).padStart(2,"0")}`;
+  m=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if(m) return `${m[3]}-${String(+m[2]).padStart(2,"0")}-${String(+m[1]).padStart(2,"0")}`;
+  return null;
+}
+function normalizeHeaderKey(s){
+  return String(s||"").toLowerCase().trim()
+    .replace(/\s+/g," ")
+    .replace(/[._-]+/g," ");
+}
+function pickField(row, aliases){
+  const map={};
+  Object.keys(row||{}).forEach(k=>map[normalizeHeaderKey(k)]=row[k]);
+  for(const a of aliases){
+    const key=normalizeHeaderKey(a);
+    if(key in map) return map[key];
+  }
+  return null;
+}
+async function readWorkbookFile(file){
+  if(!file) throw Error("File belum dipilih.");
+  const buf=await file.arrayBuffer();
+  return XLSX.read(buf,{type:"array",cellDates:true});
+}
+function workbookRows(wb){
+  const out=[];
+  wb.SheetNames.forEach(name=>{
+    const sheet=wb.Sheets[name];
+    const rows=XLSX.utils.sheet_to_json(sheet,{defval:null,raw:false});
+    rows.forEach(r=>out.push({sheet:name,row:r}));
+  });
+  return out;
+}
+function parseMonthlyWorkbook(wb,fileName){
+  const rows=workbookRows(wb);
+  const dailyMap=new Map();
+  const summaryMap=new Map();
+  const unknown=[];
+
+  for(const item of rows){
+    const r=item.row;
+    const kp=canonKP(
+      pickField(r,["kp","kode kp","kantor pencairan","kantor","unit","kode unit"])
+    );
+    const date=excelSerialToISO(
+      pickField(r,["tanggal","date","tgl","report date"])
+    );
+    const tonRaw=pickField(r,["tonase kg","tonnage kg","tonase","tonnage","berat kg","berat"]);
+    const tripRaw=pickField(r,["trip","jumlah trip","mobil masuk","jumlah kendaraan","kendaraan"]);
+    const monthRaw=pickField(r,["bulan","month"]);
+    const yearRaw=pickField(r,["tahun","year"]);
+
+    let ton=Number(String(tonRaw??"").replace(/\./g,"").replace(",",".").replace(/[^\d.-]/g,""));
+    if(!Number.isFinite(ton)) ton=0;
+
+    let trips=parseInt(String(tripRaw??"").replace(/[^\d-]/g,""),10);
+    if(!Number.isFinite(trips)) trips=0;
+
+    if(kp && date && ton>0){
+      const key=`${date}|${kp}`;
+      const prev=dailyMap.get(key)||{report_date:date,kp_code:kp,tonnage_kg:0,trip_count:0,source_file:fileName};
+      prev.tonnage_kg+=ton;
+      prev.trip_count+=trips;
+      dailyMap.set(key,prev);
+
+      const [y,m]=date.split("-").map(Number);
+      const skey=`${y}|${m}|${kp}`;
+      const sp=summaryMap.get(skey)||{year:y,month:m,kp_code:kp,tonnage_kg:0,source_file:fileName};
+      sp.tonnage_kg+=ton;
+      summaryMap.set(skey,sp);
+      continue;
+    }
+
+    // Allow already aggregated monthly rows.
+    const monthNum=parseInt(String(monthRaw??"").replace(/[^\d]/g,""),10);
+    const yearNum=parseInt(String(yearRaw??"").replace(/[^\d]/g,""),10);
+    if(kp && yearNum>=2000 && monthNum>=1 && monthNum<=12 && ton>0){
+      const skey=`${yearNum}|${monthNum}|${kp}`;
+      const sp=summaryMap.get(skey)||{year:yearNum,month:monthNum,kp_code:kp,tonnage_kg:0,source_file:fileName};
+      sp.tonnage_kg+=ton;
+      summaryMap.set(skey,sp);
+      continue;
+    }
+
+    if(Object.values(r).some(v=>v!=null && String(v).trim()!=="")) unknown.push({sheet:item.sheet,row:r});
+  }
+
+  return {
+    fileName,
+    daily:[...dailyMap.values()],
+    summary:[...summaryMap.values()],
+    unknownCount:unknown.length
+  };
+}
+function parseAnnualWorkbook(wb,fileName){
+  const rows=workbookRows(wb);
+  const summaryMap=new Map();
+  const monthNameMap={
+    januari:1,februari:2,maret:3,april:4,mei:5,juni:6,juli:7,agustus:8,
+    september:9,oktober:10,november:11,desember:12,
+    jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12
+  };
+
+  for(const item of rows){
+    const r=item.row;
+    let year=parseInt(String(pickField(r,["tahun","year"])??item.sheet).replace(/[^\d]/g,""),10);
+    const kp=canonKP(pickField(r,["kp","kode kp","kantor pencairan","kantor","unit","kode unit"]));
+    const tonRaw=pickField(r,["tonase kg","tonnage kg","tonase","tonnage","berat kg","berat"]);
+    const monthRaw=pickField(r,["bulan","month"]);
+
+    let ton=Number(String(tonRaw??"").replace(/\./g,"").replace(",",".").replace(/[^\d.-]/g,""));
+    let monthNum=parseInt(String(monthRaw??"").replace(/[^\d]/g,""),10);
+
+    if(kp && Number.isFinite(year) && monthNum>=1 && monthNum<=12 && Number.isFinite(ton) && ton>0){
+      const key=`${year}|${monthNum}|${kp}`;
+      const prev=summaryMap.get(key)||{year,month:monthNum,kp_code:kp,tonnage_kg:0,source_file:fileName};
+      prev.tonnage_kg+=ton;
+      summaryMap.set(key,prev);
+      continue;
+    }
+
+    // Wide annual format: KP + Jan..Dec columns
+    if(kp && Number.isFinite(year)){
+      Object.entries(r).forEach(([key,val])=>{
+        const mk=normalizeHeaderKey(key);
+        const m=monthNameMap[mk];
+        if(!m) return;
+        let v=Number(String(val??"").replace(/\./g,"").replace(",",".").replace(/[^\d.-]/g,""));
+        if(Number.isFinite(v) && v>0){
+          const sk=`${year}|${m}|${kp}`;
+          const prev=summaryMap.get(sk)||{year,month:m,kp_code:kp,tonnage_kg:0,source_file:fileName};
+          prev.tonnage_kg+=v;
+          summaryMap.set(sk,prev);
+        }
+      });
+    }
+  }
+  return {fileName,summary:[...summaryMap.values()]};
+}
+async function previewMonthlyExcel(file){
+  try{
+    const wb=await readWorkbookFile(file);
+    MONTHLY_EXCEL_PREVIEW=parseMonthlyWorkbook(wb,file.name);
+    const p=MONTHLY_EXCEL_PREVIEW;
+    $("monthlyExcelPreview").textContent=
+      `FILE: ${p.fileName}\n`+
+      `Detail harian: ${p.daily.length} baris KP/tanggal\n`+
+      `Summary bulanan: ${p.summary.length} baris KP/bulan\n`+
+      `Baris belum dikenali: ${p.unknownCount}\n\n`+
+      `Contoh:\n${JSON.stringify(p.daily.slice(0,5),null,2)}`;
+  }catch(e){
+    MONTHLY_EXCEL_PREVIEW=null;
+    $("monthlyExcelPreview").textContent="ERROR: "+e.message;
+  }
+}
+async function saveMonthlyExcel(){
+  if(!MONTHLY_EXCEL_PREVIEW) return alert("Pilih dan preview Excel bulanan dahulu.");
+  const p=MONTHLY_EXCEL_PREVIEW;
+  if(!p.daily.length && !p.summary.length) return alert("Tidak ada data yang dapat disimpan.");
+
+  if(p.daily.length){
+    const {error:e1}=await db.from("kp_daily_history")
+      .upsert(p.daily,{onConflict:"report_date,kp_code"});
+    if(e1) return alert("Gagal simpan detail harian: "+e1.message);
+  }
+  if(p.summary.length){
+    const {error:e2}=await db.from("historical_summary")
+      .upsert(p.summary,{onConflict:"year,month,kp_code"});
+    if(e2) return alert("Gagal simpan summary bulanan: "+e2.message);
+  }
+
+  await db.from("upload_logs").insert({
+    upload_type:"monthly_excel",
+    source_file:p.fileName,
+    rows_count:p.daily.length+p.summary.length,
+    status:"success"
+  }).catch(()=>{});
+
+  alert(`Data bulanan tersimpan.\nHarian: ${p.daily.length}\nSummary: ${p.summary.length}`);
+  MONTHLY_EXCEL_PREVIEW=null;
+  $("monthlyExcelPreview").textContent="Belum ada file bulanan dipilih.";
+  await loadKPMonthlyPanel($("monitorKp").value || "ALL");
+}
+async function previewAnnualExcel(file){
+  try{
+    const wb=await readWorkbookFile(file);
+    ANNUAL_EXCEL_PREVIEW=parseAnnualWorkbook(wb,file.name);
+    const p=ANNUAL_EXCEL_PREVIEW;
+    $("annualExcelPreview").textContent=
+      `FILE: ${p.fileName}\n`+
+      `Summary tahunan/bulanan: ${p.summary.length} baris\n\n`+
+      `Contoh:\n${JSON.stringify(p.summary.slice(0,8),null,2)}`;
+  }catch(e){
+    ANNUAL_EXCEL_PREVIEW=null;
+    $("annualExcelPreview").textContent="ERROR: "+e.message;
+  }
+}
+async function saveAnnualExcel(){
+  if(!ANNUAL_EXCEL_PREVIEW) return alert("Pilih dan preview Excel tahunan dahulu.");
+  const p=ANNUAL_EXCEL_PREVIEW;
+  if(!p.summary.length) return alert("Tidak ada data tahunan yang dapat disimpan.");
+
+  const {error}=await db.from("historical_summary")
+    .upsert(p.summary,{onConflict:"year,month,kp_code"});
+  if(error) return alert("Gagal simpan data tahunan: "+error.message);
+
+  await db.from("upload_logs").insert({
+    upload_type:"annual_excel",
+    source_file:p.fileName,
+    rows_count:p.summary.length,
+    status:"success"
+  }).catch(()=>{});
+
+  alert(`Data tahunan tersimpan: ${p.summary.length} baris KP/bulan.`);
+  ANNUAL_EXCEL_PREVIEW=null;
+  $("annualExcelPreview").textContent="Belum ada file tahunan dipilih.";
+  await initKPMonitoringFilters();
+  await loadKPYearlyPanel($("monitorKp").value || "ALL");
+}
+
 // =========================================================
 // KP MONITORING: HARIAN / BULANAN / TAHUNAN
 // =========================================================
@@ -814,8 +1047,8 @@ function setMonitorMode(mode){
   ["daily","monthly","yearly"].forEach(m=>{
     const id=m==="daily"?"monitorModeDaily":m==="monthly"?"monitorModeMonthly":"monitorModeYearly";
     $(id)?.classList.toggle("active",m===mode);
-    const cardId=m==="daily"?"monitorPeriodDaily":m==="monthly"?"monitorPeriodMonthly":"monitorPeriodYearly";
-    $(cardId)?.classList.toggle("active",m===mode);
+    const panelId=m==="daily"?"monitorDailyPanel":m==="monthly"?"monitorMonthlyPanel":"monitorYearlyPanel";
+    $(panelId)?.classList.toggle("active",m===mode);
   });
   $("monitorDateWrap").classList.toggle("hidden",mode!=="daily");
   $("monitorMonthWrap").classList.toggle("hidden",mode!=="monthly");
@@ -840,11 +1073,199 @@ function renderMonitorEmpty(message){
 async function loadKPMonitoring(){
   if(!$("monitorKp")) return;
   const kp=$("monitorKp").value || "ALL";
-  await loadMonitoringTrendIndicators();
   if(MONITOR_MODE==="daily") return loadKPDaily(kp);
-  if(MONITOR_MODE==="monthly") return loadKPMonthly(kp);
-  return loadKPYearly(kp);
+  if(MONITOR_MODE==="monthly") return loadKPMonthlyPanel(kp);
+  return loadKPYearlyPanel(kp);
 }
+
+function setMonthlyPanelSummary({kp,period,tonnage,trips,coverage,tonnageSub,tripsSub,coverageSub}){
+  $("monthlyKpiKp").textContent=kp==="ALL"?"Semua KP":kp;
+  $("monthlyKpiPeriod").textContent=period;
+  $("monthlyKpiTonnage").textContent=kg(tonnage);
+  $("monthlyKpiTonnageSub").textContent=tonnageSub||"-";
+  $("monthlyKpiTrips").textContent=trips==null?"—":Number(trips).toLocaleString("id-ID");
+  $("monthlyKpiTripsSub").textContent=tripsSub||"-";
+  $("monthlyKpiCoverage").textContent=coverage;
+  $("monthlyKpiCoverageSub").textContent=coverageSub||"-";
+}
+function setYearlyPanelSummary({kp,period,tonnage,coverage,tonnageSub,coverageSub}){
+  $("yearlyKpiKp").textContent=kp==="ALL"?"Semua KP":kp;
+  $("yearlyKpiPeriod").textContent=period;
+  $("yearlyKpiTonnage").textContent=kg(tonnage);
+  $("yearlyKpiTonnageSub").textContent=tonnageSub||"-";
+  $("yearlyKpiCoverage").textContent=coverage;
+  $("yearlyKpiCoverageSub").textContent=coverageSub||"-";
+}
+async function loadKPMonthlyPanel(kp){
+  const month=$("monitorMonth").value;
+  if(!month) return;
+  const {start,end}=yearMonthBounds(month);
+  const [year,monthNum]=month.split("-").map(Number);
+
+  let dq=db.from("kp_daily_history")
+    .select("report_date,kp_code,tonnage_kg,trip_count")
+    .gte("report_date",start).lte("report_date",end)
+    .order("report_date",{ascending:true});
+  if(kp!=="ALL") dq=dq.eq("kp_code",kp);
+
+  const {data:daily,error:de}=await dq;
+  if(de){
+    $("monthlyMonitorChart").innerHTML=`<div class="empty">${de.message}</div>`;
+    return;
+  }
+
+  if(daily?.length){
+    const byDate={};
+    daily.forEach(r=>{
+      if(!byDate[r.report_date]) byDate[r.report_date]={tonnage:0,trips:0};
+      byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
+      byDate[r.report_date].trips+=Number(r.trip_count||0);
+    });
+    const dates=Object.keys(byDate).sort();
+    const vals=dates.map(d=>byDate[d].tonnage);
+    const total=vals.reduce((a,b)=>a+b,0);
+    const trips=dates.reduce((a,d)=>a+byDate[d].trips,0);
+    const avg=dates.length?total/dates.length:0;
+
+    setMonthlyPanelSummary({
+      kp,period:monthLabelId(month),tonnage:total,trips,
+      coverage:`${dates.length} hari`,
+      tonnageSub:`Rata-rata ${kg(avg)} / hari data`,
+      tripsSub:"Total trip Excel bulanan",
+      coverageSub:"Hari dengan data"
+    });
+
+    Plotly.newPlot("monthlyMonitorChart",[{
+      x:dates.map(d=>d.slice(8,10)),
+      y:vals,type:"bar",
+      text:vals.map(v=>compactKg(v)),
+      textposition:"outside",
+      cliponaxis:false,
+      marker:{color:"#49de5f"},
+      hovertemplate:"Tanggal %{x}<br>%{y:,.0f} kg<extra></extra>"
+    }],{
+      ...darkLayout,
+      margin:{t:28,l:58,r:18,b:42},
+      xaxis:{...darkLayout.xaxis,fixedrange:true},
+      yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
+      showlegend:false
+    },plotConfig);
+
+    $("monthlyMonitorTable").innerHTML=table(
+      ["Tanggal","Tonase","Trip"],
+      dates.map(d=>[d,kg(byDate[d].tonnage),byDate[d].trips])
+    );
+    return;
+  }
+
+  let sq=db.from("historical_summary")
+    .select("kp_code,tonnage_kg")
+    .eq("year",year).eq("month",monthNum);
+  if(kp!=="ALL") sq=sq.eq("kp_code",kp);
+  const {data:summary}=await sq;
+  const rows=summary||[];
+  const total=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+
+  setMonthlyPanelSummary({
+    kp,period:monthLabelId(month),tonnage:total,trips:null,
+    coverage:`${rows.length} KP`,
+    tonnageSub:rows.length?"Summary bulanan tersedia":"Belum ada data",
+    tripsSub:"Upload Excel detail untuk trip",
+    coverageSub:rows.length?"Data summary":"Belum ada data"
+  });
+
+  if(!rows.length){
+    Plotly.purge("monthlyMonitorChart");
+    $("monthlyMonitorChart").innerHTML="<div style='padding:55px 20px;text-align:center;color:#c8bdaf'>Belum ada data. Upload Excel Bulanan di panel ini.</div>";
+    $("monthlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data bulanan"]]);
+    return;
+  }
+
+  const pairs=rows.map(r=>[r.kp_code,Number(r.tonnage_kg||0)]).sort((a,b)=>b[1]-a[1]);
+  Plotly.newPlot("monthlyMonitorChart",[{
+    x:pairs.map(x=>x[1]),
+    y:pairs.map(x=>x[0]),
+    type:"bar",orientation:"h",
+    marker:{color:"#49de5f"},
+    hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
+  }],{
+    ...darkLayout,
+    margin:{t:18,l:74,r:18,b:38},
+    xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
+    yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
+    showlegend:false
+  },plotConfig);
+
+  $("monthlyMonitorTable").innerHTML=table(
+    ["KP","Tonase","Sumber"],
+    pairs.map(([code,val])=>[code,kg(val),"Summary Bulanan"])
+  );
+}
+async function loadKPYearlyPanel(kp){
+  const year=Number($("monitorYear").value);
+  let q=db.from("historical_summary")
+    .select("month,kp_code,tonnage_kg")
+    .eq("year",year);
+  if(kp!=="ALL") q=q.eq("kp_code",kp);
+
+  const {data,error}=await q;
+  if(error){
+    $("yearlyMonitorChart").innerHTML=`<div class="empty">${error.message}</div>`;
+    return;
+  }
+
+  const rows=data||[];
+  const monthly=Array(12).fill(0);
+  const monthsPresent=new Set();
+  rows.forEach(r=>{
+    const m=Number(r.month);
+    if(m>=1&&m<=12){
+      monthly[m-1]+=Number(r.tonnage_kg||0);
+      monthsPresent.add(m);
+    }
+  });
+
+  const total=monthly.reduce((a,b)=>a+b,0);
+  const avg=monthsPresent.size?total/monthsPresent.size:0;
+  setYearlyPanelSummary({
+    kp,period:String(year),tonnage:total,
+    coverage:`${monthsPresent.size} bulan`,
+    tonnageSub:monthsPresent.size?`Rata-rata ${kg(avg)} / bulan`:"Belum ada histori",
+    coverageSub:"Bulan dengan data"
+  });
+
+  const labels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
+
+  if(!rows.length){
+    Plotly.purge("yearlyMonitorChart");
+    $("yearlyMonitorChart").innerHTML="<div style='padding:55px 20px;text-align:center;color:#c8bdaf'>Belum ada histori. Upload Excel Tahunan di panel ini.</div>";
+    $("yearlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data tahunan"]]);
+    return;
+  }
+
+  Plotly.newPlot("yearlyMonitorChart",[{
+    x:labels,y:monthly,type:"bar",
+    text:monthly.map((v,i)=>monthsPresent.has(i+1)&&v>0?compactKg(v):""),
+    textposition:"outside",
+    cliponaxis:false,
+    marker:{color:monthly.map((v,i)=>monthsPresent.has(i+1)?"#49de5f":"rgba(255,255,255,.08)")},
+    hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
+  }],{
+    ...darkLayout,
+    margin:{t:28,l:58,r:18,b:42},
+    xaxis:{...darkLayout.xaxis,fixedrange:true},
+    yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
+    showlegend:false
+  },plotConfig);
+
+  $("yearlyMonitorTable").innerHTML=table(
+    ["Bulan","Tonase","Status"],
+    labels.map((label,i)=>[
+      label,kg(monthly[i]),monthsPresent.has(i+1)?"Tersedia":"Belum ada data"
+    ])
+  );
+}
+
 async function loadKPDaily(kp){
   const date=$("monitorDate").value;
   $("monitorChartTitle").textContent="INTRADAY PROGRESS 10 / 12 / 15 / 17";
@@ -895,12 +1316,11 @@ async function loadKPDaily(kp){
   });
 
   Plotly.newPlot("monitorKpChart",[{
-    x:slots,y:ys,type:"scatter",mode:"lines+markers+text",
+    x:slots,y:ys.map(v=>v??0),type:"bar",
     text:ys.map(v=>v==null?"Menunggu":compactKg(v)),
-    textposition:"top center",
-    line:{width:3,color:"#49de5f",shape:"spline"},
-    marker:{size:10,color:ys.map(v=>v==null?"rgba(255,255,255,.22)":"#65f278"),line:{width:2,color:"#203522"}},
-    connectgaps:false,
+    textposition:"outside",
+    cliponaxis:false,
+    marker:{color:ys.map(v=>v==null?"rgba(255,255,255,.10)":"#49de5f")},
     hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
   }],{
     ...darkLayout,
@@ -919,134 +1339,118 @@ async function loadKPDaily(kp){
   );
 }
 async function loadKPMonthly(kp){
-  const monthValue=$("monitorMonth").value;
-  if(!monthValue) return;
-  const [year,month]=monthValue.split("-").map(Number);
+  const month=$("monitorMonth").value;
+  const {start,end}=yearMonthBounds(month);
+  const [year,monthNum]=month.split("-").map(Number);
 
   $("monitorChartTitle").textContent=kp==="ALL"
-    ? "PERBANDINGAN TONASE KP - BULAN TERPILIH"
-    : "PERKEMBANGAN BULANAN KP - TAHUN TERPILIH";
-  $("monitorTableTitle").textContent="REKAP BULANAN KP";
-  $("monitorSourceBadge").textContent="Monthly Summary";
-  $("monitorRuleNote").textContent="Detail harian & trip akan diisi dari Excel bulanan";
+    ? "TONASE HARIAN BULAN TERPILIH"
+    : `TONASE HARIAN ${kp} - BULAN TERPILIH`;
+  $("monitorTableTitle").textContent="REKAP HARIAN BULANAN";
+  $("monitorSourceBadge").textContent="Excel Bulanan";
+  $("monitorRuleNote").textContent="Sumber utama: kp_daily_history; fallback ke summary bulanan";
 
-  // Panel bulanan memakai summary bulanan KP. Tidak menjumlahkan snapshot WhatsApp intraday.
-  let q=db.from("historical_summary")
-    .select("year,month,kp_code,tonnage_kg")
-    .eq("year",year);
+  let dq=db.from("kp_daily_history")
+    .select("report_date,kp_code,tonnage_kg,trip_count")
+    .gte("report_date",start).lte("report_date",end)
+    .order("report_date",{ascending:true});
+  if(kp!=="ALL") dq=dq.eq("kp_code",kp);
+  const {data:daily,error:dailyErr}=await dq;
+  if(dailyErr){renderMonitorEmpty(dailyErr.message);return;}
 
-  const {data,error}=await q;
-  if(error){renderMonitorEmpty(error.message);return;}
-  const allRows=data||[];
-
-  if(!allRows.length){
-    setMonitorSummary({
-      kp,period:monthLabelId(monthValue),tonnage:0,trips:null,
-      coverage:"0 KP",
-      tonnageSub:"Belum ada data bulanan",
-      tripsSub:"Menunggu Excel bulanan",
-      coverageSub:"KP dengan data"
+  if(daily?.length){
+    const byDate={};
+    daily.forEach(r=>{
+      if(!byDate[r.report_date]) byDate[r.report_date]={tonnage:0,trips:0};
+      byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
+      byDate[r.report_date].trips+=Number(r.trip_count||0);
     });
-    renderMonitorEmpty("Panel bulanan sudah siap. Data akan muncul setelah summary/Excel bulan tersebut tersedia.");
-    return;
-  }
-
-  // Aggregate current selected month by KP.
-  const monthRows=allRows.filter(r=>Number(r.month)===month);
-  const byKP={};
-  monthRows.forEach(r=>{
-    byKP[r.kp_code]=(byKP[r.kp_code]||0)+Number(r.tonnage_kg||0);
-  });
-
-  if(kp==="ALL"){
-    const pairs=Object.entries(byKP).sort((a,b)=>b[1]-a[1]);
-    const total=pairs.reduce((a,b)=>a+b[1],0);
-    const active=pairs.filter(([,v])=>v>0).length;
-    const avg=active?total/active:0;
+    const dates=Object.keys(byDate).sort();
+    const vals=dates.map(d=>byDate[d].tonnage);
+    const total=vals.reduce((a,b)=>a+b,0);
+    const trips=dates.reduce((a,d)=>a+byDate[d].trips,0);
+    const avg=dates.length?total/dates.length:0;
 
     setMonitorSummary({
-      kp,period:monthLabelId(monthValue),tonnage:total,trips:null,
-      coverage:`${active} KP`,
-      tonnageSub:`Rata-rata ${kg(avg)} / KP aktif`,
-      tripsSub:"Akan tersedia setelah Excel detail bulanan diupload",
-      coverageSub:"KP dengan tonase bulan ini"
+      kp,period:monthLabelId(month),tonnage:total,trips,
+      coverage:`${dates.length} hari`,
+      tonnageSub:`Rata-rata ${kg(avg)} / hari data`,
+      tripsSub:"Total trip dari Excel bulanan",
+      coverageSub:"Hari dengan data"
     });
-
-    if(!pairs.length){
-      renderMonitorEmpty("Belum ada data untuk bulan yang dipilih.");
-      return;
-    }
 
     Plotly.newPlot("monitorKpChart",[{
-      x:pairs.map(x=>x[1]),
-      y:pairs.map(x=>x[0]),
-      type:"bar",orientation:"h",
+      x:dates.map(d=>d.slice(8,10)),
+      y:vals,type:"bar",
+      text:vals.map(v=>compactKg(v)),
+      textposition:"outside",
+      cliponaxis:false,
       marker:{color:"#49de5f"},
-      hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
+      hovertemplate:"Tanggal %{x}<br>%{y:,.0f} kg<extra></extra>"
     }],{
       ...darkLayout,
-      margin:{t:18,l:74,r:18,b:38},
-      xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
-      yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
-      showlegend:false
-    },plotConfig);
-
-    $("monitorKpTable").innerHTML=table(
-      ["Ranking","KP","Tonase","Trip"],
-      pairs.map(([code,val],i)=>[
-        i+1,code,kg(val),'<span style="color:#9e9588">Menunggu Excel</span>'
-      ])
-    );
-  }else{
-    // For one KP, show Jan-Dec monthly trend in the selected year,
-    // while KPI card remains focused on the selected month.
-    const monthly=Array(12).fill(0);
-    allRows.filter(r=>r.kp_code===kp).forEach(r=>{
-      const m=Number(r.month);
-      if(m>=1&&m<=12) monthly[m-1]+=Number(r.tonnage_kg||0);
-    });
-    const selected=monthly[month-1]||0;
-    const present=monthly.filter(v=>v>0).length;
-    const previous=month>1?monthly[month-2]:0;
-    let deltaText="Tidak ada pembanding bulan sebelumnya";
-    if(previous>0){
-      const delta=selected-previous;
-      const pct=(delta/previous)*100;
-      deltaText=`${delta>=0?"+":""}${kg(delta)} (${pct>=0?"+":""}${pct.toFixed(1)}%) vs bulan lalu`;
-    }
-
-    setMonitorSummary({
-      kp,period:monthLabelId(monthValue),tonnage:selected,trips:null,
-      coverage:`${present} bulan`,
-      tonnageSub:deltaText,
-      tripsSub:"Akan tersedia setelah Excel detail bulanan diupload",
-      coverageSub:`Bulan tersedia pada ${year}`
-    });
-
-    const labels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
-    Plotly.newPlot("monitorKpChart",[{
-      x:labels,y:monthly,type:"bar",
-      marker:{
-        color:monthly.map((v,i)=>i===month-1?"#7cff86":v>0?"rgba(73,222,95,.55)":"rgba(255,255,255,.10)")
-      },
-      hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
-    }],{
-      ...darkLayout,
-      margin:{t:18,l:58,r:18,b:38},
-      xaxis:{...darkLayout.xaxis,fixedrange:true},
+      margin:{t:28,l:58,r:18,b:42},
+      xaxis:{...darkLayout.xaxis,title:{text:"Tanggal",font:{size:9,color:"#b8aea1"}},fixedrange:true},
       yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
       showlegend:false
     },plotConfig);
 
     $("monitorKpTable").innerHTML=table(
-      ["Bulan","Tonase","Trip","Sumber"],
-      labels.map((label,i)=>[
-        label,kg(monthly[i]),
-        '<span style="color:#9e9588">—</span>',
-        monthly[i]>0?"Summary bulanan":"Belum ada data"
-      ])
+      ["Tanggal","Tonase","Trip","Sumber"],
+      dates.map(d=>[d,kg(byDate[d].tonnage),byDate[d].trips,"Excel Bulanan"])
     );
+    return;
   }
+
+  // Fallback: monthly summary only
+  let sq=db.from("historical_summary")
+    .select("kp_code,tonnage_kg")
+    .eq("year",year).eq("month",monthNum);
+  if(kp!=="ALL") sq=sq.eq("kp_code",kp);
+  const {data:summary,error}=await sq;
+  if(error){renderMonitorEmpty(error.message);return;}
+  const rows=summary||[];
+
+  if(!rows.length){
+    setMonitorSummary({
+      kp,period:monthLabelId(month),tonnage:0,trips:null,
+      coverage:"0 hari",
+      tonnageSub:"Belum ada data bulanan",
+      tripsSub:"Upload Excel bulanan untuk detail trip",
+      coverageSub:"Belum ada data"
+    });
+    renderMonitorEmpty("Belum ada data bulanan. Gunakan tombol Upload Excel Bulanan di atas.");
+    return;
+  }
+
+  const total=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  setMonitorSummary({
+    kp,period:monthLabelId(month),tonnage:total,trips:null,
+    coverage:`${rows.length} KP`,
+    tonnageSub:"Summary bulanan tersedia",
+    tripsSub:"Trip tidak tersedia di summary",
+    coverageSub:"Upload Excel detail untuk grafik harian"
+  });
+
+  const pairs=rows.map(r=>[r.kp_code,Number(r.tonnage_kg||0)]).sort((a,b)=>b[1]-a[1]);
+  Plotly.newPlot("monitorKpChart",[{
+    x:pairs.map(x=>x[1]),
+    y:pairs.map(x=>x[0]),
+    type:"bar",orientation:"h",
+    marker:{color:"#49de5f"},
+    hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
+  }],{
+    ...darkLayout,
+    margin:{t:18,l:74,r:18,b:38},
+    xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
+    yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
+    showlegend:false
+  },plotConfig);
+
+  $("monitorKpTable").innerHTML=table(
+    ["KP","Tonase","Trip","Sumber"],
+    pairs.map(([code,val])=>[code,kg(val),"—","Summary Bulanan"])
+  );
 }
 
 async function loadKPYearly(kp){
@@ -1090,7 +1494,10 @@ async function loadKPYearly(kp){
 
   Plotly.newPlot("monitorKpChart",[{
     x:labels,y:monthly,type:"bar",
-    marker:{color:monthly.map((v,i)=>monthsPresent.has(i+1)?"#49de5f":"rgba(255,255,255,.10)")},
+    text:monthly.map((v,i)=>monthsPresent.has(i+1)&&v>0?compactKg(v):""),
+    textposition:"outside",
+    cliponaxis:false,
+    marker:{color:monthly.map((v,i)=>monthsPresent.has(i+1)?"#49de5f":"rgba(255,255,255,.08)")},
     hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
   }],{
     ...darkLayout,
