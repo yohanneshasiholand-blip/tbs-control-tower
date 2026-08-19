@@ -1335,6 +1335,14 @@ async function saveAnnualExcel(){
   await loadKPYearlyPanel($("monitorKp").value || "ALL");
 }
 
+
+function resetPlotContainer(id){
+  const el=$(id);
+  if(!el) return;
+  try{ Plotly.purge(id); }catch(e){}
+  el.innerHTML="";
+}
+
 // =========================================================
 // KP MONITORING: HARIAN / BULANAN / TAHUNAN
 // =========================================================
@@ -1453,7 +1461,7 @@ async function loadKPMonthlyPanel(kp){
 
   const {data:daily,error:de}=await dq;
   if(de){
-    $("monthlyMonitorChart").innerHTML=`<div class="empty">${de.message}</div>`;
+    resetPlotContainer("monthlyMonitorChart"); $("monthlyMonitorChart").innerHTML=`<div class="chart-empty-state">${de.message}</div>`;
     return;
   }
 
@@ -1478,6 +1486,7 @@ async function loadKPMonthlyPanel(kp){
       coverageSub:"Hari dengan data"
     });
 
+    resetPlotContainer("monthlyMonitorChart");
     Plotly.newPlot("monthlyMonitorChart",[{
       x:dates.map(d=>d.slice(8,10)),
       y:vals,type:"bar",
@@ -1518,14 +1527,15 @@ async function loadKPMonthlyPanel(kp){
   });
 
   if(!rows.length){
-    Plotly.purge("monthlyMonitorChart");
-    $("monthlyMonitorChart").innerHTML="<div style='padding:55px 20px;text-align:center;color:#c8bdaf'>Belum ada data. Upload Excel Bulanan di panel ini.</div>";
+    resetPlotContainer("monthlyMonitorChart");
+    $("monthlyMonitorChart").innerHTML="<div class='chart-empty-state'>Belum ada data. Upload Excel Bulanan di panel ini.</div>";
     $("monthlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data bulanan"]]);
     return;
   }
 
   const pairs=rows.map(r=>[r.kp_code,Number(r.tonnage_kg||0)]).sort((a,b)=>b[1]-a[1]);
-  Plotly.newPlot("monthlyMonitorChart",[{
+  resetPlotContainer("monthlyMonitorChart");
+    Plotly.newPlot("monthlyMonitorChart",[{
     x:pairs.map(x=>x[1]),
     y:pairs.map(x=>x[0]),
     type:"bar",orientation:"h",
@@ -1553,7 +1563,7 @@ async function loadKPYearlyPanel(kp){
 
   const {data,error}=await q;
   if(error){
-    $("yearlyMonitorChart").innerHTML=`<div class="empty">${error.message}</div>`;
+    resetPlotContainer("yearlyMonitorChart"); $("yearlyMonitorChart").innerHTML=`<div class="chart-empty-state">${error.message}</div>`;
     return;
   }
 
@@ -1580,12 +1590,13 @@ async function loadKPYearlyPanel(kp){
   const labels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
 
   if(!rows.length){
-    Plotly.purge("yearlyMonitorChart");
-    $("yearlyMonitorChart").innerHTML="<div style='padding:55px 20px;text-align:center;color:#c8bdaf'>Belum ada histori. Upload Excel Tahunan di panel ini.</div>";
+    resetPlotContainer("yearlyMonitorChart");
+    $("yearlyMonitorChart").innerHTML="<div class='chart-empty-state'>Belum ada histori. Upload Excel Tahunan di panel ini.</div>";
     $("yearlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data tahunan"]]);
     return;
   }
 
+  resetPlotContainer("yearlyMonitorChart");
   Plotly.newPlot("yearlyMonitorChart",[{
     x:labels,y:monthly,type:"bar",
     text:monthly.map((v,i)=>monthsPresent.has(i+1)&&v>0?compactKg(v):""),
@@ -1658,6 +1669,7 @@ async function loadKPDaily(kp){
     coverageSub:"Snapshot tersedia"
   });
 
+  resetPlotContainer("monitorKpChart");
   Plotly.newPlot("monitorKpChart",[{
     x:slots,y:ys.map(v=>v??0),type:"bar",
     text:ys.map(v=>v==null?"Menunggu":compactKg(v)),
@@ -1722,7 +1734,8 @@ async function loadKPMonthly(kp){
       coverageSub:"Hari dengan data"
     });
 
-    Plotly.newPlot("monitorKpChart",[{
+    resetPlotContainer("monitorKpChart");
+  Plotly.newPlot("monitorKpChart",[{
       x:dates.map(d=>d.slice(8,10)),
       y:vals,type:"bar",
       text:vals.map(v=>compactKg(v)),
@@ -1776,6 +1789,7 @@ async function loadKPMonthly(kp){
   });
 
   const pairs=rows.map(r=>[r.kp_code,Number(r.tonnage_kg||0)]).sort((a,b)=>b[1]-a[1]);
+  resetPlotContainer("monitorKpChart");
   Plotly.newPlot("monitorKpChart",[{
     x:pairs.map(x=>x[1]),
     y:pairs.map(x=>x[0]),
@@ -1835,6 +1849,7 @@ async function loadKPYearly(kp){
     coverageSub:"Bulan dengan data"
   });
 
+  resetPlotContainer("monitorKpChart");
   Plotly.newPlot("monitorKpChart",[{
     x:labels,y:monthly,type:"bar",
     text:monthly.map((v,i)=>monthsPresent.has(i+1)&&v>0?compactKg(v):""),
