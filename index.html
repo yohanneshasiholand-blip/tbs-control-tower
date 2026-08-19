@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.4.1">
+  <link rel="stylesheet" href="style.css?v=4.5">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -549,12 +549,58 @@
       </section>
 
       <section id="page-master" class="page">
-        <div class="page-head glass">
-          <h2>Master Data</h2>
-          <p>Daftar KP dan supplier yang aktif di sistem.</p>
+        <div class="page-head glass row-space">
+          <div>
+            <h2>Master Data</h2>
+            <p>Directory unit, Jenis SPB/DO, kategori buah, dan penanggung jawab operasional.</p>
+          </div>
+          <div class="master-head-actions">
+            <input id="masterSearch" type="search" placeholder="Cari KP, unit, SPB, alamat..." oninput="renderMasterDirectory()">
+            <select id="masterFilter" onchange="renderMasterDirectory()">
+              <option value="ALL">Semua Unit</option>
+              <option value="WITH_PIC">Dengan PIC</option>
+              <option value="NO_PIC">PIC belum lengkap</option>
+            </select>
+          </div>
         </div>
-        <article class="panel glass">
-          <div id="masterTable" class="table-wrap"></div>
+
+        <div class="master-summary-grid">
+          <article class="monitor-kpi glass">
+            <small>TOTAL UNIT</small>
+            <strong id="masterUnitCount">0</strong>
+            <span>KP / PKS aktif</span>
+          </article>
+          <article class="monitor-kpi glass">
+            <small>TOTAL SPB / DO</small>
+            <strong id="masterSupplierCount">0</strong>
+            <span>Jenis SPB aktif</span>
+          </article>
+          <article class="monitor-kpi glass">
+            <small>UNIT DENGAN PIMPINAN</small>
+            <strong id="masterHeadCount">0</strong>
+            <span>Data pimpinan tersedia</span>
+          </article>
+          <article class="monitor-kpi glass">
+            <small>WILAYAH</small>
+            <strong id="masterRegionCount">0</strong>
+            <span>Provinsi teridentifikasi</span>
+          </article>
+        </div>
+
+        <article class="panel glass master-directory-panel">
+          <div class="panel-head row-space">
+            <h3>DIRECTORY UNIT</h3>
+            <span class="monitor-source-badge">Master Aktif</span>
+          </div>
+          <div id="masterDirectory" class="master-directory"></div>
+        </article>
+
+        <article class="panel glass master-supplier-panel">
+          <div class="panel-head row-space">
+            <h3>MASTER JENIS SPB / DO</h3>
+            <span class="monitor-source-badge">Kode + Nama Lengkap</span>
+          </div>
+          <div id="masterSupplierTable" class="table-wrap"></div>
         </article>
       </section>
     </main>
