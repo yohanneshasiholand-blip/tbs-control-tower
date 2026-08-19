@@ -1978,3 +1978,9 @@ select option:checked{
 #monthlyExcelPreview{
   border-color:rgba(73,222,95,.13);
 }
+
+
+/* ASMJ multi-row header import v4.7.1 */
+#monthlyExcelPreview{
+  white-space:pre-wrap;
+}
