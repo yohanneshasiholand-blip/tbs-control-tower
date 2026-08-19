@@ -1702,3 +1702,37 @@ select option:checked{
   .classic-child b{font-size:6px}
   .classic-list-icon{font-size:7px;min-width:9px}
 }
+/* FINAL SIDEBAR FONT BALANCE */
+.classic-parent b{
+  font-size: 11px !important;
+  font-weight: 800 !important;
+}
+
+.classic-child b{
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+.classic-parent-icon{
+  font-size: 10px !important;
+}
+
+.classic-list-icon{
+  font-size: 9px !important;
+}
+
+/* Dashboard & Master Data */
+.classic-tree-nav > .nav b{
+  font-size: 11px !important;
+}
+
+/* Beri tinggi menu sedikit lebih nyaman */
+.classic-parent{
+  min-height: 38px;
+  padding: 8px 10px !important;
+}
+
+.classic-child{
+  min-height: 32px;
+  padding: 6px 8px !important;
+}
