@@ -1160,3 +1160,97 @@ tr:hover td{background:rgba(255,255,255,.03)}
   .control-tools{width:100%;justify-content:flex-start}
   .control-tools input,.control-tools select{flex:1;min-width:0}
 }
+
+
+/* =========================================================
+   KP DROPDOWN VISIBILITY FIX v3.9.1
+   Native Windows/Chrome option menu needs an explicit dark surface.
+   ========================================================= */
+select{
+  color:#f7f4ea !important;
+  color-scheme:dark;
+}
+select option,
+select optgroup{
+  background:#171915 !important;
+  color:#f7f4ea !important;
+}
+select option:checked{
+  background:#244429 !important;
+  color:#ffffff !important;
+}
+#dashboardTrendKp,
+#monitorKp,
+#historyKp,
+#expenseKp{
+  background-color:rgba(22,25,20,.94) !important;
+  color:#ffffff !important;
+}
+
+
+/* =========================================================
+   EXECUTIVE DASHBOARD RESTORE + MONITOR PERIOD CARDS v4.0
+   ========================================================= */
+
+/* Dashboard kembali ke komposisi utama; interaksi tidak mengubah ukuran */
+#page-dashboard .interactive-card,
+#page-dashboard .interactive-panel{
+  cursor:pointer;
+}
+#page-dashboard .interactive-card:hover,
+#page-dashboard .interactive-panel:hover{
+  transform:translateY(-1px);
+  border-color:rgba(73,222,95,.18);
+}
+
+/* Period indicators only live inside Monitoring KP */
+.monitor-period-overview{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  margin-top:8px;
+}
+.monitor-period-card{
+  min-height:116px;
+  cursor:pointer;
+  position:relative;
+  overflow:hidden;
+}
+.monitor-period-card::after{
+  content:"";
+  position:absolute;
+  left:0;right:0;bottom:0;
+  height:2px;
+  background:transparent;
+}
+.monitor-period-card.active{
+  border-color:rgba(73,222,95,.26);
+  box-shadow:0 12px 28px rgba(0,0,0,.18),0 0 0 1px rgba(73,222,95,.06) inset;
+}
+.monitor-period-card.active::after{
+  background:linear-gradient(90deg,#49de5f,#7cff86);
+}
+.monitor-period-card:hover{
+  transform:translateY(-1px);
+  border-color:rgba(73,222,95,.22);
+}
+.period-open{
+  color:#64ef72;
+  font-weight:900;
+  font-size:7px;
+}
+
+@media (min-width:1100px) and (max-width:1499px){
+  .monitor-period-overview{gap:5px;margin-top:5px}
+  .monitor-period-card{
+    min-height:76px;
+    padding:5px 7px 4px;
+    border-radius:9px;
+  }
+  .monitor-period-card .mini-trend-chart{height:37px}
+  .period-open{font-size:5px}
+}
+@media(max-width:900px){
+  .monitor-period-overview{grid-template-columns:1fr}
+  .monitor-period-card{min-height:112px}
+}
