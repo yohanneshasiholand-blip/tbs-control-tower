@@ -1702,37 +1702,85 @@ select option:checked{
   .classic-child b{font-size:6px}
   .classic-list-icon{font-size:7px;min-width:9px}
 }
-/* FINAL SIDEBAR FONT BALANCE */
-.classic-parent b{
-  font-size: 11px !important;
-  font-weight: 800 !important;
+
+
+/* =========================================================
+   SIDEBAR FONT FIX v4.4.1
+   Final override — keep this at the VERY END of style.css
+   ========================================================= */
+
+/* Parent items: Monitoring / Harga TBS / Pengeluaran */
+.sidebar .classic-tree-nav .classic-parent b{
+  font-size:14px !important;
+  line-height:1.2 !important;
+  font-weight:800 !important;
 }
 
-.classic-child b{
-  font-size: 10px !important;
-  font-weight: 700 !important;
+/* Submenu: Harian / Bulanan / Tahunan / Paste ... */
+.sidebar .classic-tree-nav .classic-child b{
+  font-size:12px !important;
+  line-height:1.2 !important;
+  font-weight:700 !important;
 }
 
-.classic-parent-icon{
-  font-size: 10px !important;
+/* Dashboard + Master Data */
+.sidebar .classic-tree-nav > .nav b{
+  font-size:14px !important;
+  line-height:1.2 !important;
+  font-weight:800 !important;
 }
 
-.classic-list-icon{
-  font-size: 9px !important;
+/* Icons and arrows */
+.sidebar .classic-parent-icon{
+  font-size:12px !important;
+}
+.sidebar .classic-caret{
+  font-size:11px !important;
+}
+.sidebar .classic-list-icon{
+  font-size:11px !important;
 }
 
-/* Dashboard & Master Data */
-.classic-tree-nav > .nav b{
-  font-size: 11px !important;
+/* Comfortable menu height */
+.sidebar .classic-parent{
+  min-height:44px !important;
+  padding:10px 11px !important;
+}
+.sidebar .classic-child{
+  min-height:36px !important;
+  padding:8px 9px !important;
+}
+.sidebar .nav{
+  min-height:44px !important;
+  padding:10px 12px !important;
 }
 
-/* Beri tinggi menu sedikit lebih nyaman */
-.classic-parent{
-  min-height: 38px;
-  padding: 8px 10px !important;
+/* Keep submenu indentation visible */
+.sidebar .classic-submenu{
+  padding-left:30px !important;
 }
 
-.classic-child{
-  min-height: 32px;
-  padding: 6px 8px !important;
+/* Force the same size even in the laptop-fit media range */
+@media (min-width:1100px) and (max-width:1499px){
+  .sidebar .classic-tree-nav .classic-parent b{
+    font-size:14px !important;
+  }
+  .sidebar .classic-tree-nav .classic-child b{
+    font-size:12px !important;
+  }
+  .sidebar .classic-tree-nav > .nav b{
+    font-size:14px !important;
+  }
+  .sidebar .classic-parent{
+    min-height:44px !important;
+    padding:10px 11px !important;
+  }
+  .sidebar .classic-child{
+    min-height:36px !important;
+    padding:8px 9px !important;
+  }
+  .sidebar .nav{
+    min-height:44px !important;
+    padding:10px 12px !important;
+  }
 }
