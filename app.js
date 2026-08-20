@@ -222,19 +222,85 @@ function resolveTonnageHeader(text){
     timeSource:parsed.time?"header WhatsApp":"pilihan jam"
   };
 }
+function cleanTonnageLine(raw){
+  return String(raw||"")
+    .replace(/\u00a0/g," ")
+    .replace(/[＊*_`~]/g,"")   // strip WhatsApp markdown
+    .replace(/\s+/g," ")
+    .trim();
+}
+
 function parseTonnage(text){
-  const h=resolveTonnageHeader(text); let kp=null, rows=[], declared=null;
-  for(const raw of text.split(/\r?\n/)){
-    const line=raw.trim(); if(!line) continue;
-    if(/^KP[.\s]/i.test(line)){ kp=canonKP(line); continue; }
-    let ts=line.match(/^TOTAL\s+SELURUH\s*:\s*([\d.,]+)/i);
-    if(ts){ declared=num(ts[1]); continue; }
+  const h=resolveTonnageHeader(text);
+  let kp=null, rows=[], declared=null;
+
+  for(const raw of String(text||"").split(/\r?\n/)){
+    const line=cleanTonnageLine(raw);
+    if(!line) continue;
+
+    // KP header. Strip trailing colon/punctuation before canonicalization.
+    if(/^KP[.\s:]/i.test(line)){
+      kp=canonKP(line.replace(/[:]+$/,"").trim());
+      continue;
+    }
+
+    // IMPORTANT: detect TOTAL SELURUH before generic supplier parsing.
+    // Works for:
+    // TOTAL SELURUH : 1.582.407
+    // *TOTAL SELURUH : 1.582.407*
+    // TOTAL SELURUH: Rp? (numeric only accepted)
+    const ts=line.match(/^TOTAL\s+SELURUH\s*:\s*([\d.,]+)/i);
+    if(ts){
+      declared=num(ts[1]);
+      continue;
+    }
+
+    // KP subtotal is never a supplier/detail row.
     if(/^TOTAL\s*:/i.test(line)) continue;
-    let r=line.match(/^([^:]+)\s*:\s*([\d.,]+|-)\s*(?:\((\d+)\))?/);
-    if(kp && r) rows.push({kp_code:kp, supplier_name:r[1].trim(), tonnage_kg:r[2]==="-"?0:num(r[2]), trip_count:+(r[3]||0)});
+
+    // Supplier row, e.g. "Surya : 95.481 (8)"
+    const r=line.match(/^([^:]+)\s*:\s*([\d.,]+|-)\s*(?:\((\d+)\))?/);
+    if(kp && r){
+      const supplier=r[1].trim();
+
+      // Defensive block: never let any TOTAL-like label enter details.
+      if(/^TOTAL\b/i.test(supplier)) continue;
+
+      rows.push({
+        kp_code:kp,
+        supplier_name:supplier,
+        tonnage_kg:r[2]==="-" ? 0 : num(r[2]),
+        trip_count:+(r[3]||0)
+      });
+    }
   }
-  const total=rows.reduce((a,b)=>a+b.tonnage_kg,0), trips=rows.reduce((a,b)=>a+b.trip_count,0);
-  return {...h, rows, total, trips, declared, validTotal: declared==null || declared===total};
+
+  // Deduplicate exact KP+supplier within one pasted snapshot by summing only
+  // if duplicates are truly repeated supplier lines. TOTAL rows are excluded above.
+  const agg=new Map();
+  rows.forEach(r=>{
+    const key=`${r.kp_code}|${String(r.supplier_name).toUpperCase()}`;
+    if(!agg.has(key)){
+      agg.set(key,{...r});
+    }else{
+      const x=agg.get(key);
+      x.tonnage_kg+=Number(r.tonnage_kg||0);
+      x.trip_count+=Number(r.trip_count||0);
+    }
+  });
+  rows=[...agg.values()];
+
+  const total=rows.reduce((a,b)=>a+Number(b.tonnage_kg||0),0);
+  const trips=rows.reduce((a,b)=>a+Number(b.trip_count||0),0);
+
+  return {
+    ...h,
+    rows,
+    total,
+    trips,
+    declared,
+    validTotal:declared==null || declared===total
+  };
 }
 function previewTonnage(){
   try{
@@ -253,6 +319,15 @@ function previewTonnage(){
 async function saveTonnage(){
   if(!TONNAGE_PREVIEW) return alert("Preview dahulu.");
   const p = TONNAGE_PREVIEW;
+
+  if(p.declared!=null && !p.validTotal){
+    return alert(
+      "SIMPAN DIBLOKIR.\n\n"+
+      `Total detail: ${kg(p.total)}\n`+
+      `TOTAL SELURUH: ${kg(p.declared)}\n\n`+
+      "Jumlah detail harus sama dengan TOTAL SELURUH."
+    );
+  }
   const {data:s, error} = await db.from("monitoring_snapshots").upsert({
     report_date:p.date, snapshot_time:p.time, total_tonnage_kg:p.declared ?? p.total,
     total_trips:p.trips, raw_text:$("tonnageText").value, status:p.validTotal ? "validated" : "needs_review"
@@ -363,9 +438,36 @@ function priceSuppliersForKP(expr,kp){
       .map(x=>canonSupplierForKP(kp,x)||x)
   )];
 }
+function parsePriceReportDate(text){
+  const source=String(text||"")
+    .replace(/\u00a0/g," ")
+    .replace(/[＊*]/g,"")
+    .replace(/\s+/g," ");
+
+  // Price reports often use: "Kamis, 20 Agustus 2026".
+  // Resolve Indonesian month names explicitly so month cannot drift.
+  let m=source.match(
+    /\b(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})\b/i
+  );
+  if(m){
+    const month=monthMap[m[2].toLowerCase()];
+    if(month) return isoDate(Number(m[1]),month,Number(m[3]));
+  }
+
+  // Numeric Indonesian date fallback: DD/MM/YYYY or DD-MM-YYYY.
+  m=source.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/);
+  if(m){
+    return isoDate(Number(m[1]),Number(m[2]),Number(m[3]));
+  }
+
+  return null;
+}
+
 function parsePrice(text){
+  const explicitDate=parsePriceReportDate(text);
   const h=parseHeader(text);
-  if(!h?.date) throw Error("Tanggal harga tidak ditemukan.");
+  const priceDate=explicitDate || h?.date || null;
+  if(!priceDate) throw Error("Tanggal harga tidak ditemukan.");
 
   let kp=null;
   const rows=[];
@@ -422,7 +524,7 @@ function parsePrice(text){
 
     for(const supplier of suppliers){
       rows.push({
-        effective_date:h.date,
+        effective_date:priceDate,
         kp_code:kp,
         supplier_name:supplier,
         price_per_kg:closed ? null : price,
@@ -439,7 +541,7 @@ function parsePrice(text){
   const finalRows=[...dedup.values()];
 
   if(!finalRows.length) throw Error("Tidak ada baris harga TBS yang dapat dibaca.");
-  return {date:h.date,rows:finalRows,warnings};
+  return {date:priceDate,rows:finalRows,warnings};
 }
 function previewPrice(){
   try{
@@ -712,7 +814,7 @@ function previewExpense(){
       : "";
 
     $("expensePreview").textContent=
-      `Tanggal: ${p.date}\n`+
+      `Tanggal efektif: ${p.date}\n`+
       `KP: ${p.kp} (${p.kpSource})\n`+
       `Baris biaya: ${p.rows.length}\n`+
       `Total detail: ${rupiah(p.total)}\n`+
