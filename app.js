@@ -18,7 +18,7 @@ const monthMap = {januari:1,februari:2,maret:3,april:4,mei:5,juni:6,juli:7,agust
 const slots = ["10:00","12:00","15:00","17:00"];
 let MASTER_KP_COUNT = 0;
 let TONNAGE_PREVIEW = null, PRICE_PREVIEW = null, EXPENSE_PREVIEW = null;
-let MONTHLY_EXCEL_PREVIEW = null, ANNUAL_EXCEL_PREVIEW = null;
+let DAILY_EXCEL_PREVIEW = null, MONTHLY_EXCEL_PREVIEW = null, ANNUAL_EXCEL_PREVIEW = null;
 let MONITOR_MODE = "daily";
 let MASTER_DIRECTORY_DATA = [];
 let MASTER_SUPPLIER_DATA = [];
@@ -289,17 +289,47 @@ function priceNumberToken(s){
 }
 function priceChangeFromLine(line){
   const s=String(line||"");
+
+  // "Naik Rp. 30 menjadi Rp. 3.120"
   let m=s.match(/\b(Naik|Turun)\b\s*(?:Rp\.?\s*)?([\d.,]+)/i);
   if(m){
     const n=Number(m[2].replace(/[.,]/g,""));
     return Number.isFinite(n) ? (m[1].toLowerCase()==="turun" ? -n : n) : null;
   }
+
+  // "(+30)" / "(-30)"
   m=s.match(/\(([+-])\s*(?:Rp\.?\s*)?([\d.,]+)\)/i);
   if(m){
     const n=Number(m[2].replace(/[.,]/g,""));
     return Number.isFinite(n) ? (m[1]==="-" ? -n : n) : null;
   }
   return null;
+}
+
+function finalPriceFromLine(line,closed){
+  if(closed) return null;
+  const s=String(line||"");
+
+  // Highest priority: explicit final price after "menjadi".
+  let m=s.match(/\bmenjadi\b\s*(?:Rp\.?\s*)?(\d{1,2}(?:[.,]\d{3})|\d{4,5})(?!\d)/i);
+  if(m){
+    return Number(m[1].replace(/[.,]/g,""));
+  }
+
+  // Pattern: "Rp3.310 Naik Rp20" -> take price before Naik/Turun.
+  const beforeChange=s.split(/\b(?:Naik|Turun)\b/i)[0];
+  const p=priceNumberToken(beforeChange);
+  if(p>0) return p;
+
+  // Fallback: first plausible price token in line, but ignore the
+  // Naik/Turun amount if a second price is present.
+  const vals=[...s.matchAll(/(?:Rp\.?\s*)?(\d{1,2}(?:[.,]\d{3})|\d{4,5})(?!\d)/gi)]
+    .map(x=>Number(x[1].replace(/[.,]/g,"")))
+    .filter(n=>Number.isFinite(n) && n>0);
+
+  if(!vals.length) return null;
+  if(/\b(?:Naik|Turun)\b/i.test(s) && vals.length>=2) return vals[vals.length-1];
+  return vals[0];
 }
 function supplierSearchToken(s){
   return String(s||"").toUpperCase().replace(/[^A-Z0-9]+/g,"");
@@ -359,17 +389,15 @@ function parsePrice(text){
 
     const closed=/\bTUTUP\b|\bCLOSED\b/i.test(line);
     const change=priceChangeFromLine(line);
-
-    // Main price must be taken BEFORE Naik/Turun, otherwise Rp20 change could be read as price.
-    const mainPart=line.split(/\b(?:Naik|Turun)\b/i)[0];
-    const price=closed ? null : priceNumberToken(mainPart);
+    const price=finalPriceFromLine(line,closed);
 
     if(!closed && !(price>0)){
-      // Not a recognized price line; do not create a bad row.
       continue;
     }
 
-    let supplierExpr=mainPart
+    // Supplier expression is always the part before price/change wording.
+    let supplierExpr=line
+      .split(/\b(?:Naik|Turun)\b/i)[0]
       .replace(/\bTUTUP\b|\bCLOSED\b/ig,"")
       .replace(/(?:Rp\.?\s*)?\d{1,2}(?:[.,]\d{3})|(?:Rp\.?\s*)?\d{4,5}/ig,"")
       .replace(/[:=]+/g," ")
@@ -511,6 +539,21 @@ function extractDeclaredExpenseTotal(text){
   }
   return null;
 }
+function malformedExpenseAmountCandidate(line){
+  // Detect likely mistyped Indonesian thousands such as 35.00 -> 35.000.
+  // Never auto-accept by itself; it is only used if it reconciles exactly
+  // against the declared report Total.
+  const m=String(line||"").match(/(?:Rp\.?\s*)?(\d{1,3})\.(\d{2})(?!\d)/i);
+  if(!m) return null;
+
+  const original=`${m[1]}.${m[2]}`;
+  const correctedToken=`${m[1]}.${m[2]}0`;
+  const corrected=Number(correctedToken.replace(/\./g,""));
+
+  if(!Number.isFinite(corrected) || corrected<=0) return null;
+  return {original,correctedToken,corrected};
+}
+
 function parseExpense(text){
   const h=parseHeader(text);
   if(!h?.date) throw Error("Tanggal biaya tidak ditemukan.");
@@ -527,7 +570,9 @@ function parseExpense(text){
     throw Error("KP tidak ada di laporan. Pilih KP/unit terlebih dahulu, lalu Preview lagi.");
   }
 
+  const declaredTotal=extractDeclaredExpenseTotal(text);
   const rows=[];
+  const malformedCandidates=[];
 
   for(const raw of String(text||"").split(/\r?\n/)){
     const line=cleanExpenseLine(raw);
@@ -538,16 +583,23 @@ function parseExpense(text){
     if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(line)) continue;
     if(/^\d{1,2}\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}$/i.test(line)) continue;
 
-    const amounts=expenseAmountsFromText(line);
-    if(!amounts.length) continue;
-
-    const amount=amounts.reduce((sum,n)=>sum+n,0);
-
     let category="Lainnya";
     const cat=line.match(/^(?:(?:B\.\s*|B\s+)|Beban\s+)([^()0-9]+?)(?:\s*\(|\s+\d|$)/i);
     if(cat){
       category=cat[1].trim().replace(/[,:;]+$/,"").trim();
     }
+
+    const amounts=expenseAmountsFromText(line);
+
+    if(!amounts.length){
+      const malformed=malformedExpenseAmountCandidate(line);
+      if(malformed){
+        malformedCandidates.push({line,category,...malformed});
+      }
+      continue;
+    }
+
+    const amount=amounts.reduce((sum,n)=>sum+n,0);
 
     const paren=line.match(/\((.*)\)/);
     let detail=paren?.[1]?.trim() || line;
@@ -571,16 +623,55 @@ function parseExpense(text){
       category,
       subcategory,
       description:detail || line,
-      amount
+      amount,
+      corrected_from:null
     });
+  }
+
+  let parsedTotal=rows.reduce((sum,r)=>sum+Number(r.amount||0),0);
+  const corrections=[];
+
+  // Reconcile malformed amounts only if the declared Total proves the correction.
+  if(declaredTotal!=null && parsedTotal!==declaredTotal && malformedCandidates.length){
+    let remaining=declaredTotal-parsedTotal;
+
+    for(const c of malformedCandidates){
+      if(remaining<=0) break;
+
+      if(c.corrected===remaining){
+        const paren=c.line.match(/\((.*)\)/);
+        const detail=(paren?.[1] || c.line)
+          .replace(c.original,"")
+          .replace(/\s+/g," ")
+          .trim();
+
+        rows.push({
+          expense_date:h.date,
+          kp_code:kp,
+          category:c.category,
+          subcategory:null,
+          description:detail || c.line,
+          amount:c.corrected,
+          corrected_from:c.original
+        });
+
+        corrections.push({
+          from:c.original,
+          to:c.correctedToken,
+          amount:c.corrected,
+          line:c.line
+        });
+
+        parsedTotal+=c.corrected;
+        remaining=declaredTotal-parsedTotal;
+      }
+    }
   }
 
   if(!rows.length){
     throw Error("Tidak ada baris biaya yang dapat dibaca.");
   }
 
-  const parsedTotal=rows.reduce((sum,r)=>sum+Number(r.amount||0),0);
-  const declaredTotal=extractDeclaredExpenseTotal(text);
   const difference=declaredTotal==null ? null : parsedTotal-declaredTotal;
   const totalMatches=declaredTotal==null ? null : Math.abs(difference)<=1;
 
@@ -592,7 +683,11 @@ function parseExpense(text){
     total:parsedTotal,
     declaredTotal,
     difference,
-    totalMatches
+    totalMatches,
+    corrections,
+    unresolvedMalformed:malformedCandidates.filter(c=>
+      !corrections.some(x=>x.line===c.line)
+    )
   };
 }
 function previewExpense(){
@@ -606,17 +701,30 @@ function previewExpense(){
         `Selisih: ${rupiah(Math.abs(p.difference||0))}\n`+
         `Status: ${p.totalMatches ? "✓ COCOK" : "✕ TIDAK COCOK"}`;
 
+    const correctionText=p.corrections?.length
+      ? `\nKoreksi format otomatis tervalidasi:\n`+
+        p.corrections.map(c=>`- ${c.from} → ${c.to} (${rupiah(c.amount)})`).join("\n")
+      : "";
+
+    const unresolvedText=p.unresolvedMalformed?.length
+      ? `\nFormat nominal belum pasti:\n`+
+        p.unresolvedMalformed.map(c=>`- ${c.line}`).join("\n")
+      : "";
+
     $("expensePreview").textContent=
       `Tanggal: ${p.date}\n`+
       `KP: ${p.kp} (${p.kpSource})\n`+
       `Baris biaya: ${p.rows.length}\n`+
       `Total detail: ${rupiah(p.total)}\n`+
-      `${validation}\n\n`+
+      `${validation}`+
+      `${correctionText}`+
+      `${unresolvedText}\n\n`+
       p.rows.map((r,i)=>
         `${i+1}. ${r.category}`+
         `${r.subcategory ? " / "+r.subcategory : ""}\n`+
         `   ${r.description}\n`+
-        `   ${rupiah(r.amount)}`
+        `   ${rupiah(r.amount)}`+
+        `${r.corrected_from ? ` [dikoreksi dari ${r.corrected_from}]` : ""}`
       ).join("\n\n");
   }catch(e){
     EXPENSE_PREVIEW=null;
@@ -625,6 +733,12 @@ function previewExpense(){
 }
 async function saveExpense(){
   if(!EXPENSE_PREVIEW) return alert("Preview dahulu.");
+
+  if(EXPENSE_PREVIEW.unresolvedMalformed?.length && !EXPENSE_PREVIEW.totalMatches){
+    return alert(
+      "SIMPAN DIBLOKIR. Ada nominal dengan format tidak pasti dan total belum cocok. Periksa Preview."
+    );
+  }
 
   if(EXPENSE_PREVIEW.declaredTotal!=null && !EXPENSE_PREVIEW.totalMatches){
     return alert(
@@ -775,17 +889,37 @@ async function loadMaster(){
   renderMasterDirectory();
 }
 
+function normalizedPriceKey(kp,supplier){
+  const kpKey=canonKP(kp||"");
+  const supplierKey=String(supplier||"")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g,"");
+  return `${kpKey}|${supplierKey}`;
+}
+
 async function getLatestEffectivePrices(date){
-  const {data}=await db.from("daily_prices").select("*").lte("effective_date",date).order("effective_date",{ascending:false}).limit(2000);
+  // Business rule: use the latest explicit price/status effective on or before
+  // the snapshot date. ACTIVE carries forward until replaced; CLOSED also
+  // carries forward until a later row reopens the supplier.
+  const {data,error}=await db.from("daily_prices")
+    .select("*")
+    .lte("effective_date",date)
+    .order("effective_date",{ascending:false})
+    .order("created_at",{ascending:false})
+    .limit(5000);
+
+  if(error){
+    console.error("daily_prices:",error);
+    return [];
+  }
+
   const latest={};
   (data||[]).forEach(x=>{
-    const key=x.kp_code+"|"+x.supplier_name;
+    const key=normalizedPriceKey(x.kp_code,x.supplier_name);
     if(!latest[key]) latest[key]=x;
   });
   return Object.values(latest);
 }
-
-
 
 async function openDashboardDetail(page,mode=null){
   if(page==="monitoring" && $("monitorKp") && !$("monitorKp").value) $("monitorKp").value="ALL";
@@ -811,7 +945,7 @@ async function loadDashboard(){
   const maxPrice = pricesOnly.length ? Math.max(...pricesOnly) : 0;
 
   $("kpiAvgPrice").textContent = rupiah(avgPrice) + " /kg";
-  $("kpiPriceSub").textContent = activePrices.length + " supplier aktif";
+  $("kpiPriceSub").textContent = activePrices.length + " supplier dengan harga efektif";
   $("priceMin").textContent = rupiah(minPrice);
   $("priceAvg2").textContent = rupiah(avgPrice);
   $("priceMax").textContent = rupiah(maxPrice);
@@ -992,7 +1126,9 @@ async function loadDashboard(){
 
   // Control table
   const priceMap = {};
-  latestPrices.forEach(x=>priceMap[x.kp_code + "|" + x.supplier_name] = x);
+  latestPrices.forEach(x=>{
+    priceMap[normalizedPriceKey(x.kp_code,x.supplier_name)] = x;
+  });
   const expenseByKP = {};
   dailyExpenses.forEach(x=>expenseByKP[x.kp_code] = (expenseByKP[x.kp_code] || 0) + Number(x.amount || 0));
 
@@ -1000,7 +1136,9 @@ async function loadDashboard(){
     .filter(r=>Number(r.tonnage_kg||0) > 0 || Number(r.trip_count||0) > 0)
     .sort((a,b)=>Number(b.tonnage_kg)-Number(a.tonnage_kg))
     .map((r,i)=>{
-      const price = priceMap[r.kp_code + "|" + r.supplier_name]?.price_per_kg || 0;
+      const priceRow = priceMap[normalizedPriceKey(r.kp_code,r.supplier_name)] || null;
+      const isClosed = priceRow?.status === "closed";
+      const price = (!isClosed && priceRow?.price_per_kg != null) ? Number(priceRow.price_per_kg) : 0;
       const value = Number(r.tonnage_kg || 0) * Number(price || 0);
       const exp = expenseByKP[r.kp_code] || 0;
       const costkg = Number(r.tonnage_kg || 0) ? (exp / Number(r.tonnage_kg || 0)) : 0;
@@ -1010,7 +1148,7 @@ async function loadDashboard(){
         r.supplier_name,
         Number(r.tonnage_kg || 0).toLocaleString("id-ID"),
         r.trip_count || 0,
-        price ? Number(price).toLocaleString("id-ID") : "-",
+        isClosed ? "TUTUP" : (price ? Number(price).toLocaleString("id-ID") : "BELUM ADA"),
         value ? Number(value).toLocaleString("id-ID") : "-",
         exp ? exp.toLocaleString("id-ID") : "-",
         costkg ? costkg.toLocaleString("id-ID", {minimumFractionDigits:2, maximumFractionDigits:2}) : "-"
@@ -1334,6 +1472,12 @@ async function readWorkbookFile(file){
 }
 function sheetAOA(sheet){
   return XLSX.utils.sheet_to_json(sheet,{header:1,defval:null,raw:false,blankrows:false});
+}
+function annualSheetAOA(sheet){
+  // Annual workbook must use the underlying/cached numeric value.
+  // raw:false can turn 2,461,462 kg into displayed "2.461" and corrupt totals.
+  // raw:true also preserves cached numeric results for formula cells in older sheets.
+  return XLSX.utils.sheet_to_json(sheet,{header:1,defval:null,raw:true,blankrows:false});
 }
 function sheetAOARaw(sheet){
   return XLSX.utils.sheet_to_json(sheet,{header:1,defval:null,raw:true,blankrows:false});
@@ -1826,6 +1970,107 @@ async function validateMonthlyAgainstAnnual(dailyRows){
   }
   return result;
 }
+
+async function previewDailyExcels(fileList){
+  try{
+    const files=[...(fileList||[])];
+    if(!files.length) throw Error("Pilih minimal 1 file Excel Harian.");
+
+    const selectedDate=$("monitorDate")?.value;
+    if(!selectedDate) throw Error("Pilih tanggal Monitoring Harian terlebih dahulu.");
+
+    const previews=[];
+    let extracted=[];
+
+    for(const file of files){
+      const wb=await readWorkbookFile(file);
+      const p=parseMonthlyWorkbook(wb,file.name);
+      previews.push(p);
+
+      // Reuse the validated detailed Excel parser, but ONLY take the selected day.
+      extracted.push(...(p.daily||[])
+        .filter(r=>r.report_date===selectedDate)
+        .map(r=>({
+          ...r,
+          source_file:`DAILY:${file.name}`
+        })));
+    }
+
+    extracted=combineDailyRows(extracted);
+
+    const badFiles=previews.filter(p=>!p.integrityOk);
+    const kpSet=new Set(extracted.map(r=>r.kp_code));
+    const supplierSet=new Set(extracted.map(r=>`${r.kp_code}/${r.supplier_name}`));
+    const tonTotal=extracted.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const tripTotal=extracted.reduce((a,r)=>a+Number(r.trip_count||0),0);
+
+    DAILY_EXCEL_PREVIEW={
+      date:selectedDate,
+      files:files.map(f=>f.name),
+      daily:extracted,
+      fileResults:previews,
+      integrityBlocked:badFiles
+    };
+
+    $("dailyExcelPreview").textContent=
+      `TANGGAL CLOSING: ${selectedDate}\n`+
+      `File dipilih: ${files.length}\n`+
+      `KP terbaca pada tanggal ini: ${kpSet.size}\n`+
+      `Supplier terbaca: ${supplierSet.size}\n`+
+      `Baris KP/Supplier: ${extracted.length}\n`+
+      `Total trip: ${tripTotal.toLocaleString("id-ID")}\n`+
+      `CLOSING TONASE 00.00: ${kg(tonTotal)}\n\n`+
+      (extracted.length
+        ? `Data ini akan dibandingkan dengan snapshot WhatsApp, dengan acuan utama snapshot 17.00 pada ${selectedDate}.`
+        : `PERINGATAN: Tidak ada transaksi tanggal ${selectedDate} di file yang dipilih.`)+
+      (badFiles.length
+        ? `\n\nSIMPAN AKAN DIBLOKIR:\n${badFiles.map(f=>`• ${f.fileName}: ${f.integrityIssues?.join("; ")||"Total parser tidak cocok dengan Total Excel"}`).join("\n")}`
+        : "");
+  }catch(e){
+    DAILY_EXCEL_PREVIEW=null;
+    $("dailyExcelPreview").textContent="ERROR: "+e.message;
+  }
+}
+
+async function saveDailyExcel(){
+  if(!DAILY_EXCEL_PREVIEW) return alert("Pilih dan Preview Excel Harian dahulu.");
+  const p=DAILY_EXCEL_PREVIEW;
+
+  if(!p.daily.length){
+    return alert(`Tidak ada transaksi untuk tanggal ${p.date} pada file yang dipilih.`);
+  }
+
+  if((p.integrityBlocked||[]).length){
+    return alert(
+      "SIMPAN DIBLOKIR.\n\n"+
+      p.integrityBlocked.map(f=>`${f.fileName}: total parser belum cocok dengan Total Excel.`).join("\n")
+    );
+  }
+
+  // Daily Excel is authoritative only for this selected date.
+  // Upsert by date + KP + supplier avoids duplicate totals.
+  const chunkSize=500;
+  for(let i=0;i<p.daily.length;i+=chunkSize){
+    const {error}=await db.from("kp_daily_history")
+      .upsert(p.daily.slice(i,i+chunkSize),{
+        onConflict:"report_date,kp_code,supplier_name"
+      });
+    if(error) return alert("Gagal menyimpan Excel Harian: "+error.message);
+  }
+
+  alert(
+    `Excel Harian berhasil disimpan.\n`+
+    `Tanggal: ${p.date}\n`+
+    `Baris KP/Supplier: ${p.daily.length}\n\n`+
+    `Data sekarang menjadi closing final dan pembanding snapshot WhatsApp.`
+  );
+
+  DAILY_EXCEL_PREVIEW=null;
+  if($("dailyExcelFile")) $("dailyExcelFile").value="";
+  $("dailyExcelPreview").textContent="Belum ada file closing dipilih.";
+  await loadKPDaily($("monitorKp").value||"ALL");
+}
+
 async function previewMonthlyExcels(fileList){
   try{
     const files=[...(fileList||[])];
@@ -1961,7 +2206,7 @@ function annualMonthColumns(aoa){
   return map;
 }
 function parseAnnualSheet(sheet,sheetName,fileName){
-  const aoa=sheetAOA(sheet);
+  const aoa=annualSheetAOA(sheet);
   const yearMatch=String(sheetName).match(/\b(20\d{2})\b/);
   const titleText=aoa.slice(0,5).flat().join(" ");
   const titleYear=titleText.match(/\b(20\d{2})\b/);
@@ -2031,11 +2276,20 @@ async function previewAnnualExcels(fileList){
 
     const years=[...new Set(summary.map(r=>r.year))].sort();
     const units=new Set(summary.map(r=>r.kp_code));
+    const annualTotals={};
+    years.forEach(y=>{
+      annualTotals[y]=summary
+        .filter(r=>Number(r.year)===Number(y))
+        .reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    });
     $("annualExcelPreview").textContent=
       `FILE DIPILIH: ${files.length}\n`+
       `Tahun terbaca: ${years.join(", ")||"-"}\n`+
       `Unit/KP historis: ${units.size}\n`+
       `Baris KP/bulan: ${summary.length}\n\n`+
+      `TOTAL PER TAHUN (KG):\n`+
+      years.map(y=>`• ${y}: ${kg(annualTotals[y])}`).join("\n")+
+      `\n\nVALIDASI: angka di atas dibaca dari nilai asli/cached Excel, bukan angka tampilan sel.\n\n`+
       fileResults.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n");
   }catch(e){
     ANNUAL_EXCEL_PREVIEW=null;
@@ -2047,11 +2301,34 @@ async function saveAnnualExcel(){
   const p=ANNUAL_EXCEL_PREVIEW;
   if(!p.summary.length) return alert("Tidak ada data tahunan yang dapat disimpan.");
 
+  const years=[...new Set(p.summary.map(r=>Number(r.year)))];
+
+  // SAFER REBUILD:
+  // 1) Upsert the complete annual workbook first.
+  // 2) Only after every chunk succeeds, remove stale/contaminating rows whose
+  //    source_file is not one of the annual files just uploaded.
+  // This avoids leaving a year empty if a network/save error happens mid-upload.
   const chunkSize=500;
   for(let i=0;i<p.summary.length;i+=chunkSize){
     const {error}=await db.from("historical_summary")
       .upsert(p.summary.slice(i,i+chunkSize),{onConflict:"year,month,kp_code"});
     if(error) return alert("Gagal simpan data tahunan: "+error.message);
+  }
+
+  for(const y of years){
+    let cleanup=db.from("historical_summary").delete().eq("year",y);
+    if(p.files.length===1){
+      cleanup=cleanup.neq("source_file",p.files[0]);
+    }else{
+      cleanup=cleanup.not("source_file","in",`(${p.files.map(f=>`"${f.replaceAll('"','')}"`).join(",")})`);
+    }
+    const {error:cleanupError}=await cleanup;
+    if(cleanupError){
+      return alert(
+        `Data tahunan ${y} sudah tersimpan, tetapi pembersihan data lama gagal: `+
+        cleanupError.message
+      );
+    }
   }
 
   alert(`Upload tahunan berhasil.\nFile: ${p.files.length}\nBaris KP/bulan: ${p.summary.length}`);
@@ -2124,7 +2401,7 @@ function setMonitorMode(mode){
   $("monitorYearWrap").classList.toggle("hidden",mode!=="yearly");
 
   const titleMap={
-    daily:["Monitoring • Harian","Snapshot operasional per KP pada 10.00, 12.00, 15.00, dan 17.00."],
+    daily:["Monitoring • Harian","Snapshot WhatsApp 10.00 / 12.00 / 15.00 / 17.00 dibandingkan dengan Closing Tonase final pukul 00.00."],
     monthly:["Monitoring • Bulanan","Analisis tonase bulanan per KP dan upload Excel data bulanan."],
     yearly:["Monitoring • Tahunan","Analisis tonase tahunan per KP dan upload Excel data tahunan."]
   };
@@ -2311,7 +2588,7 @@ async function loadKPYearlyPanel(kp){
     kp,period:String(year),tonnage:total,
     coverage:`${monthsPresent.size} bulan`,
     tonnageSub:monthsPresent.size?`Rata-rata ${kg(avg)} / bulan`:"Belum ada histori",
-    coverageSub:"Bulan dengan data"
+    coverageSub:"Bulan historis terbaca dari workbook tahunan"
   });
 
   const labels=["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Ags","Sep","Okt","Nov","Des"];
@@ -2349,75 +2626,174 @@ async function loadKPYearlyPanel(kp){
 
 async function loadKPDaily(kp){
   const date=$("monitorDate").value;
-  $("monitorChartTitle").textContent="INTRADAY PROGRESS 10 / 12 / 15 / 17";
-  $("monitorTableTitle").textContent="DETAIL SNAPSHOT HARIAN";
-  $("monitorSourceBadge").textContent="Snapshot WhatsApp";
-  $("monitorRuleNote").textContent="Setiap jam = snapshot kumulatif";
+  $("monitorChartTitle").textContent="INTRADAY + CLOSING 00.00";
+  $("monitorTableTitle").textContent="DETAIL SNAPSHOT & CLOSING HARIAN";
+  $("monitorSourceBadge").textContent="WhatsApp + Closing Excel";
+  $("monitorRuleNote").textContent="Snapshot 10/12/15/17 = progres intraday; Closing 00.00 = total final harian";
 
+  // WhatsApp snapshots
   const {data:snaps,error}=await db.from("monitoring_snapshots")
     .select("id,report_date,snapshot_time,total_tonnage_kg,total_trips")
     .eq("report_date",date)
     .order("snapshot_time",{ascending:true});
   if(error){renderMonitorEmpty(error.message);return;}
-  if(!snaps?.length){
-    setMonitorSummary({kp,period:dateLabelId(date),tonnage:0,trips:0,coverage:"0 / 4",tonnageSub:"Belum ada snapshot",tripsSub:"Belum ada snapshot",coverageSub:"Snapshot tersedia"});
-    renderMonitorEmpty("Belum ada data snapshot untuk tanggal ini.");
+
+  // Daily actual comparison data from Excel.
+  let dq=db.from("kp_daily_history")
+    .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count,source_file")
+    .eq("report_date",date);
+  if(kp!=="ALL") dq=dq.eq("kp_code",kp);
+  const {data:dailyRows,error:dailyErr}=await dq;
+  if(dailyErr){renderMonitorEmpty(dailyErr.message);return;}
+
+  const actualRows=dailyRows||[];
+  const actualTonnage=actualRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const actualTrips=actualRows.reduce((a,r)=>a+Number(r.trip_count||0),0);
+  const hasActual=actualRows.length>0;
+
+  let values={};
+  if(snaps?.length){
+    if(kp==="ALL"){
+      snaps.forEach(s=>values[s.id]={
+        tonnage:Number(s.total_tonnage_kg||0),
+        trips:Number(s.total_trips||0)
+      });
+    }else{
+      const ids=snaps.map(s=>s.id);
+      const {data:details}=await db.from("monitoring_snapshot_details")
+        .select("snapshot_id,tonnage_kg,trip_count")
+        .in("snapshot_id",ids)
+        .eq("kp_code",kp);
+      snaps.forEach(s=>values[s.id]={tonnage:0,trips:0});
+      (details||[]).forEach(d=>{
+        values[d.snapshot_id].tonnage+=Number(d.tonnage_kg||0);
+        values[d.snapshot_id].trips+=Number(d.trip_count||0);
+      });
+    }
+  }
+
+  const snapList=snaps||[];
+  const slotData={};
+  snapList.forEach(s=>slotData[s.snapshot_time.slice(0,5)]={...values[s.id],snapshot:s});
+  const snapYs=slots.map(slot=>slotData[slot]?.tonnage ?? null);
+
+  const latest=snapList.length ? snapList[snapList.length-1] : null;
+  const latestVal=latest ? (values[latest.id]||{tonnage:0,trips:0}) : {tonnage:0,trips:0};
+
+  // Main KPI continues to represent latest operational snapshot.
+  setMonitorSummary({
+    kp,
+    period:dateLabelId(date),
+    tonnage:latest ? latestVal.tonnage : (hasActual ? actualTonnage : 0),
+    trips:latest ? latestVal.trips : (hasActual ? actualTrips : 0),
+    coverage:`${snapList.length} / 4`,
+    tonnageSub:latest
+      ? `Snapshot terakhir ${latest.snapshot_time.slice(0,5)}`
+      : hasActual ? "Belum ada snapshot — memakai total Excel sebagai referensi" : "Belum ada data",
+    tripsSub:latest
+      ? "Trip kumulatif snapshot terakhir"
+      : hasActual ? "Trip dari Excel Harian" : "Belum ada data",
+    coverageSub:hasActual ? "Snapshot tersedia + pembanding Excel" : "Snapshot tersedia"
+  });
+
+  // Comparison KPIs
+  if($("dailyActualTonnage")){
+    $("dailyActualTonnage").textContent=hasActual ? kg(actualTonnage) : "—";
+    $("dailyActualTonnageSub").textContent=hasActual
+      ? `${actualTrips.toLocaleString("id-ID")} trip • Closing 00.00`
+      : "Upload closing Excel setelah pukul 00.00";
+  }
+
+  if($("dailySnapshotDiff")){
+    const snap17=snapList.find(s=>s.snapshot_time.slice(0,5)==="17:00") || null;
+    const compareSnap=snap17 || latest;
+    const compareVal=compareSnap ? (values[compareSnap.id]||{tonnage:0,trips:0}) : null;
+
+    if(hasActual && compareSnap){
+      const diff=actualTonnage-compareVal.tonnage;
+      const pct=actualTonnage ? (diff/actualTonnage)*100 : 0;
+      $("dailySnapshotDiff").textContent=
+        `${diff>=0?"+":""}${kg(diff)}`;
+      $("dailySnapshotDiffSub").textContent=
+        `${pct>=0?"+":""}${pct.toFixed(2)}% • ${compareSnap.snapshot_time.slice(0,5)} → Closing 00.00`;
+    }else if(hasActual){
+      $("dailySnapshotDiff").textContent="—";
+      $("dailySnapshotDiffSub").textContent="Closing tersedia; belum ada snapshot untuk dibandingkan";
+    }else{
+      $("dailySnapshotDiff").textContent="—";
+      $("dailySnapshotDiffSub").textContent="Belum ada Closing 00.00";
+    }
+  }
+
+  if(!snapList.length && !hasActual){
+    renderMonitorEmpty("Belum ada snapshot WhatsApp maupun Excel Harian untuk tanggal ini.");
     return;
   }
 
-  let values={};
-  if(kp==="ALL"){
-    snaps.forEach(s=>values[s.id]={tonnage:Number(s.total_tonnage_kg||0),trips:Number(s.total_trips||0)});
-  }else{
-    const ids=snaps.map(s=>s.id);
-    const {data:details}=await db.from("monitoring_snapshot_details")
-      .select("snapshot_id,tonnage_kg,trip_count")
-      .in("snapshot_id",ids)
-      .eq("kp_code",kp);
-    snaps.forEach(s=>values[s.id]={tonnage:0,trips:0});
-    (details||[]).forEach(d=>{
-      values[d.snapshot_id].tonnage+=Number(d.tonnage_kg||0);
-      values[d.snapshot_id].trips+=Number(d.trip_count||0);
-    });
-  }
-
-  const slotData={};
-  snaps.forEach(s=>slotData[s.snapshot_time.slice(0,5)]={...values[s.id],snapshot:s});
-  const ys=slots.map(slot=>slotData[slot]?.tonnage ?? null);
-  const latest=snaps[snaps.length-1];
-  const latestVal=values[latest.id]||{tonnage:0,trips:0};
-
-  setMonitorSummary({
-    kp,period:dateLabelId(date),
-    tonnage:latestVal.tonnage,trips:latestVal.trips,
-    coverage:`${snaps.length} / 4`,
-    tonnageSub:`Snapshot terakhir ${latest.snapshot_time.slice(0,5)}`,
-    tripsSub:"Trip kumulatif snapshot terakhir",
-    coverageSub:"Snapshot tersedia"
-  });
+  // Chart: 4 snapshots + Total Hari.
+  const chartLabels=[...slots,"CLOSING 00.00"];
+  const chartValues=[
+    ...snapYs.map(v=>v??0),
+    hasActual ? actualTonnage : 0
+  ];
+  const chartTexts=[
+    ...snapYs.map(v=>v==null?"Menunggu":compactKg(v)),
+    hasActual ? compactKg(actualTonnage) : "Belum Upload"
+  ];
+  const chartColors=[
+    ...snapYs.map(v=>v==null?"rgba(255,255,255,.10)":"#49de5f"),
+    hasActual ? "#e9b949" : "rgba(255,255,255,.10)"
+  ];
 
   resetPlotContainer("monitorKpChart");
   Plotly.newPlot("monitorKpChart",[{
-    x:slots,y:ys.map(v=>v??0),type:"bar",
-    text:ys.map(v=>v==null?"Menunggu":compactKg(v)),
+    x:chartLabels,
+    y:chartValues,
+    type:"bar",
+    text:chartTexts,
     textposition:"outside",
     cliponaxis:false,
-    marker:{color:ys.map(v=>v==null?"rgba(255,255,255,.10)":"#49de5f")},
+    marker:{color:chartColors},
     hovertemplate:"<b>%{x}</b><br>%{y:,.0f} kg<extra></extra>"
   }],{
     ...darkLayout,
     margin:{t:34,l:58,r:18,b:42},
-    xaxis:{...darkLayout.xaxis,type:"category",categoryorder:"array",categoryarray:slots,fixedrange:true},
+    xaxis:{
+      ...darkLayout.xaxis,
+      type:"category",
+      categoryorder:"array",
+      categoryarray:chartLabels,
+      fixedrange:true
+    },
     yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
     showlegend:false
   },plotConfig);
 
+  const rows=snapList.map(s=>{
+    const v=values[s.id]||{tonnage:0,trips:0};
+    const diff=hasActual ? actualTonnage-v.tonnage : null;
+    return [
+      s.snapshot_time.slice(0,5),
+      kg(v.tonnage),
+      v.trips,
+      hasActual ? `${diff>=0?"+":""}${kg(diff)}` : "—",
+      "WhatsApp Snapshot"
+    ];
+  });
+
+  if(hasActual){
+    rows.push([
+      "CLOSING 00.00",
+      kg(actualTonnage),
+      actualTrips,
+      "0 kg",
+      "Closing Excel"
+    ]);
+  }
+
   $("monitorKpTable").innerHTML=table(
-    ["Jam","Tonase","Trip","Status"],
-    snaps.map(s=>{
-      const v=values[s.id]||{tonnage:0,trips:0};
-      return [s.snapshot_time.slice(0,5),kg(v.tonnage),v.trips,"Tersedia"];
-    })
+    ["Jam / Acuan","Tonase","Trip","Selisih ke Closing 00.00","Sumber"],
+    rows
   );
 }
 async function loadKPMonthly(kp){
