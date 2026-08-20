@@ -464,20 +464,42 @@ function cleanExpenseLine(raw){
     .replace(/\u00a0/g," ")
     .replace(/^[\s>*•●▪◦\-–—*]+/,"")
     .replace(/[*_`~]/g,"")
+    .replace(/\s+/g," ")
     .trim();
 }
+function expenseAmountsFromText(s){
+  const text=String(s||"");
+  const found=[];
+
+  // Operational amounts: 100.000 / 300.000 / 1.250.000.
+  // Plain numbers such as plate "9094" are deliberately ignored.
+  for(const m of text.matchAll(/(?:Rp\.?\s*)?(\d{1,3}(?:\.\d{3})+)(?!\d)/gi)){
+    const n=Number(m[1].replace(/\./g,""));
+    if(Number.isFinite(n) && n>0) found.push(n);
+  }
+
+  // Allow plain integer only when explicitly prefixed with Rp.
+  if(!found.length){
+    for(const m of text.matchAll(/Rp\.?\s*(\d+)(?!\d)/gi)){
+      const n=Number(m[1]);
+      if(Number.isFinite(n) && n>0) found.push(n);
+    }
+  }
+  return found;
+}
 function expenseAmountFromText(s){
-  const matches=[...String(s||"").matchAll(/(?:Rp\.?\s*)?(\d{1,3}(?:\.\d{3})+|\d+)/gi)];
-  if(!matches.length) return null;
-  // Expense lines use the final monetary figure as amount.
-  return num(matches[matches.length-1][1]);
+  const amounts=expenseAmountsFromText(s);
+  return amounts.length ? amounts.reduce((a,b)=>a+b,0) : null;
+}
+function isExpenseTotalLine(line){
+  return /^total(?:\s+seluruh)?\b\s*:?\s*/i.test(cleanExpenseLine(line));
 }
 function extractDeclaredExpenseTotal(text){
   for(const raw of String(text||"").split(/\r?\n/)){
     const line=cleanExpenseLine(raw);
-    if(!/^total(?:\s+seluruh)?\s*:/i.test(line)) continue;
-    const amount=expenseAmountFromText(line);
-    if(amount!=null) return amount;
+    if(!isExpenseTotalLine(line)) continue;
+    const amounts=expenseAmountsFromText(line);
+    if(amounts.length) return amounts[amounts.length-1];
   }
   return null;
 }
@@ -486,7 +508,7 @@ function parseExpense(text){
   if(!h?.date) throw Error("Tanggal biaya tidak ditemukan.");
 
   const kpMatch=String(text||"").match(
-    /\b(?:KP\s*[\.\-:]?\s*)?(BMK|FAA|KIP|ASMJ[\s-]?[12]|HKBS|TKWL[\s-]?[12]|SISL|GSS|SSL|MAN|SSM|IIS|GSL(?:[\s-]INUMAN)?|SKA|KS\s*2|LBP|LPI|LSHP|PSM|BSN|MSB\s*2|BSS|KWP)\b/i
+    /\b(?:KP\s*[.\-:]?\s*)?(BMK|FAA|KIP|ASMJ[\s-]?[12]|HKBS|TKWL[\s-]?[12]|SISL|GSS|SSL|MAN|SSM|IIS|GSL(?:[\s-]INUMAN)?|SKA|KS\s*2|LBP|LPI|LSHP|PSM|BSN|MSB\s*2|BSS|KWP)\b/i
   );
 
   const selectedKp=$("expenseKp")?.value || "";
@@ -497,46 +519,48 @@ function parseExpense(text){
     throw Error("KP tidak ada di laporan. Pilih KP/unit terlebih dahulu, lalu Preview lagi.");
   }
 
-  let category="Lainnya";
   const rows=[];
 
   for(const raw of String(text||"").split(/\r?\n/)){
     const line=cleanExpenseLine(raw);
     if(!line) continue;
 
-    // Header/report label is not an expense row.
     if(/^laporan\s+biaya\b/i.test(line)) continue;
-
-    // Critical: TOTAL is validation only, never an expense transaction.
-    if(/^total(?:\s+seluruh)?\s*:/i.test(line)) continue;
-
-    // Ignore a line that is only a date.
+    if(isExpenseTotalLine(line)) continue;
     if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(line)) continue;
+    if(/^\d{1,2}\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}$/i.test(line)) continue;
 
+    const amounts=expenseAmountsFromText(line);
+    if(!amounts.length) continue;
+
+    const amount=amounts.reduce((sum,n)=>sum+n,0);
+
+    let category="Lainnya";
     const cat=line.match(/^(?:B\.?\s*|Beban\s+)([^()0-9]+?)(?:\s*\(|\s+\d|$)/i);
     if(cat){
       category=cat[1].trim().replace(/[,:;]+$/,"").trim();
     }
 
-    const amount=expenseAmountFromText(line);
-    if(!(amount>0)) continue;
-
-    const paren=line.match(/\(([^)]+)\)/);
-    const detail=paren?.[1]?.trim() || line
-      .replace(/^(?:B\.?\s*|Beban\s+)[^()0-9]+/i,"")
-      .replace(/\s*(?:Rp\.?\s*)?\d{1,3}(?:\.\d{3})+\s*$/i,"")
-      .replace(/^\(|\)$/g,"")
+    const paren=line.match(/\((.*)\)/);
+    let detail=paren?.[1]?.trim() || line;
+    detail=detail
+      .replace(/(?:Rp\.?\s*)?\d{1,3}(?:\.\d{3})+/gi,"")
+      .replace(/\s+/g," ")
+      .replace(/\s+,/g,",")
       .trim();
+
+    let subcategory=null;
+    if(/pengambilan dana|p\.\s*dana/i.test(line)){
+      subcategory="Pengambilan Dana";
+    }else if(/\bBBM\b/i.test(line)){
+      subcategory="BBM";
+    }
 
     rows.push({
       expense_date:h.date,
       kp_code:kp,
       category,
-      subcategory:/pengambilan dana|p\.\s*dana/i.test(line)
-        ? "Pengambilan Dana"
-        : /\bbbm\b/i.test(line)
-          ? "BBM"
-          : null,
+      subcategory,
       description:detail || line,
       amount
     });
