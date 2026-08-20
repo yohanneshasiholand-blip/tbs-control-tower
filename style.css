@@ -2098,3 +2098,8 @@ select option:checked{
 
 
 /* WhatsApp tonnage TOTAL markdown fix v4.8.6 */
+
+
+/* WhatsApp closing-per-KP mode v4.8.7 */
+.input-mode-note{margin:8px 0 10px;padding:9px 11px;border:1px solid rgba(255,255,255,.10);border-radius:10px;color:#ddd6c8;font-size:12px;background:rgba(0,0,0,.16)}
+.input-mode-note b{color:#72ff82}
