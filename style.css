@@ -2039,3 +2039,7 @@ select option:checked{
   white-space:pre-wrap;
   line-height:1.5;
 }
+
+
+/* Expense multi-amount + TOTAL fix v4.7.6 */
+#expensePreview{white-space:pre-wrap;line-height:1.5;}
