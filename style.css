@@ -2047,3 +2047,48 @@ select option:checked{
 
 /* Expense parser robustness v4.7.7 */
 #expensePreview{white-space:pre-wrap;line-height:1.5;}
+
+
+/* Expense typo reconciliation v4.7.8 */
+#expensePreview{white-space:pre-wrap;line-height:1.5;}
+
+
+/* Effective price normalization v4.7.9 */
+
+
+/* Price change 'menjadi' parser v4.8.0 */
+
+
+/* Daily Excel comparison v4.8.1 */
+.daily-upload-panel{
+  margin-bottom:14px;
+  border:1px solid rgba(233,185,73,.22);
+}
+.daily-upload-panel .period-upload-info strong{
+  color:#f2d37a;
+}
+.daily-actual-kpi strong{
+  color:#f2d37a;
+}
+.daily-compare-kpi strong{
+  font-size:24px;
+}
+@media (max-width:760px){
+  .daily-upload-panel .period-upload-actions{
+    width:100%;
+  }
+  .daily-upload-panel .period-upload-actions .btn,
+  .daily-upload-panel .period-upload-actions .file-btn{
+    width:100%;
+    justify-content:center;
+  }
+}
+
+
+/* Closing tonase terminology v4.8.2 */
+
+
+/* Annual raw-value parser & integrity fix v4.8.3 */
+
+
+/* Annual safe rebuild v4.8.4 */
