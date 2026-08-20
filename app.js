@@ -471,20 +471,28 @@ function expenseAmountsFromText(s){
   const text=String(s||"");
   const found=[];
 
-  // Operational amounts: 100.000 / 300.000 / 1.250.000.
-  // Plain numbers such as plate "9094" are deliberately ignored.
-  for(const m of text.matchAll(/(?:Rp\.?\s*)?(\d{1,3}(?:\.\d{3})+)(?!\d)/gi)){
-    const n=Number(m[1].replace(/\./g,""));
+  // Standard Indonesian thousands format with dot or comma:
+  // 35.000 / 35,000 / 1.250.000 / 1,250,000
+  for(const m of text.matchAll(/(?:Rp\.?\s*)?(\d{1,3}(?:(?:\.|,)\d{3})+)(?!\d)/gi)){
+    const n=Number(m[1].replace(/[.,]/g,""));
     if(Number.isFinite(n) && n>0) found.push(n);
   }
 
-  // Allow plain integer only when explicitly prefixed with Rp.
+  // WhatsApp shorthand: 35rb / 35 rb / 35k
+  for(const m of text.matchAll(/(?:Rp\.?\s*)?(\d+(?:[.,]\d+)?)\s*(rb|ribu|k)\b/gi)){
+    const raw=Number(m[1].replace(",","."));
+    const n=Math.round(raw*1000);
+    if(Number.isFinite(n) && n>0) found.push(n);
+  }
+
+  // Plain integer only when explicitly prefixed with Rp.
   if(!found.length){
     for(const m of text.matchAll(/Rp\.?\s*(\d+)(?!\d)/gi)){
       const n=Number(m[1]);
       if(Number.isFinite(n) && n>0) found.push(n);
     }
   }
+
   return found;
 }
 function expenseAmountFromText(s){
@@ -536,7 +544,7 @@ function parseExpense(text){
     const amount=amounts.reduce((sum,n)=>sum+n,0);
 
     let category="Lainnya";
-    const cat=line.match(/^(?:B\.?\s*|Beban\s+)([^()0-9]+?)(?:\s*\(|\s+\d|$)/i);
+    const cat=line.match(/^(?:(?:B\.\s*|B\s+)|Beban\s+)([^()0-9]+?)(?:\s*\(|\s+\d|$)/i);
     if(cat){
       category=cat[1].trim().replace(/[,:;]+$/,"").trim();
     }
@@ -544,7 +552,8 @@ function parseExpense(text){
     const paren=line.match(/\((.*)\)/);
     let detail=paren?.[1]?.trim() || line;
     detail=detail
-      .replace(/(?:Rp\.?\s*)?\d{1,3}(?:\.\d{3})+/gi,"")
+      .replace(/(?:Rp\.?\s*)?\d{1,3}(?:(?:\.|,)\d{3})+/gi,"")
+      .replace(/(?:Rp\.?\s*)?\d+(?:[.,]\d+)?\s*(?:rb|ribu|k)\b/gi,"")
       .replace(/\s+/g," ")
       .replace(/\s+,/g,",")
       .trim();
