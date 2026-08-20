@@ -230,6 +230,60 @@ function cleanTonnageLine(raw){
     .trim();
 }
 
+function detectClosingKpReport(text){
+  const source=String(text||"")
+    .replace(/\u00a0/g," ")
+    .replace(/[＊*_`~]/g," ")
+    .replace(/\s+/g," ");
+  const m=source.match(/\b(?:tonase\s+(?:di\s+)?)KP\s*[.:\-]?\s*(ASMJ[\s-]?[12]|TKWL[\s-]?[12]|MSB[\s-]?2|KS\s*2|GSL[\s-]INUMAN|BMK|FAA|KIP|HKBS|SISL|GSS|SSL|MAN|SSM|IIS|GSL|SKA|LBP|LPI|LSHP|PSM|BSN|BSS|KWP)\b/i);
+  return m ? canonKP(m[1]) : null;
+}
+function isClosingKpTonnageReport(text){
+  const hasKp=!!detectClosingKpReport(text);
+  const cleaned=String(text||"").replace(/[＊*_`~]/g,"");
+  const hasSnapshotClock=/(?:Pukul|Jam)\s*(?:10|12|15|17)\s*(?:[.:]\s*00)?/i.test(cleaned);
+  return hasKp && !hasSnapshotClock;
+}
+function parseClosingKpTonnage(text){
+  const h=parseHeader(text)||{};
+  if(!h.date) throw Error("Tanggal closing harian tidak ditemukan.");
+  const kp=detectClosingKpReport(text);
+  if(!kp) throw Error("KP closing harian tidak ditemukan.");
+
+  let rows=[], declared=null, declaredTrips=null;
+  for(const raw of String(text||"").split(/\r?\n/)){
+    const line=cleanTonnageLine(raw);
+    if(!line) continue;
+
+    const totalMatch=line.match(/^TOTAL\s*:?\s*([\d.,]+)\s*(?:KG|KGS|KILOGRAM)?\s*(?:\((\d+|-)\))?/i);
+    if(totalMatch){
+      declared=num(totalMatch[1]);
+      declaredTrips=(totalMatch[2] && totalMatch[2]!=="-") ? Number(totalMatch[2]) : 0;
+      continue;
+    }
+
+    const r=line.match(/^([^:]+?)\s*:\s*([\d.,]+|-)\s*(?:KG|KGS|KILOGRAM)?\s*(?:\((\d+|-)\))?\s*$/i);
+    if(!r) continue;
+    const supplierRaw=r[1].trim();
+    if(/^TOTAL\b/i.test(supplierRaw)) continue;
+    rows.push({
+      kp_code:kp,
+      supplier_name:canonSupplierForKP(kp,supplierRaw)||supplierRaw,
+      tonnage_kg:r[2]==="-"?0:num(r[2]),
+      trip_count:(r[3] && r[3]!=="-")?Number(r[3]):0
+    });
+  }
+  if(!rows.length) throw Error("Tidak ada baris supplier closing harian yang dapat dibaca.");
+  const dedup=new Map();
+  rows.forEach(r=>dedup.set(`${r.kp_code}|${String(r.supplier_name).toUpperCase()}`,r));
+  rows=[...dedup.values()];
+  const total=rows.reduce((a,b)=>a+Number(b.tonnage_kg||0),0);
+  const trips=rows.reduce((a,b)=>a+Number(b.trip_count||0),0);
+  return {mode:"closing_kp",date:h.date,time:null,kp,rows,total,trips,declared,declaredTrips,
+    validTotal:declared==null||declared===total,
+    validTrips:declaredTrips==null||declaredTrips===trips};
+}
+
 function parseTonnage(text){
   const h=resolveTonnageHeader(text);
   let kp=null, rows=[], declared=null;
@@ -304,43 +358,49 @@ function parseTonnage(text){
 }
 function previewTonnage(){
   try{
-    TONNAGE_PREVIEW=parseTonnage($("tonnageText").value);
+    const raw=$("tonnageText").value;
+    TONNAGE_PREVIEW=isClosingKpTonnageReport(raw)?parseClosingKpTonnage(raw):parseTonnage(raw);
     const p=TONNAGE_PREVIEW;
+    if(p.mode==="closing_kp"){
+      $("tonnagePreview").textContent=
+        `MODE: CLOSING HARIAN PER KP\nTanggal: ${p.date}\nKP: ${p.kp}\nSupplier: ${p.rows.length}\n`+
+        `Total detail: ${kg(p.total)}\nTOTAL laporan: ${p.declared==null?"tidak ditemukan":kg(p.declared)}\n`+
+        `Trip detail: ${p.trips}\nTrip TOTAL: ${p.declaredTrips==null?"tidak ditemukan":p.declaredTrips}\n`+
+        `Validasi tonase: ${p.validTotal?"OK ✓":"TIDAK COCOK ⚠"}\nValidasi trip: ${p.validTrips?"OK ✓":"TIDAK COCOK ⚠"}\n\n`+
+        p.rows.map(r=>`${r.kp_code} / ${r.supplier_name} : ${kg(r.tonnage_kg)} (${r.trip_count} trip)`).join("\n");
+      return;
+    }
     $("tonnagePreview").textContent=
-      `SNAPSHOT ${p.date} ${p.time.slice(0,5)}\n` +
-      `KP/Supplier rows: ${p.rows.length}\n` +
-      `Total parser: ${kg(p.total)}\n` +
-      `TOTAL SELURUH: ${p.declared==null ? "tidak ditemukan" : kg(p.declared)}\n` +
-      `Mobil/Trip: ${p.trips}\n` +
-      `Validasi total: ${p.validTotal ? "OK ✓" : "PERLU CEK ⚠"}\n\n` +
-      JSON.stringify(p.rows, null, 2);
-  }catch(e){ $("tonnagePreview").textContent="ERROR: "+e.message; }
+      `MODE: SNAPSHOT WHATSAPP\nSNAPSHOT ${p.date} ${p.time.slice(0,5)}\n`+
+      `KP/Supplier rows: ${p.rows.length}\nTotal parser: ${kg(p.total)}\n`+
+      `TOTAL SELURUH: ${p.declared==null?"tidak ditemukan":kg(p.declared)}\nMobil/Trip: ${p.trips}\n`+
+      `Validasi total: ${p.validTotal?"OK ✓":"PERLU CEK ⚠"}\n\n`+JSON.stringify(p.rows,null,2);
+  }catch(e){TONNAGE_PREVIEW=null;$("tonnagePreview").textContent="ERROR: "+e.message;}
 }
 async function saveTonnage(){
   if(!TONNAGE_PREVIEW) return alert("Preview dahulu.");
-  const p = TONNAGE_PREVIEW;
-
-  if(p.declared!=null && !p.validTotal){
-    return alert(
-      "SIMPAN DIBLOKIR.\n\n"+
-      `Total detail: ${kg(p.total)}\n`+
-      `TOTAL SELURUH: ${kg(p.declared)}\n\n`+
-      "Jumlah detail harus sama dengan TOTAL SELURUH."
-    );
+  const p=TONNAGE_PREVIEW;
+  if(p.mode==="closing_kp"){
+    if(!p.validTotal || !p.validTrips){
+      return alert("SIMPAN DIBLOKIR.\n\n"+`Total detail: ${kg(p.total)}\nTOTAL laporan: ${p.declared==null?"-":kg(p.declared)}\n`+`Trip detail: ${p.trips}\nTrip TOTAL: ${p.declaredTrips==null?"-":p.declaredTrips}\n\nTonase dan trip harus cocok dengan TOTAL laporan.`);
+    }
+    const payload=p.rows.map(r=>({report_date:p.date,kp_code:p.kp,supplier_name:r.supplier_name,tonnage_kg:r.tonnage_kg,trip_count:r.trip_count,source_file:`WHATSAPP:CLOSING:${p.kp}`}));
+    const {error}=await db.from("kp_daily_history").upsert(payload,{onConflict:"report_date,kp_code,supplier_name"});
+    if(error) return alert("Gagal simpan closing harian: "+error.message);
+    alert(`Closing harian KP berhasil disimpan.\nTanggal: ${p.date}\nKP: ${p.kp}\nTonase: ${kg(p.total)}\nTrip: ${p.trips}`);
+    TONNAGE_PREVIEW=null; $("tonnageText").value=""; $("tonnagePreview").textContent="Belum ada preview.";
+    await loadKPDaily($("monitorKp")?.value||"ALL"); await loadDashboard(); return;
   }
-  const {data:s, error} = await db.from("monitoring_snapshots").upsert({
-    report_date:p.date, snapshot_time:p.time, total_tonnage_kg:p.declared ?? p.total,
-    total_trips:p.trips, raw_text:$("tonnageText").value, status:p.validTotal ? "validated" : "needs_review"
-  }, {onConflict:"report_date,snapshot_time"}).select().single();
+  if(p.declared!=null && !p.validTotal){
+    return alert("SIMPAN DIBLOKIR.\n\n"+`Total detail: ${kg(p.total)}\nTOTAL SELURUH: ${kg(p.declared)}\n\nJumlah detail harus sama dengan TOTAL SELURUH.`);
+  }
+  const {data:s,error}=await db.from("monitoring_snapshots").upsert({report_date:p.date,snapshot_time:p.time,total_tonnage_kg:p.declared??p.total,total_trips:p.trips,raw_text:$("tonnageText").value,status:"validated"},{onConflict:"report_date,snapshot_time"}).select().single();
   if(error) return alert(error.message);
-  await db.from("monitoring_snapshot_details").delete().eq("snapshot_id", s.id);
-  const {error:e2} = await db.from("monitoring_snapshot_details").insert(p.rows.map(r => ({...r, snapshot_id:s.id})));
+  await db.from("monitoring_snapshot_details").delete().eq("snapshot_id",s.id);
+  const {error:e2}=await db.from("monitoring_snapshot_details").insert(p.rows.map(r=>({...r,snapshot_id:s.id})));
   if(e2) return alert(e2.message);
-  alert("Snapshot tersimpan.");
-  TONNAGE_PREVIEW=null;
-  await loadDashboard();
+  alert("Snapshot tersimpan."); TONNAGE_PREVIEW=null; $("tonnageText").value=""; await loadDashboard();
 }
-
 function cleanPriceLine(raw){
   return String(raw||"")
     .replace(/\u00a0/g," ")
@@ -2752,6 +2812,10 @@ async function loadKPDaily(kp){
   const actualTonnage=actualRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
   const actualTrips=actualRows.reduce((a,r)=>a+Number(r.trip_count||0),0);
   const hasActual=actualRows.length>0;
+  const closingKps=[...new Set(actualRows.map(r=>r.kp_code))];
+  const hasExcelClosing=actualRows.some(r=>String(r.source_file||"").startsWith("DAILY:"));
+  const hasWhatsappClosing=actualRows.some(r=>String(r.source_file||"").startsWith("WHATSAPP:CLOSING:"));
+  const isPartialWhatsappClosing=(kp==="ALL" && hasWhatsappClosing && !hasExcelClosing);
 
   let values={};
   if(snaps?.length){
@@ -2802,8 +2866,8 @@ async function loadKPDaily(kp){
   if($("dailyActualTonnage")){
     $("dailyActualTonnage").textContent=hasActual ? kg(actualTonnage) : "—";
     $("dailyActualTonnageSub").textContent=hasActual
-      ? `${actualTrips.toLocaleString("id-ID")} trip • Closing 00.00`
-      : "Upload closing Excel setelah pukul 00.00";
+      ? (isPartialWhatsappClosing ? `${actualTrips.toLocaleString("id-ID")} trip • Closing WhatsApp parsial (${closingKps.length} KP)` : `${actualTrips.toLocaleString("id-ID")} trip • Closing 00.00`)
+      : "Upload closing Excel atau paste closing per KP";
   }
 
   if($("dailySnapshotDiff")){
@@ -2811,7 +2875,10 @@ async function loadKPDaily(kp){
     const compareSnap=snap17 || latest;
     const compareVal=compareSnap ? (values[compareSnap.id]||{tonnage:0,trips:0}) : null;
 
-    if(hasActual && compareSnap){
+    if(isPartialWhatsappClosing){
+      $("dailySnapshotDiff").textContent="—";
+      $("dailySnapshotDiffSub").textContent=`Closing WhatsApp masih parsial (${closingKps.length} KP); belum dibandingkan dengan total snapshot`;
+    }else if(hasActual && compareSnap){
       const diff=actualTonnage-compareVal.tonnage;
       const pct=actualTonnage ? (diff/actualTonnage)*100 : 0;
       $("dailySnapshotDiff").textContent=
