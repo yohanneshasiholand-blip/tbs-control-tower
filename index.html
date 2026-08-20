@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.7.7">
+  <link rel="stylesheet" href="style.css?v=4.8.4">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -304,6 +304,16 @@
               <strong id="monitorKpiCoverage">0</strong>
               <span id="monitorKpiCoverageSub">-</span>
             </article>
+            <article class="monitor-kpi glass daily-actual-kpi">
+              <small>CLOSING TONASE 00.00</small>
+              <strong id="dailyActualTonnage">—</strong>
+              <span id="dailyActualTonnageSub">Upload closing Excel setelah pukul 00.00</span>
+            </article>
+            <article class="monitor-kpi glass daily-compare-kpi">
+              <small>SELISIH 17.00 VS CLOSING</small>
+              <strong id="dailySnapshotDiff">—</strong>
+              <span id="dailySnapshotDiffSub">Belum ada Closing 00.00</span>
+            </article>
           </div>
 
           <div class="monitor-analytics-grid">
@@ -323,6 +333,23 @@
               <div id="monitorKpTable" class="table-wrap monitor-table"></div>
             </article>
           </div>
+
+          <article class="panel glass period-upload-panel daily-upload-panel">
+            <div class="period-upload-info">
+              <div>
+                <strong>Upload Closing Tonase Harian — 00.00</strong>
+                <span>Closing final harian setelah pukul 00.00. Dipakai sebagai pembanding terhadap snapshot WhatsApp, terutama snapshot 17.00. Tidak menggantikan snapshot intraday.</span>
+              </div>
+              <div class="period-upload-actions">
+                <label class="btn btn-primary file-btn">
+                  Pilih Excel Closing
+                  <input id="dailyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewDailyExcels(this.files)">
+                </label>
+                <button class="btn btn-secondary" onclick="saveDailyExcel()">Simpan Closing 00.00</button>
+              </div>
+            </div>
+            <pre id="dailyExcelPreview" class="preview compact-preview">Belum ada file closing dipilih.</pre>
+          </article>
 
           <details class="monitor-input-details" open>
             <summary>Input / Update Tonase Harian dari WhatsApp</summary>
@@ -619,6 +646,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.7.7"></script>
+  <script src="app.js?v=4.8.4"></script>
 </body>
 </html>
