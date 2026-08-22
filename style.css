@@ -2103,3 +2103,207 @@ select option:checked{
 /* WhatsApp closing-per-KP mode v4.8.7 */
 .input-mode-note{margin:8px 0 10px;padding:9px 11px;border:1px solid rgba(255,255,255,.10);border-radius:10px;color:#ddd6c8;font-size:12px;background:rgba(0,0,0,.16)}
 .input-mode-note b{color:#72ff82}
+
+
+/* =========================================================
+   BACKGROUND VISIBILITY THEME — v4.8.8
+   Goal: plantation remains visible while data stays readable
+   ========================================================= */
+
+html, body {
+  min-height: 100%;
+}
+
+body {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(7, 17, 10, 0.12) 0%,
+      rgba(7, 17, 10, 0.18) 45%,
+      rgba(7, 17, 10, 0.24) 100%
+    ),
+    url("bg-palm.jpg") center center / cover fixed no-repeat !important;
+  background-color: #15351d !important;
+}
+
+/* Keep the image visible across the app surface */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255,255,255,.10), transparent 30%),
+    linear-gradient(120deg, rgba(20,80,30,.03), rgba(0,0,0,.10));
+}
+
+/* Main glass surfaces: transparent enough to reveal plantation */
+.glass,
+.panel,
+.card,
+.kpi-card,
+.monitor-kpi,
+.period-upload-panel,
+.monitor-input-details,
+.dashboard-card,
+.hero,
+.hero-panel,
+.content-card,
+.table-card {
+  background: linear-gradient(
+    145deg,
+    rgba(18, 31, 20, 0.50),
+    rgba(12, 22, 16, 0.42)
+  ) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  box-shadow:
+    0 12px 28px rgba(0,0,0,0.18),
+    inset 0 1px 0 rgba(255,255,255,0.05) !important;
+  backdrop-filter: blur(7px) saturate(115%) !important;
+  -webkit-backdrop-filter: blur(7px) saturate(115%) !important;
+}
+
+/* Sidebar stays slightly darker for navigation contrast */
+.sidebar,
+aside.sidebar,
+.app-sidebar,
+.nav-panel {
+  background: linear-gradient(
+    180deg,
+    rgba(12, 25, 15, 0.64),
+    rgba(10, 20, 13, 0.58)
+  ) !important;
+  border-right: 1px solid rgba(255,255,255,.12) !important;
+  backdrop-filter: blur(8px) saturate(110%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(110%) !important;
+}
+
+/* Header / top hero */
+.topbar,
+.app-header,
+header,
+.hero {
+  background: linear-gradient(
+    135deg,
+    rgba(18, 31, 23, 0.60),
+    rgba(13, 24, 18, 0.52)
+  ) !important;
+  backdrop-filter: blur(8px) saturate(115%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(115%) !important;
+}
+
+/* Tables: reduce solid black appearance */
+table {
+  background: rgba(9, 18, 12, 0.22) !important;
+}
+
+thead,
+table thead tr {
+  background: rgba(8, 18, 12, 0.50) !important;
+}
+
+tbody tr,
+table tbody tr {
+  background: rgba(16, 29, 18, 0.12) !important;
+}
+
+tbody tr:nth-child(even),
+table tbody tr:nth-child(even) {
+  background: rgba(255,255,255,0.025) !important;
+}
+
+tbody tr:hover,
+table tbody tr:hover {
+  background: rgba(65, 220, 90, 0.13) !important;
+}
+
+/* Inputs need contrast, but not opaque blocks */
+input,
+select,
+textarea {
+  background: rgba(7, 16, 10, 0.46) !important;
+  border-color: rgba(255,255,255,.14) !important;
+  backdrop-filter: blur(5px) !important;
+  -webkit-backdrop-filter: blur(5px) !important;
+}
+
+/* Chart canvas / plot wrapper should stay transparent */
+.js-plotly-plot,
+.plot-container,
+.svg-container,
+.chart,
+.chart-wrap {
+  background: transparent !important;
+}
+
+/* Preserve bright green enterprise accent */
+:root {
+  --accent-green: #53f36a;
+  --accent-green-soft: rgba(83,243,106,.14);
+}
+
+h1, h2, h3,
+.section-title,
+.card-title,
+#controlTitle,
+#monitorChartTitle,
+#monitorTableTitle {
+  text-shadow: 0 1px 4px rgba(0,0,0,.38);
+}
+
+/* Slight text shadow improves readability on bright photo areas */
+body,
+button,
+input,
+select,
+textarea,
+table {
+  text-shadow: 0 1px 2px rgba(0,0,0,.20);
+}
+
+/* Desktop: reveal more of the plantation */
+@media (min-width: 1100px) {
+  .glass,
+  .panel,
+  .card,
+  .kpi-card,
+  .monitor-kpi {
+    background: linear-gradient(
+      145deg,
+      rgba(18, 31, 20, 0.46),
+      rgba(12, 22, 16, 0.38)
+    ) !important;
+  }
+}
+
+/* Mobile: slightly more opaque for readability */
+@media (max-width: 760px) {
+  body {
+    background-attachment: scroll !important;
+    background-position: center top !important;
+  }
+
+  .glass,
+  .panel,
+  .card,
+  .kpi-card,
+  .monitor-kpi,
+  .period-upload-panel,
+  .monitor-input-details {
+    background: rgba(12, 23, 15, 0.58) !important;
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+  }
+
+  .sidebar,
+  aside.sidebar,
+  .app-sidebar {
+    background: rgba(10, 20, 13, 0.72) !important;
+  }
+}
+
+/* Optional tuning:
+   Want MORE background visible? change 0.46 -> 0.38 on desktop glass.
+   Want MORE readable/less photo? change 0.46 -> 0.56.
+*/
