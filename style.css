@@ -2307,3 +2307,35 @@ table {
    Want MORE background visible? change 0.46 -> 0.38 on desktop glass.
    Want MORE readable/less photo? change 0.46 -> 0.56.
 */
+
+
+/* Closing WhatsApp save verification v4.8.9 */
+.tonnage-mode-badge{
+  display:inline-flex;
+  align-items:center;
+  margin-left:8px;
+  padding:4px 8px;
+  border-radius:999px;
+  border:1px solid rgba(90,255,110,.28);
+  background:rgba(65,220,90,.10);
+  color:#7cff89;
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.03em;
+  white-space:nowrap;
+}
+.tonnage-mode-badge.closing-mode{
+  border-color:rgba(242,211,122,.40);
+  background:rgba(242,211,122,.13);
+  color:#f2d37a;
+}
+#tonnageSnapshotTime:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+
+
+/* Batch WhatsApp Closing v4.9.0 */
+.tonnage-mode-badge.closing-mode{
+  box-shadow:0 0 0 1px rgba(242,211,122,.10), 0 0 14px rgba(242,211,122,.08);
+}
