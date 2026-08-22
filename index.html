@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.8.8">
+  <link rel="stylesheet" href="style.css?v=4.9.0">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -356,8 +356,11 @@
             <div class="two-col monitor-input-grid">
               <article class="panel glass">
                 <h3>Paste Tonase WhatsApp</h3>
-                <div class="input-mode-note">Mendukung <b>Snapshot 10/12/15/17</b> dan <b>Closing Harian per KP</b> tanpa jam.</div>
-              <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
+                <div class="input-mode-note">
+                  Mendukung <b>Snapshot 10/12/15/17</b>, <b>Closing per KP</b>, atau <b>banyak KP sekaligus</b> dalam satu paste.
+                  <span id="tonnageModeBadge" class="tonnage-mode-badge">SNAPSHOT 10/12/15/17</span>
+                </div>
+              <textarea id="tonnageText" oninput="detectTonnageModeLive()" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
                 <div class="snapshot-input-meta">
                   <label>
                     <span>Jam Snapshot</span>
@@ -373,7 +376,7 @@
                 </div>
                 <div class="actions">
                   <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
-                  <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
+                  <button id="tonnageSaveBtn" class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
                 </div>
                 <pre id="tonnagePreview" class="preview"></pre>
               </article>
@@ -647,6 +650,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.8.8"></script>
+  <script src="app.js?v=4.9.0"></script>
 </body>
 </html>
