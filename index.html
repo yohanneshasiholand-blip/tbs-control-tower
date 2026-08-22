@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.9.0">
+  <link rel="stylesheet" href="style.css?v=4.9.1">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -393,9 +393,9 @@
           <div class="monitor-subpanel-head">
             <div>
               <span class="subpanel-kicker">MONITORING BULANAN</span>
-              <h3>Analisis Tonase per Hari dalam Bulan</h3>
+              <h3>Akumulasi Closing Harian dalam Bulan</h3>
             </div>
-            <span class="monitor-source-badge">Excel Bulanan</span>
+            <span id="monthlySourceBadge" class="monitor-source-badge">Closing Harian</span>
           </div>
 
           <article class="panel glass period-upload-panel">
@@ -650,6 +650,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.9.0"></script>
+  <script src="app.js?v=4.9.1"></script>
 </body>
 </html>
