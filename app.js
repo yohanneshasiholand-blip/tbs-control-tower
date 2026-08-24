@@ -20,6 +20,7 @@ let MASTER_KP_COUNT = 0;
 let TONNAGE_PREVIEW = null, PRICE_PREVIEW = null, EXPENSE_PREVIEW = null;
 let DAILY_EXCEL_PREVIEW = null, MONTHLY_EXCEL_PREVIEW = null, ANNUAL_EXCEL_PREVIEW = null;
 let MONITOR_MODE = "daily";
+let EXPENSE_MONITOR_DATA = [];
 let MASTER_DIRECTORY_DATA = [];
 let MASTER_SUPPLIER_DATA = [];
 
@@ -129,6 +130,12 @@ async function focusPageInput(page,inputId){
   },80);
 }
 
+async function openExpenseMonitoring(){
+  closeSidebarGroups("expenseGroup");
+  $("expenseGroup")?.classList.add("open");
+  await goToPage("expense-monitor");
+}
+
 function goToPage(page){
   document.querySelectorAll(".nav").forEach(x => x.classList.toggle("active", x.dataset.page===page));
   document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
@@ -149,6 +156,11 @@ function goToPage(page){
   if(page==="expenses"){
     $("expenseGroup")?.classList.add("open");
     loadExpenses();
+  }
+  if(page==="expense-monitor"){
+    $("expenseGroup")?.classList.add("open");
+    initExpenseMonitoring();
+    loadExpenseMonitoring();
   }
   if(page==="history") loadHistory();
   if(page==="dashboard") loadDashboard();
@@ -183,20 +195,20 @@ function parseHeader(text){
   let time=null;
 
   // Primary: "Pukul 17.00 WIB", "Pukul 17:00", "Jam 17.00", including markdown stars.
-  let t=source.match(/(?:Pukul|Jam)\s*(10|12|15|17)\s*(?:[.:]\s*00)?\s*(?:WIB)?/i);
+  let t=source.match(/(?:Pukul|Jam)\s*(00|0|10|12|15|17)\s*(?:[.:]\s*00)?\s*(?:WIB)?/i);
 
   // Fallback: standalone canonical snapshot clock.
   if(!t){
-    t=source.match(/(?:^|\s)(10|12|15|17)\s*[.:]\s*00\s*(?:WIB)?(?:\s|$)/i);
+    t=source.match(/(?:^|\s)(00|0|10|12|15|17)\s*[.:]\s*00\s*(?:WIB)?(?:\s|$)/i);
   }
 
-  if(t) time=`${t[1]}:00:00`;
+  if(t){ const hh=String(Number(t[1])).padStart(2,"0"); time=`${hh}:00:00`; }
 
   return (date||time) ? {date,time} : null;
 }
 
 function selectedTonnageFallback(){
-  const date=$("monitorDate")?.value || null;
+  const date=$("tonnageInputDate")?.value || $("monitorDate")?.value || null;
   const time=$("tonnageSnapshotTime")?.value || null;
   return {date,time};
 }
@@ -207,19 +219,25 @@ function resolveTonnageHeader(text){
 
   const date=parsed.date || fallback.date;
   const time=parsed.time || fallback.time;
+  const dateMismatch=!!(parsed.date && $("tonnageInputDate")?.value && parsed.date!==$("tonnageInputDate").value);
+  const timeMismatch=!!(parsed.time && fallback.time && parsed.time!==fallback.time);
 
   if(!date){
-    throw Error("Tanggal snapshot tidak ditemukan. Pilih Tanggal pada filter Monitoring Harian.");
+    throw Error("Tanggal data harian tidak ditemukan. Sertakan tanggal di laporan atau pilih Tanggal Data.");
   }
   if(!time){
-    throw Error("Waktu snapshot tidak ditemukan. Header seperti 'Pukul 17.00 WIB' seharusnya terbaca; jika tidak, pilih Jam Snapshot 10.00 / 12.00 / 15.00 / 17.00.");
+    throw Error("Jam data tidak ditemukan. Pilih 00.00 / 10.00 / 12.00 / 15.00 / 17.00.");
   }
 
   return {
     date,
     time,
-    dateSource:parsed.date?"header WhatsApp":"filter tanggal",
-    timeSource:parsed.time?"header WhatsApp":"pilihan jam"
+    dateSource:parsed.date?"header WhatsApp":"pilihan tanggal",
+    timeSource:parsed.time?"header WhatsApp":"pilihan jam",
+    dateMismatch,
+    timeMismatch,
+    manualDate:$("tonnageInputDate")?.value||null,
+    manualTime:fallback.time||null
   };
 }
 function cleanTonnageLine(raw){
@@ -294,9 +312,25 @@ function detectClosingKpReport(text){
 }
 
 function isClosingKpTonnageReport(text){
-  const cleaned=String(text||"").replace(/[＊*_`~]/g,"");
-  const hasSnapshotClock=/(?:Pukul|Jam)\s*(?:10|12|15|17)\s*(?:[.:]\s*00)?/i.test(cleaned);
-  return !hasSnapshotClock && !!detectClosingKpReport(text);
+  const hasKp=!!detectClosingKpReport(text);
+  if(!hasKp) return false;
+
+  const parsed=parseHeader(text)||{};
+  const selected=$("tonnageSnapshotTime")?.value || null;
+  const effectiveTime=parsed.time || selected || null;
+
+  // Explicit intraday time always means snapshot, even when the report has KP headings.
+  if(["10:00:00","12:00:00","15:00:00","17:00:00"].includes(effectiveTime)){
+    return false;
+  }
+
+  // 00.00 is the final daily closing / total day.
+  if(effectiveTime==="00:00:00"){
+    return true;
+  }
+
+  // Legacy KP closing reports often have no clock at all.
+  return true;
 }
 
 function parseClosingValuePart(valueText){
@@ -326,10 +360,21 @@ function parseClosingValuePart(valueText){
 }
 
 function parseClosingBatchTonnage(text){
-  const reportDate=parseHeader(text)?.date || null;
+  const parsedHeader=parseHeader(text)||{};
+  const fallback=selectedTonnageFallback();
+  const reportDate=parsedHeader.date || fallback.date || null;
+  const reportTime=parsedHeader.time || fallback.time || "00:00:00";
+  const dateMismatch=!!(parsedHeader.date && $("tonnageInputDate")?.value && parsedHeader.date!==$("tonnageInputDate").value);
+  const timeMismatch=!!(parsedHeader.time && fallback.time && parsedHeader.time!==fallback.time);
+
   if(!reportDate) throw Error("Tanggal closing harian tidak ditemukan.");
+  if(reportTime!=="00:00:00"){
+    throw Error("Closing harian harus menggunakan Jam 00.00. Untuk 10/12/15/17 gunakan mode Snapshot.");
+  }
 
   const blocks=[];
+  let grandDeclared=null;
+  let grandDeclaredTrips=null;
   let current=null;
 
   for(const raw of String(text||"").split(/\r?\n/)){
@@ -346,6 +391,17 @@ function parseClosingBatchTonnage(text){
         warnings:[]
       };
       blocks.push(current);
+      continue;
+    }
+
+    // Grand total for the whole day, e.g. TOTAL SELURUH : 4.222.298 (420)
+    if(/^TOTAL\s+SELURUH\b/i.test(line)){
+      const colon=line.indexOf(":");
+      if(colon>=0){
+        const parsedGrand=parseClosingValuePart(line.slice(colon+1));
+        grandDeclared=parsedGrand.amount;
+        grandDeclaredTrips=parsedGrand.trips;
+      }
       continue;
     }
 
@@ -421,6 +477,8 @@ function parseClosingBatchTonnage(text){
   const rows=finalBlocks.flatMap(b=>b.rows);
   const total=finalBlocks.reduce((a,b)=>a+b.total,0);
   const trips=finalBlocks.reduce((a,b)=>a+b.trips,0);
+  const validGrandTotal=grandDeclared==null || grandDeclared===total;
+  const validGrandTrips=grandDeclaredTrips==null || grandDeclaredTrips===trips;
 
   const presentKps=[...new Set(finalBlocks.map(b=>b.kp))];
   const missingKps=FALLBACK_KP_CODES.filter(k=>!presentKps.includes(k));
@@ -428,16 +486,25 @@ function parseClosingBatchTonnage(text){
   return {
     mode:finalBlocks.length>1 ? "closing_batch" : "closing_kp",
     date:reportDate,
+    time:"00:00:00",
     kp:finalBlocks.length===1 ? finalBlocks[0].kp : "ALL",
     blocks:finalBlocks,
     rows,
     total,
     trips,
+    grandDeclared,
+    grandDeclaredTrips,
+    validGrandTotal,
+    validGrandTrips,
     invalid,
-    validTotal:invalid.length===0,
-    validTrips:invalid.length===0,
+    validTotal:invalid.length===0 && validGrandTotal,
+    validTrips:invalid.length===0 && validGrandTrips,
     presentKps,
-    missingKps
+    missingKps,
+    dateMismatch,
+    timeMismatch,
+    dateSource:parsedHeader.date?"header WhatsApp":"pilihan tanggal",
+    timeSource:parsedHeader.time?"header WhatsApp":"pilihan jam / closing otomatis"
   };
 }
 
@@ -535,7 +602,7 @@ function setTonnageInputMode(mode){
       ? "Simpan / Update Semua Closing"
       : isClosing ? "Simpan / Update Closing Harian" : "Simpan Snapshot";
   }
-  if(timeSelect) timeSelect.disabled=isClosing;
+  if(timeSelect) timeSelect.disabled=false;
 }
 function detectTonnageModeLive(){
   const raw=$("tonnageText")?.value||"";
@@ -577,20 +644,35 @@ function previewTonnage(){
         ].join("\n");
       }).join("\n\n");
 
+      const mismatchText=(p.dateMismatch||p.timeMismatch)
+        ? `⚠ PILIHAN MANUAL BERBEDA DENGAN HEADER — SIMPAN DIBLOKIR\n`
+        : "";
+      const grandText=p.grandDeclared==null
+        ? "TOTAL SELURUH: tidak dicantumkan"
+        : `TOTAL SELURUH: ${kg(p.grandDeclared)} ${p.validGrandTotal?"✓":"✕"}`;
+
       $("tonnagePreview").textContent=
-        `MODE: ${p.mode==="closing_batch"?"CLOSING BANYAK KP":"CLOSING HARIAN PER KP"}\n`+
-        `Tanggal: ${p.date}\n`+
+        `MODE: ${p.mode==="closing_batch"?"CLOSING BANYAK KP — 00.00":"CLOSING HARIAN PER KP — 00.00"}\n`+
+        `Tanggal: ${p.date} (${p.dateSource})\n`+
+        `Jam: 00.00 (${p.timeSource})\n`+
+        `${mismatchText}`+
         `KP terbaca: ${p.blocks.length}\n`+
-        `Total tonase paste: ${kg(p.total)}\n`+
+        `Total tonase detail: ${kg(p.total)}\n`+
+        `${grandText}\n`+
         `Total trip detail: ${p.trips}\n`+
-        `Validasi: ${p.invalid.length===0?"SEMUA KP COCOK ✓":`${p.invalid.length} KP PERLU CEK ✕`}\n`+
+        `Validasi: ${p.validTotal&&p.validTrips?"SEMUA COCOK ✓":"PERLU CEK ✕"}\n`+
         `KP belum ada dalam paste: ${p.missingKps.length ? p.missingKps.join(", ") : "Tidak ada"}\n\n`+
         blockText;
       return;
     }
 
+    const mismatchText=(p.dateMismatch||p.timeMismatch)
+      ? `⚠ PILIHAN MANUAL BERBEDA DENGAN HEADER — SIMPAN DIBLOKIR\n`
+      : "";
     $("tonnagePreview").textContent=
       `MODE: SNAPSHOT WHATSAPP\nSNAPSHOT ${p.date} ${p.time.slice(0,5)}\n`+
+      `Tanggal sumber: ${p.dateSource}\nJam sumber: ${p.timeSource}\n`+
+      `${mismatchText}`+
       `KP/Supplier rows: ${p.rows.length}\nTotal parser: ${kg(p.total)}\n`+
       `TOTAL SELURUH: ${p.declared==null?"tidak ditemukan":kg(p.declared)}\nMobil/Trip: ${p.trips}\n`+
       `Validasi total: ${p.validTotal?"OK ✓":"PERLU CEK ⚠"}\n\n`+
@@ -604,15 +686,31 @@ function previewTonnage(){
 async function saveTonnage(){
   if(!TONNAGE_PREVIEW) return alert("Preview dahulu.");
   const p=TONNAGE_PREVIEW;
+
+  if(p.dateMismatch || p.timeMismatch){
+    return alert(
+      "SIMPAN DIBLOKIR.\n\n"+
+      "Tanggal/jam pilihan manual berbeda dengan header laporan.\n"+
+      "Samakan pilihan manual dengan laporan, atau kosongkan pilihan manual agar sistem memakai header otomatis."
+    );
+  }
+
   if(p.mode==="closing_kp" || p.mode==="closing_batch"){
-    if(p.invalid?.length){
+    if(p.invalid?.length || p.validGrandTotal===false || p.validGrandTrips===false){
+      const grandIssue=p.validGrandTotal===false
+        ? `\nTOTAL SELURUH: detail ${kg(p.total)} vs laporan ${kg(p.grandDeclared)}`
+        : "";
+      const grandTripIssue=p.validGrandTrips===false
+        ? `\nTRIP SELURUH: detail ${p.trips} vs laporan ${p.grandDeclaredTrips}`
+        : "";
       return alert(
         "SIMPAN DIBLOKIR.\n\n"+
         p.invalid.map(b=>
           `${b.kp}: detail ${kg(b.total)} vs TOTAL ${b.declared==null?"-":kg(b.declared)}`+
           `${b.declaredTrips==null?"":` • trip ${b.trips} vs ${b.declaredTrips}`}`
         ).join("\n")+
-        "\n\nPerbaiki KP yang tidak cocok sebelum menyimpan."
+        grandIssue+grandTripIssue+
+        "\n\nPerbaiki total yang tidak cocok sebelum menyimpan."
       );
     }
 
@@ -622,7 +720,7 @@ async function saveTonnage(){
       supplier_name:r.supplier_name,
       tonnage_kg:Number(r.tonnage_kg||0),
       trip_count:Number(r.trip_count||0),
-      source_file:`WHATSAPP:CLOSING:${b.kp}`
+      source_file:`WHATSAPP:CLOSING:00.00:${b.kp}`
     })));
 
     const {data:saved,error}=await db.from("kp_daily_history")
@@ -643,6 +741,8 @@ async function saveTonnage(){
     }
 
     if($("monitorDate")) $("monitorDate").value=p.date;
+    if($("tonnageInputDate")) $("tonnageInputDate").value=p.date;
+    if($("tonnageSnapshotTime")) $("tonnageSnapshotTime").value="00:00:00";
 
     if($("monitorKp")){
       if(p.blocks.length===1){
@@ -680,7 +780,7 @@ async function saveTonnage(){
   if(p.declared!=null && !p.validTotal){
     return alert("SIMPAN DIBLOKIR.\n\n"+`Total detail: ${kg(p.total)}\nTOTAL SELURUH: ${kg(p.declared)}\n\nJumlah detail harus sama dengan TOTAL SELURUH.`);
   }
-  const {data:s,error}=await db.from("monitoring_snapshots").upsert({report_date:p.date,snapshot_time:p.time,total_tonnage_kg:p.declared??p.total,total_trips:p.trips,raw_text:$("tonnageText").value,status:"validated"},{onConflict:"report_date,snapshot_time"}).select().single();
+  const {data:s,error}=await db.from("monitoring_snapshots").upsert({report_date:p.date,snapshot_time:p.time,total_tonnage_kg:p.declared??p.total,total_trips:p.trips,source_type:"whatsapp_paste",raw_text:$("tonnageText").value,status:"validated"},{onConflict:"report_date,snapshot_time"}).select().single();
   if(error) return alert(error.message);
   await db.from("monitoring_snapshot_details").delete().eq("snapshot_id",s.id);
   const {error:e2}=await db.from("monitoring_snapshot_details").insert(p.rows.map(r=>({...r,snapshot_id:s.id})));
@@ -1004,7 +1104,15 @@ function malformedExpenseAmountCandidate(line){
 
 function parseExpense(text){
   const h=parseHeader(text);
-  if(!h?.date) throw Error("Tanggal biaya tidak ditemukan.");
+  const whatsappDate=h?.date || null;
+  const manualDate=$("expenseDate")?.value || null;
+  const effectiveDate=whatsappDate || manualDate;
+  const dateMismatch=!!(whatsappDate && manualDate && whatsappDate!==manualDate);
+  const dateSource=whatsappDate ? "teks WhatsApp" : manualDate ? "pilihan manual" : null;
+
+  if(!effectiveDate){
+    throw Error("Tanggal biaya tidak ditemukan. Sertakan tanggal di laporan WhatsApp atau pilih Tanggal Pengeluaran.");
+  }
 
   const kpMatch=String(text||"").match(
     /\b(?:KP\s*[.\-:]?\s*)?(BMK|FAA|KIP|ASMJ[\s-]?[12]|HKBS|TKWL[\s-]?[12]|SISL|GSS|SSL|MAN|SSM|IIS|GSL(?:[\s-]INUMAN)?|SKA|KS\s*2|LBP|LPI|LSHP|PSM|BSN|MSB\s*2|BSS|KWP)\b/i
@@ -1066,7 +1174,7 @@ function parseExpense(text){
     }
 
     rows.push({
-      expense_date:h.date,
+      expense_date:effectiveDate,
       kp_code:kp,
       category,
       subcategory,
@@ -1094,7 +1202,7 @@ function parseExpense(text){
           .trim();
 
         rows.push({
-          expense_date:h.date,
+          expense_date:effectiveDate,
           kp_code:kp,
           category:c.category,
           subcategory:null,
@@ -1124,7 +1232,11 @@ function parseExpense(text){
   const totalMatches=declaredTotal==null ? null : Math.abs(difference)<=1;
 
   return {
-    date:h.date,
+    date:effectiveDate,
+    whatsappDate,
+    manualDate,
+    dateSource,
+    dateMismatch,
     kp,
     kpSource,
     rows,
@@ -1138,11 +1250,131 @@ function parseExpense(text){
     )
   };
 }
-function previewExpense(){
+
+function normalizeExpenseRawText(text){
+  return String(text||"")
+    .replace(/\u00a0/g," ")
+    .replace(/[＊*_`~]/g,"")
+    .replace(/\r/g,"")
+    .split("\n")
+    .map(x=>x.trim().replace(/\s+/g," "))
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+}
+
+function normalizeExpenseCompareText(text){
+  return String(text||"")
+    .toLowerCase()
+    .replace(/\u00a0/g," ")
+    .replace(/[^a-z0-9]+/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+
+function expenseTransactionKey(row){
+  return [
+    row.expense_date||"",
+    String(row.kp_code||"").toUpperCase(),
+    normalizeExpenseCompareText(row.category||""),
+    normalizeExpenseCompareText(row.subcategory||""),
+    normalizeExpenseCompareText(row.description||""),
+    Number(row.amount||0)
+  ].join("|");
+}
+
+async function checkExpenseDuplicates(preview, rawText){
+  const result={
+    exactReport:false,
+    exactReportExistingCount:0,
+    potentialRows:[],
+    checked:true
+  };
+
+  if(!preview?.date || !preview?.kp) return result;
+
+  const {data:existing,error}=await db.from("unit_expenses")
+    .select("id,expense_date,kp_code,category,subcategory,description,amount,raw_text,created_at")
+    .eq("expense_date",preview.date)
+    .eq("kp_code",preview.kp)
+    .order("created_at",{ascending:false})
+    .limit(1000);
+
+  if(error){
+    console.error("Duplicate expense check failed:",error);
+    throw Error("Gagal memeriksa duplikasi pengeluaran: "+error.message);
+  }
+
+  const existingRows=existing||[];
+  const normalizedNewReport=normalizeExpenseRawText(rawText);
+
+  // Exact-report duplicate:
+  // every saved row from one WhatsApp report stores the same raw_text.
+  // One matching raw_text is sufficient to prove the report was already saved.
+  const exactMatches=existingRows.filter(r=>
+    r.raw_text && normalizeExpenseRawText(r.raw_text)===normalizedNewReport
+  );
+
+  result.exactReport=exactMatches.length>0;
+  result.exactReportExistingCount=exactMatches.length;
+  result.exactReportCreatedAt=exactMatches[0]?.created_at || null;
+
+  // Potential transaction duplicates:
+  // same date + KP + category + subcategory + description + amount.
+  // These are warnings only because legitimate identical purchases can occur.
+  const existingKeys=new Map();
+  existingRows.forEach(r=>{
+    const key=expenseTransactionKey(r);
+    if(!existingKeys.has(key)) existingKeys.set(key,[]);
+    existingKeys.get(key).push(r);
+  });
+
+  result.potentialRows=(preview.rows||[]).map((r,i)=>{
+    const key=expenseTransactionKey(r);
+    const matches=existingKeys.get(key)||[];
+    return matches.length ? {
+      index:i,
+      row:r,
+      matchCount:matches.length,
+      lastCreatedAt:matches[0]?.created_at||null
+    } : null;
+  }).filter(Boolean);
+
+  return result;
+}
+
+function formatExpenseDuplicateStatus(dup){
+  if(!dup?.checked) return "Belum diperiksa";
+  if(dup.exactReport){
+    const when=dup.exactReportCreatedAt
+      ? new Date(dup.exactReportCreatedAt).toLocaleString("id-ID")
+      : "-";
+    return [
+      "✕ DUPLIKAT LAPORAN",
+      `Laporan identik sudah tersimpan (${dup.exactReportExistingCount} baris cocok).`,
+      `Terakhir tersimpan: ${when}`,
+      "Status: SIMPAN DIBLOKIR"
+    ].join("\n");
+  }
+  if(dup.potentialRows?.length){
+    return [
+      "⚠ POTENSI TRANSAKSI GANDA",
+      `${dup.potentialRows.length} baris mirip dengan transaksi yang sudah ada.`,
+      "Ini hanya peringatan; laporan tetap dapat disimpan bila memang transaksi baru."
+    ].join("\n");
+  }
+  return "✓ BELUM PERNAH DISIMPAN";
+}
+
+async function previewExpense(){
   try{
     EXPENSE_PREVIEW=parseExpense($("expenseText").value);
 
     const p=EXPENSE_PREVIEW;
+    $("expensePreview").textContent="Memeriksa data dan duplikasi...";
+
+    p.duplicateCheck=await checkExpenseDuplicates(p,$("expenseText").value);
+
     const validation=p.declaredTotal==null
       ? "Total laporan: tidak dicantumkan"
       : `Total laporan: ${rupiah(p.declaredTotal)}\n`+
@@ -1159,12 +1391,30 @@ function previewExpense(){
         p.unresolvedMalformed.map(c=>`- ${c.line}`).join("\n")
       : "";
 
+    const dateValidation=p.dateMismatch
+      ? `⚠ Tanggal WhatsApp ${p.whatsappDate} berbeda dengan tanggal pilihan ${p.manualDate}. Simpan akan diblokir.\n`
+      : `Tanggal sumber: ${p.dateSource}\n`;
+
+    const dupStatus=formatExpenseDuplicateStatus(p.duplicateCheck);
+
+    const potentialText=p.duplicateCheck?.potentialRows?.length && !p.duplicateCheck?.exactReport
+      ? `\n\nDetail potensi transaksi ganda:\n`+
+        p.duplicateCheck.potentialRows.map(x=>
+          `- ${x.row.category}${x.row.subcategory?" / "+x.row.subcategory:""} | `+
+          `${x.row.description||"-"} | ${rupiah(x.row.amount)} `+
+          `(sudah ada ${x.matchCount}x)`
+        ).join("\n")
+      : "";
+
     $("expensePreview").textContent=
       `Tanggal efektif: ${p.date}\n`+
+      `${dateValidation}`+
       `KP: ${p.kp} (${p.kpSource})\n`+
       `Baris biaya: ${p.rows.length}\n`+
       `Total detail: ${rupiah(p.total)}\n`+
-      `${validation}`+
+      `${validation}\n\n`+
+      `DETEKSI DUPLIKAT\n${dupStatus}`+
+      `${potentialText}`+
       `${correctionText}`+
       `${unresolvedText}\n\n`+
       p.rows.map((r,i)=>
@@ -1182,6 +1432,42 @@ function previewExpense(){
 async function saveExpense(){
   if(!EXPENSE_PREVIEW) return alert("Preview dahulu.");
 
+  // Re-check immediately before INSERT to prevent double-click / stale preview.
+  let latestDuplicateCheck;
+  try{
+    latestDuplicateCheck=await checkExpenseDuplicates(
+      EXPENSE_PREVIEW,
+      $("expenseText").value
+    );
+  }catch(e){
+    return alert(e.message);
+  }
+
+  EXPENSE_PREVIEW.duplicateCheck=latestDuplicateCheck;
+
+  if(latestDuplicateCheck.exactReport){
+    const when=latestDuplicateCheck.exactReportCreatedAt
+      ? new Date(latestDuplicateCheck.exactReportCreatedAt).toLocaleString("id-ID")
+      : "-";
+    return alert(
+      "SIMPAN DIBLOKIR — DUPLIKAT LAPORAN\n\n"+
+      `KP: ${EXPENSE_PREVIEW.kp}\n`+
+      `Tanggal: ${EXPENSE_PREVIEW.date}\n`+
+      `Total: ${rupiah(EXPENSE_PREVIEW.total)}\n`+
+      `Sudah tersimpan: ${when}\n\n`+
+      "Laporan WhatsApp yang sama tidak disimpan dua kali."
+    );
+  }
+
+  if(EXPENSE_PREVIEW.dateMismatch){
+    return alert(
+      "SIMPAN DIBLOKIR.\n\n"+
+      `Tanggal WhatsApp: ${EXPENSE_PREVIEW.whatsappDate}\n`+
+      `Tanggal pilihan: ${EXPENSE_PREVIEW.manualDate}\n\n`+
+      "Samakan tanggal pilihan dengan laporan WhatsApp, atau kosongkan tanggal pilihan agar sistem memakai tanggal WhatsApp."
+    );
+  }
+
   if(EXPENSE_PREVIEW.unresolvedMalformed?.length && !EXPENSE_PREVIEW.totalMatches){
     return alert(
       "SIMPAN DIBLOKIR. Ada nominal dengan format tidak pasti dan total belum cocok. Periksa Preview."
@@ -1197,9 +1483,21 @@ async function saveExpense(){
     );
   }
 
+  if(latestDuplicateCheck.potentialRows?.length){
+    const proceed=confirm(
+      "PERINGATAN POTENSI TRANSAKSI GANDA\n\n"+
+      `${latestDuplicateCheck.potentialRows.length} baris mirip dengan transaksi yang sudah ada `+
+      `untuk ${EXPENSE_PREVIEW.kp} tanggal ${EXPENSE_PREVIEW.date}.\n\n`+
+      "Jika ini memang laporan/transaksi baru, klik OK untuk lanjut.\n"+
+      "Klik Cancel untuk membatalkan."
+    );
+    if(!proceed) return;
+  }
+
   const {error}=await db.from("unit_expenses").insert(
     EXPENSE_PREVIEW.rows.map(x=>({
       ...x,
+      source_type:"whatsapp_paste",
       raw_text:$("expenseText").value
     }))
   );
@@ -1207,6 +1505,7 @@ async function saveExpense(){
 
   alert(
     `Pengeluaran tersimpan.\n`+
+    `Tanggal: ${EXPENSE_PREVIEW.date}\n`+
     `KP: ${EXPENSE_PREVIEW.kp}\n`+
     `Total: ${rupiah(EXPENSE_PREVIEW.total)}`
   );
@@ -1215,8 +1514,10 @@ async function saveExpense(){
   $("expenseText").value="";
   $("expensePreview").textContent="Belum ada preview.";
   await loadExpenses();
+  if($("page-expense-monitor")?.classList.contains("active")) await loadExpenseMonitoring();
   await loadDashboard();
 }
+
 function masterProvinceFromAddress(address){
   const a=String(address||"").toLowerCase();
   if(a.includes("riau")) return "Riau";
@@ -1317,6 +1618,7 @@ async function loadMaster(){
     codes.map(code=>`<option value="${code}">${code}</option>`).join("");
 
   if($("expenseKp")) $("expenseKp").innerHTML=optionsExpense;
+  if($("expenseMonitorKp")) $("expenseMonitorKp").innerHTML=optionsAll;
   if($("historyKp")) $("historyKp").innerHTML=optionsAll;
   if($("monitorKp")) $("monitorKp").innerHTML=optionsAll;
 
@@ -1646,6 +1948,139 @@ async function loadExpenses(){
   (data||[]).forEach(x=>agg[x.kp_code] = (agg[x.kp_code] || 0) + Number(x.amount||0));
   $("expenseTable").innerHTML = table(["KP","Total Pengeluaran"], Object.entries(agg).sort((a,b)=>b[1]-a[1]).map(([kp,val])=>[kp, rupiah(val)]));
 }
+
+function localTodayISO(){
+  const d=new Date();
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,"0");
+  const day=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+function initExpenseMonitoring(){
+  if($("expenseMonitorMonth") && !$("expenseMonitorMonth").value){
+    $("expenseMonitorMonth").value=localTodayISO().slice(0,7);
+  }
+}
+function expenseSourceLabel(row){
+  const s=String(row?.source_type||"").toLowerCase();
+  if(s==="whatsapp_paste" || !s) return "WhatsApp Paste";
+  return row.source_type;
+}
+function expenseMonthBounds(month){
+  const [y,m]=String(month||"").split("-").map(Number);
+  if(!y||!m) return null;
+  const start=`${y}-${String(m).padStart(2,"0")}-01`;
+  const nextM=m===12?1:m+1;
+  const nextY=m===12?y+1:y;
+  const end=`${nextY}-${String(nextM).padStart(2,"0")}-01`;
+  return {start,end};
+}
+async function loadExpenseMonitoring(){
+  if(!$("expenseMonitorMonth")) return;
+  initExpenseMonitoring();
+  const bounds=expenseMonthBounds($("expenseMonitorMonth").value);
+  if(!bounds) return;
+
+  const {data,error}=await db.from("unit_expenses")
+    .select("id,expense_date,kp_code,category,subcategory,description,amount,source_type,corrected_from,created_at")
+    .gte("expense_date",bounds.start)
+    .lt("expense_date",bounds.end)
+    .order("expense_date",{ascending:true})
+    .order("created_at",{ascending:true});
+
+  if(error){
+    console.error(error);
+    $("expenseMonitorDetailTable").innerHTML=`<div class="master-empty">Gagal memuat monitoring pengeluaran: ${error.message}</div>`;
+    return;
+  }
+
+  EXPENSE_MONITOR_DATA=data||[];
+  const currentCategory=$("expenseMonitorCategory")?.value||"ALL";
+  const cats=[...new Set(EXPENSE_MONITOR_DATA.map(r=>r.category||"Lainnya"))].sort((a,b)=>a.localeCompare(b));
+  if($("expenseMonitorCategory")){
+    $("expenseMonitorCategory").innerHTML='<option value="ALL">Semua Kategori</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join("");
+    if(cats.includes(currentCategory)) $("expenseMonitorCategory").value=currentCategory;
+  }
+  renderExpenseMonitoring();
+}
+function renderExpenseMonitoring(){
+  if(!$("expenseMonitorDetailTable")) return;
+  const kp=$("expenseMonitorKp")?.value||"ALL";
+  const category=$("expenseMonitorCategory")?.value||"ALL";
+  const search=($("expenseMonitorSearch")?.value||"").trim().toLowerCase();
+
+  let rows=[...EXPENSE_MONITOR_DATA];
+  if(kp!=="ALL") rows=rows.filter(r=>r.kp_code===kp);
+  if(category!=="ALL") rows=rows.filter(r=>(r.category||"Lainnya")===category);
+  if(search){
+    rows=rows.filter(r=>`${r.kp_code} ${r.category||""} ${r.subcategory||""} ${r.description||""}`.toLowerCase().includes(search));
+  }
+
+  const total=rows.reduce((a,r)=>a+Number(r.amount||0),0);
+  const kps=new Set(rows.map(r=>r.kp_code));
+  const days=new Set(rows.map(r=>r.expense_date));
+  const avgDay=days.size?total/days.size:0;
+  const maxRow=rows.reduce((best,r)=>!best||Number(r.amount||0)>Number(best.amount||0)?r:best,null);
+
+  $("expenseMonitorTotal").textContent=rupiah(total);
+  $("expenseMonitorTransactions").textContent=rows.length.toLocaleString("id-ID");
+  $("expenseMonitorKpActive").textContent=kps.size.toLocaleString("id-ID");
+  $("expenseMonitorDays").textContent=days.size.toLocaleString("id-ID");
+  $("expenseMonitorAvg").textContent=rupiah(avgDay);
+  $("expenseMonitorLargest").textContent=maxRow?rupiah(maxRow.amount):"Rp0";
+  $("expenseMonitorLargestSub").textContent=maxRow?`${maxRow.kp_code} • ${maxRow.category||"Lainnya"}`:"Belum ada data";
+
+  const daily={};
+  rows.forEach(r=>daily[r.expense_date]=(daily[r.expense_date]||0)+Number(r.amount||0));
+  const dailyDates=Object.keys(daily).sort();
+  Plotly.newPlot("expenseMonitorTrend",[{
+    x:dailyDates,y:dailyDates.map(d=>daily[d]),type:"bar",
+    hovertemplate:"<b>%{x}</b><br>Rp%{y:,.0f}<extra></extra>"
+  }],{
+    ...darkLayout,margin:{t:16,l:68,r:16,b:48},
+    xaxis:{...darkLayout.xaxis,fixedrange:true},
+    yaxis:{...darkLayout.yaxis,fixedrange:true,tickformat:"~s",rangemode:"tozero"}
+  },plotConfig);
+
+  const catAgg={};
+  rows.forEach(r=>{const c=r.category||"Lainnya";catAgg[c]=(catAgg[c]||0)+Number(r.amount||0);});
+  const cats=Object.entries(catAgg).sort((a,b)=>a[1]-b[1]);
+  Plotly.newPlot("expenseMonitorCategoryChart",[{
+    x:cats.map(x=>x[1]),y:cats.map(x=>x[0]),type:"bar",orientation:"h",
+    hovertemplate:"<b>%{y}</b><br>Rp%{x:,.0f}<extra></extra>"
+  }],{
+    ...darkLayout,margin:{t:16,l:125,r:18,b:42},
+    xaxis:{...darkLayout.xaxis,fixedrange:true,tickformat:"~s",rangemode:"tozero"},
+    yaxis:{...darkLayout.yaxis,fixedrange:true}
+  },plotConfig);
+
+  const kpAgg={};
+  rows.forEach(r=>kpAgg[r.kp_code]=(kpAgg[r.kp_code]||0)+Number(r.amount||0));
+  const topKp=Object.entries(kpAgg).sort((a,b)=>b[1]-a[1]).slice(0,10).reverse();
+  Plotly.newPlot("expenseMonitorKpChart",[{
+    x:topKp.map(x=>x[1]),y:topKp.map(x=>x[0]),type:"bar",orientation:"h",
+    hovertemplate:"<b>%{y}</b><br>Rp%{x:,.0f}<extra></extra>"
+  }],{
+    ...darkLayout,margin:{t:16,l:70,r:18,b:42},
+    xaxis:{...darkLayout.xaxis,fixedrange:true,tickformat:"~s",rangemode:"tozero"},
+    yaxis:{...darkLayout.yaxis,fixedrange:true}
+  },plotConfig);
+
+  const detailRows=rows
+    .sort((a,b)=>b.expense_date.localeCompare(a.expense_date)||Number(b.amount||0)-Number(a.amount||0))
+    .map(r=>[
+      r.expense_date,r.kp_code,r.category||"Lainnya",r.subcategory||"—",r.description||"—",
+      rupiah(r.amount),expenseSourceLabel(r),r.corrected_from?`Koreksi dari ${r.corrected_from}`:"—"
+    ]);
+
+  $("expenseMonitorDetailTable").innerHTML=detailRows.length
+    ? table(["Tanggal","KP","Kategori","Subkategori","Deskripsi","Nominal","Sumber","Koreksi"],detailRows)
+    : '<div class="master-empty">Belum ada pengeluaran untuk filter yang dipilih.</div>';
+
+  const month=$("expenseMonitorMonth")?.value||"-";
+  $("expenseMonitorPeriodLabel").textContent=`Periode ${month} • ${rows.length} transaksi`;
+}
+
 async function loadHistoryFilters(){
   const {data} = await db.from("historical_summary").select("year");
   const years = [...new Set((data||[]).map(x=>x.year))].sort((a,b)=>b-a);
@@ -2424,26 +2859,42 @@ async function previewDailyExcels(fileList){
     const files=[...(fileList||[])];
     if(!files.length) throw Error("Pilih minimal 1 file Excel Harian.");
 
-    const selectedDate=$("monitorDate")?.value;
-    if(!selectedDate) throw Error("Pilih tanggal Monitoring Harian terlebih dahulu.");
-
     const previews=[];
-    let extracted=[];
+    let allRows=[];
 
     for(const file of files){
       const wb=await readWorkbookFile(file);
       const p=parseMonthlyWorkbook(wb,file.name);
       previews.push(p);
-
-      // Reuse the validated detailed Excel parser, but ONLY take the selected day.
-      extracted.push(...(p.daily||[])
-        .filter(r=>r.report_date===selectedDate)
-        .map(r=>({
-          ...r,
-          source_file:`DAILY:${file.name}`
-        })));
+      allRows.push(...(p.daily||[]).map(r=>({
+        ...r,
+        source_file:`DAILY:${file.name}`
+      })));
     }
 
+    const availableDates=[...new Set(allRows.map(r=>r.report_date).filter(Boolean))].sort();
+    const manualDate=$("dailyExcelDate")?.value || null;
+    let selectedDate=manualDate;
+
+    if(!selectedDate && availableDates.length===1){
+      selectedDate=availableDates[0];
+      if($("dailyExcelDate")) $("dailyExcelDate").value=selectedDate;
+    }
+    if(!selectedDate){
+      selectedDate=$("monitorDate")?.value || null;
+    }
+    if(!selectedDate){
+      throw Error(
+        availableDates.length>1
+          ? `File berisi ${availableDates.length} tanggal. Pilih Tanggal Data Harian terlebih dahulu.`
+          : "Tanggal data tidak dapat ditentukan. Pilih Tanggal Data Harian."
+      );
+    }
+
+    const selectedTime=$("dailyExcelTime")?.value || "00:00:00";
+    const mode=selectedTime==="00:00:00" ? "closing" : "snapshot";
+
+    let extracted=allRows.filter(r=>r.report_date===selectedDate);
     extracted=combineDailyRows(extracted);
 
     const badFiles=previews.filter(p=>!p.integrityOk);
@@ -2454,23 +2905,36 @@ async function previewDailyExcels(fileList){
 
     DAILY_EXCEL_PREVIEW={
       date:selectedDate,
+      time:selectedTime,
+      mode,
       files:files.map(f=>f.name),
       daily:extracted,
       fileResults:previews,
-      integrityBlocked:badFiles
+      integrityBlocked:badFiles,
+      availableDates,
+      total:tonTotal,
+      trips:tripTotal
     };
 
+    if($("monitorDate")) $("monitorDate").value=selectedDate;
+
     $("dailyExcelPreview").textContent=
-      `TANGGAL CLOSING: ${selectedDate}\n`+
+      `MODE: ${mode==="closing"?"CLOSING / TOTAL HARIAN":"SNAPSHOT EXCEL"}\n`+
+      `Tanggal data: ${selectedDate}${manualDate?" (pilihan manual)":availableDates.length===1?" (otomatis dari file)":" (filter Monitoring)"}\n`+
+      `Jam data: ${selectedTime.slice(0,5)}\n`+
+      `Tanggal tersedia di file: ${availableDates.length?availableDates.join(", "):"tidak terdeteksi"}\n`+
       `File dipilih: ${files.length}\n`+
-      `KP terbaca pada tanggal ini: ${kpSet.size}\n`+
+      `KP terbaca: ${kpSet.size}\n`+
       `Supplier terbaca: ${supplierSet.size}\n`+
       `Baris KP/Supplier: ${extracted.length}\n`+
       `Total trip: ${tripTotal.toLocaleString("id-ID")}\n`+
-      `CLOSING TONASE 00.00: ${kg(tonTotal)}\n\n`+
-      (extracted.length
-        ? `Data ini akan dibandingkan dengan snapshot WhatsApp, dengan acuan utama snapshot 17.00 pada ${selectedDate}.`
-        : `PERINGATAN: Tidak ada transaksi tanggal ${selectedDate} di file yang dipilih.`)+
+      `${mode==="closing"?"TOTAL KESELURUHAN HARI":"TOTAL SNAPSHOT"}: ${kg(tonTotal)}\n\n`+
+      (mode==="closing"
+        ? `Jam 00.00 akan disimpan sebagai Closing final harian dan menjadi pembanding snapshot 17.00.`
+        : `Jam ${selectedTime.slice(0,5)} akan disimpan sebagai snapshot Excel pada tanggal ${selectedDate}.`)+
+      (!extracted.length
+        ? `\n\nPERINGATAN: Tidak ada transaksi tanggal ${selectedDate} di file yang dipilih.`
+        : "")+
       (badFiles.length
         ? `\n\nSIMPAN AKAN DIBLOKIR:\n${badFiles.map(f=>`• ${f.fileName}: ${f.integrityIssues?.join("; ")||"Total parser tidak cocok dengan Total Excel"}`).join("\n")}`
         : "");
@@ -2479,7 +2943,6 @@ async function previewDailyExcels(fileList){
     $("dailyExcelPreview").textContent="ERROR: "+e.message;
   }
 }
-
 async function saveDailyExcel(){
   if(!DAILY_EXCEL_PREVIEW) return alert("Pilih dan Preview Excel Harian dahulu.");
   const p=DAILY_EXCEL_PREVIEW;
@@ -2495,30 +2958,66 @@ async function saveDailyExcel(){
     );
   }
 
-  // Daily Excel is authoritative only for this selected date.
-  // Upsert by date + KP + supplier avoids duplicate totals.
-  const chunkSize=500;
-  for(let i=0;i<p.daily.length;i+=chunkSize){
-    const {error}=await db.from("kp_daily_history")
-      .upsert(p.daily.slice(i,i+chunkSize),{
-        onConflict:"report_date,kp_code,supplier_name"
-      });
-    if(error) return alert("Gagal menyimpan Excel Harian: "+error.message);
+  if(p.mode==="closing"){
+    // 00.00 = authoritative final daily total.
+    const chunkSize=500;
+    for(let i=0;i<p.daily.length;i+=chunkSize){
+      const {error}=await db.from("kp_daily_history")
+        .upsert(p.daily.slice(i,i+chunkSize),{
+          onConflict:"report_date,kp_code,supplier_name"
+        });
+      if(error) return alert("Gagal menyimpan Closing Excel Harian: "+error.message);
+    }
+
+    alert(
+      `CLOSING EXCEL 00.00 BERHASIL DISIMPAN ✓\n\n`+
+      `Tanggal: ${p.date}\n`+
+      `Total: ${kg(p.total)}\n`+
+      `Trip: ${p.trips.toLocaleString("id-ID")}\n`+
+      `Baris KP/Supplier: ${p.daily.length}\n\n`+
+      `Data menjadi total final keseluruhan hari tersebut.`
+    );
+  }else{
+    // 10/12/15/17 = operational snapshot from Excel upload.
+    const {data:s,error}=await db.from("monitoring_snapshots").upsert({
+      report_date:p.date,
+      snapshot_time:p.time,
+      total_tonnage_kg:p.total,
+      total_trips:p.trips,
+      source_type:"excel_upload",
+      raw_text:`EXCEL HARIAN: ${p.files.join(", ")}`,
+      status:"validated"
+    },{onConflict:"report_date,snapshot_time"}).select().single();
+
+    if(error) return alert("Gagal menyimpan Snapshot Excel: "+error.message);
+
+    await db.from("monitoring_snapshot_details").delete().eq("snapshot_id",s.id);
+    const payload=p.daily.map(r=>({
+      snapshot_id:s.id,
+      kp_code:r.kp_code,
+      supplier_name:r.supplier_name,
+      tonnage_kg:Number(r.tonnage_kg||0),
+      trip_count:Number(r.trip_count||0)
+    }));
+    const {error:e2}=await db.from("monitoring_snapshot_details").insert(payload);
+    if(e2) return alert("Snapshot tersimpan, tetapi detail gagal: "+e2.message);
+
+    alert(
+      `SNAPSHOT EXCEL BERHASIL DISIMPAN ✓\n\n`+
+      `Tanggal: ${p.date}\n`+
+      `Jam: ${p.time.slice(0,5)}\n`+
+      `Total: ${kg(p.total)}\n`+
+      `Trip: ${p.trips.toLocaleString("id-ID")}`
+    );
   }
 
-  alert(
-    `Excel Harian berhasil disimpan.\n`+
-    `Tanggal: ${p.date}\n`+
-    `Baris KP/Supplier: ${p.daily.length}\n\n`+
-    `Data sekarang menjadi closing final dan pembanding snapshot WhatsApp.`
-  );
-
+  if($("monitorDate")) $("monitorDate").value=p.date;
   DAILY_EXCEL_PREVIEW=null;
   if($("dailyExcelFile")) $("dailyExcelFile").value="";
-  $("dailyExcelPreview").textContent="Belum ada file closing dipilih.";
+  $("dailyExcelPreview").textContent="Belum ada file harian dipilih.";
   await loadKPDaily($("monitorKp").value||"ALL");
+  await loadDashboard();
 }
-
 async function previewMonthlyExcels(fileList){
   try{
     const files=[...(fileList||[])];
@@ -3149,7 +3648,7 @@ async function loadKPDaily(kp){
 
   // WhatsApp snapshots
   const {data:snaps,error}=await db.from("monitoring_snapshots")
-    .select("id,report_date,snapshot_time,total_tonnage_kg,total_trips")
+    .select("id,report_date,snapshot_time,total_tonnage_kg,total_trips,source_type")
     .eq("report_date",date)
     .order("snapshot_time",{ascending:true});
   if(error){renderMonitorEmpty(error.message);return;}
@@ -3302,7 +3801,9 @@ async function loadKPDaily(kp){
       kg(v.tonnage),
       v.trips,
       hasActual ? `${diff>=0?"+":""}${kg(diff)}` : "—",
-      "WhatsApp Snapshot"
+      String(s.source_type||"").toLowerCase().includes("excel")
+        ? "Excel Upload"
+        : "WhatsApp Snapshot"
     ];
   });
 
