@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.9.1">
+  <link rel="stylesheet" href="style.css?v=4.9.4">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -86,6 +86,9 @@
           <div class="classic-submenu">
             <button class="classic-child" onclick="focusPageInput('expenses','expenseText')">
               <span class="classic-list-icon">☷</span><b>Paste Pengeluaran</b>
+            </button>
+            <button class="classic-child" id="sideExpenseMonitor" onclick="openExpenseMonitoring()">
+              <span class="classic-list-icon">☷</span><b>Monitoring Pengeluaran</b>
             </button>
           </div>
         </div>
@@ -185,7 +188,7 @@
               <div id="expenseDonut" class="chart chart-md"></div>
               <div id="expenseLegend" class="expense-legend"></div>
             </div>
-            <button class="ghost-link" onclick="goToPage('expenses')">Lihat Detail Pengeluaran →</button>
+            <button class="ghost-link" onclick="openExpenseMonitoring()">Lihat Detail Pengeluaran →</button>
           </article>
         </div>
 
@@ -335,20 +338,36 @@
           </div>
 
           <article class="panel glass period-upload-panel daily-upload-panel">
-            <div class="period-upload-info">
+            <div class="period-upload-info daily-upload-info">
               <div>
-                <strong>Upload Closing Tonase Harian — 00.00</strong>
-                <span>Closing final harian setelah pukul 00.00. Dipakai sebagai pembanding terhadap snapshot WhatsApp, terutama snapshot 17.00. Tidak menggantikan snapshot intraday.</span>
+                <strong>Upload Data Tonase Harian</strong>
+                <span>Tanggal dapat dideteksi otomatis dari Excel atau dipilih manual. Jam 00.00 = Closing/Total Harian; 10.00/12.00/15.00/17.00 = Snapshot.</span>
+              </div>
+              <div class="daily-upload-meta">
+                <label>
+                  <span>Tanggal Data</span>
+                  <input id="dailyExcelDate" type="date">
+                </label>
+                <label>
+                  <span>Jam Data</span>
+                  <select id="dailyExcelTime">
+                    <option value="00:00:00" selected>00.00 — Closing / Total Harian</option>
+                    <option value="10:00:00">10.00 — Snapshot</option>
+                    <option value="12:00:00">12.00 — Snapshot</option>
+                    <option value="15:00:00">15.00 — Snapshot</option>
+                    <option value="17:00:00">17.00 — Snapshot</option>
+                  </select>
+                </label>
               </div>
               <div class="period-upload-actions">
                 <label class="btn btn-primary file-btn">
-                  Pilih Excel Closing
+                  Pilih Excel Harian
                   <input id="dailyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewDailyExcels(this.files)">
                 </label>
-                <button class="btn btn-secondary" onclick="saveDailyExcel()">Simpan Closing 00.00</button>
+                <button class="btn btn-secondary" onclick="saveDailyExcel()">Simpan Data Harian</button>
               </div>
             </div>
-            <pre id="dailyExcelPreview" class="preview compact-preview">Belum ada file closing dipilih.</pre>
+            <pre id="dailyExcelPreview" class="preview compact-preview">Belum ada file harian dipilih.</pre>
           </article>
 
           <details class="monitor-input-details" open>
@@ -357,22 +376,30 @@
               <article class="panel glass">
                 <h3>Paste Tonase WhatsApp</h3>
                 <div class="input-mode-note">
-                  Mendukung <b>Snapshot 10/12/15/17</b>, <b>Closing per KP</b>, atau <b>banyak KP sekaligus</b> dalam satu paste.
+                  Mendukung <b>00.00 Closing/Total Harian</b>, <b>Snapshot 10/12/15/17</b>, <b>Closing per KP</b>, atau <b>banyak KP sekaligus</b> dalam satu paste.
                   <span id="tonnageModeBadge" class="tonnage-mode-badge">SNAPSHOT 10/12/15/17</span>
                 </div>
               <textarea id="tonnageText" oninput="detectTonnageModeLive()" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
-                <div class="snapshot-input-meta">
+                <div class="snapshot-input-meta daily-manual-meta">
                   <label>
-                    <span>Jam Snapshot</span>
-                    <select id="tonnageSnapshotTime">
+                    <span>Tanggal Data <em>(opsional)</em></span>
+                    <input id="tonnageInputDate" type="date">
+                  </label>
+                  <label>
+                    <span>Jam Data</span>
+                    <select id="tonnageSnapshotTime" onchange="detectTonnageModeLive()">
                       <option value="">Otomatis dari header / pilih jam</option>
-                      <option value="10:00:00">10.00 WIB</option>
-                      <option value="12:00:00">12.00 WIB</option>
-                      <option value="15:00:00">15.00 WIB</option>
-                      <option value="17:00:00">17.00 WIB</option>
+                      <option value="00:00:00">00.00 — Closing / Total Harian</option>
+                      <option value="10:00:00">10.00 — Snapshot</option>
+                      <option value="12:00:00">12.00 — Snapshot</option>
+                      <option value="15:00:00">15.00 — Snapshot</option>
+                      <option value="17:00:00">17.00 — Snapshot</option>
                     </select>
                   </label>
-                  <small>Jika header WhatsApp tidak ikut tercopy, tanggal memakai filter di atas dan jam memakai pilihan ini.</small>
+                  <small>
+                    Header WhatsApp tetap dideteksi otomatis. Pilihan manual dipakai jika tanggal/jam tidak tercopy.
+                    Jika manual berbeda dengan header, Simpan diblokir. <b>00.00 = total final keseluruhan hari.</b>
+                  </small>
                 </div>
                 <div class="actions">
                   <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
@@ -549,7 +576,20 @@
         <div class="two-col">
           <article class="panel glass">
             <h3>Paste Pengeluaran</h3>
-            <select id="expenseKp"><option value="">Pilih KP/unit jika tidak ada di laporan</option></select>
+            <div class="expense-input-meta">
+              <label>
+                <span>Tanggal Pengeluaran <em>(opsional / fallback)</em></span>
+                <input id="expenseDate" type="date">
+              </label>
+              <label>
+                <span>KP / Unit <em>(jika tidak ada di laporan)</em></span>
+                <select id="expenseKp"><option value="">Pilih KP/unit jika tidak ada di laporan</option></select>
+              </label>
+            </div>
+            <div class="input-mode-note expense-date-note">
+              Tanggal dari WhatsApp tetap diprioritaskan. Jika laporan tidak memiliki tanggal, sistem memakai tanggal pilihan di atas. Jika keduanya berbeda, Simpan diblokir untuk mencegah salah tanggal.
+              <br><b>Anti-double aktif:</b> laporan WhatsApp yang sama persis akan diblokir; transaksi yang hanya mirip akan diberi peringatan.
+            </div>
             <textarea id="expenseText" placeholder="Paste laporan biaya WhatsApp di sini..."></textarea>
             <div class="actions">
               <button class="btn btn-primary" onclick="previewExpense()">Preview</button>
@@ -558,10 +598,50 @@
             <pre id="expensePreview" class="preview"></pre>
           </article>
           <article class="panel glass">
-            <h3>Rekap Pengeluaran</h3>
+            <h3>Rekap Pengeluaran per KP</h3>
             <div id="expenseTable" class="table-wrap"></div>
           </article>
         </div>
+      </section>
+
+      <section id="page-expense-monitor" class="page">
+        <div class="page-head glass row-space expense-monitor-head">
+          <div>
+            <h2>Monitoring Pengeluaran</h2>
+            <p>Analisis detail biaya operasional berdasarkan tanggal, KP, kategori, transaksi, dan sumber input.</p>
+          </div>
+          <span id="expenseMonitorPeriodLabel" class="monitor-source-badge">Periode -</span>
+        </div>
+
+        <article class="panel glass expense-monitor-filter-panel">
+          <div class="expense-monitor-filters">
+            <label><span>Bulan</span><input id="expenseMonitorMonth" type="month" onchange="loadExpenseMonitoring()"></label>
+            <label><span>KP</span><select id="expenseMonitorKp" onchange="renderExpenseMonitoring()"><option value="ALL">Semua KP</option></select></label>
+            <label><span>Kategori</span><select id="expenseMonitorCategory" onchange="renderExpenseMonitoring()"><option value="ALL">Semua Kategori</option></select></label>
+            <label class="expense-search-label"><span>Cari Detail</span><input id="expenseMonitorSearch" type="search" placeholder="BBM, listrik, kendaraan..." oninput="renderExpenseMonitoring()"></label>
+            <button class="btn btn-primary" onclick="loadExpenseMonitoring()">Refresh</button>
+          </div>
+        </article>
+
+        <div class="monitor-kpi-grid expense-monitor-kpis">
+          <article class="monitor-kpi glass"><small>TOTAL PENGELUARAN</small><strong id="expenseMonitorTotal">Rp0</strong><span>sesuai filter</span></article>
+          <article class="monitor-kpi glass"><small>TRANSAKSI</small><strong id="expenseMonitorTransactions">0</strong><span>baris biaya</span></article>
+          <article class="monitor-kpi glass"><small>KP AKTIF</small><strong id="expenseMonitorKpActive">0</strong><span>unit dengan biaya</span></article>
+          <article class="monitor-kpi glass"><small>HARI DATA</small><strong id="expenseMonitorDays">0</strong><span>hari tercatat</span></article>
+          <article class="monitor-kpi glass"><small>RATA-RATA / HARI</small><strong id="expenseMonitorAvg">Rp0</strong><span>berdasarkan hari data</span></article>
+          <article class="monitor-kpi glass"><small>TRANSAKSI TERBESAR</small><strong id="expenseMonitorLargest">Rp0</strong><span id="expenseMonitorLargestSub">Belum ada data</span></article>
+        </div>
+
+        <div class="expense-monitor-chart-grid">
+          <article class="panel glass"><div class="panel-head"><h3>TREN PENGELUARAN HARIAN</h3></div><div id="expenseMonitorTrend" class="chart chart-md"></div></article>
+          <article class="panel glass"><div class="panel-head"><h3>PENGELUARAN PER KATEGORI</h3></div><div id="expenseMonitorCategoryChart" class="chart chart-md"></div></article>
+          <article class="panel glass"><div class="panel-head"><h3>TOP KP BERDASARKAN BIAYA</h3></div><div id="expenseMonitorKpChart" class="chart chart-md"></div></article>
+        </div>
+
+        <article class="panel glass expense-monitor-detail-panel">
+          <div class="panel-head row-space"><h3>DETAIL TRANSAKSI PENGELUARAN</h3><span class="monitor-rule-note">Tanggal • KP • kategori • deskripsi • nominal • sumber • koreksi</span></div>
+          <div id="expenseMonitorDetailTable" class="table-wrap expense-monitor-table"></div>
+        </article>
       </section>
 
       <section id="page-history" class="page">
@@ -650,6 +730,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.9.1"></script>
+  <script src="app.js?v=4.9.4"></script>
 </body>
 </html>
