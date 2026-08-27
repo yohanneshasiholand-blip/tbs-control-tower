@@ -3326,6 +3326,14 @@ async function initKPMonitoringFilters(){
   if(!$("monitorDate").value) $("monitorDate").value=latestDate;
   if(!$("monitorMonth").value) $("monitorMonth").value=latestDate.slice(0,7);
 
+  // Default detail range: first day of the latest operational month through latest date.
+  if($("monitorRangeStart") && !$("monitorRangeStart").value){
+    $("monitorRangeStart").value=`${latestDate.slice(0,7)}-01`;
+  }
+  if($("monitorRangeEnd") && !$("monitorRangeEnd").value){
+    $("monitorRangeEnd").value=latestDate;
+  }
+
   const {data:histYears}=await db.from("historical_summary").select("year");
   const years=[...new Set((histYears||[]).map(x=>Number(x.year)))];
   const currentYear=Number(latestDate.slice(0,4));
@@ -3584,6 +3592,256 @@ async function loadMonitorKpPeriodTable(mode,selectedKp){
   }
 }
 
+
+function inclusiveDateCount(start,end){
+  if(!start||!end) return 0;
+  const a=new Date(`${start}T00:00:00`);
+  const b=new Date(`${end}T00:00:00`);
+  if(Number.isNaN(a.getTime())||Number.isNaN(b.getTime())||b<a) return 0;
+  return Math.floor((b-a)/86400000)+1;
+}
+
+function syncMonitorRangeFromActivePeriod(){
+  let start=null,end=null;
+
+  if(MONITOR_MODE==="daily"){
+    const d=$("monitorDate")?.value||null;
+    start=d; end=d;
+  }else if(MONITOR_MODE==="monthly"){
+    const m=$("monitorMonth")?.value||null;
+    if(m){
+      const b=yearMonthBounds(m);
+      start=b.start; end=b.end;
+    }
+  }else{
+    const y=$("monitorYear")?.value||null;
+    if(y){
+      start=`${y}-01-01`;
+      end=`${y}-12-31`;
+    }
+  }
+
+  if(start && $("monitorRangeStart")) $("monitorRangeStart").value=start;
+  if(end && $("monitorRangeEnd")) $("monitorRangeEnd").value=end;
+  return loadMonitorRangeDetail();
+}
+
+async function fetchMonitorRangeClosingRows(start,end,kp){
+  const pageSize=1000;
+  let offset=0;
+  const all=[];
+
+  while(true){
+    let q=db.from("kp_daily_history")
+      .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count,source_file")
+      .gte("report_date",start)
+      .lte("report_date",end)
+      .order("report_date",{ascending:true})
+      .order("kp_code",{ascending:true})
+      .range(offset,offset+pageSize-1);
+
+    if(kp && kp!=="ALL") q=q.eq("kp_code",kp);
+
+    const {data,error}=await q;
+    if(error) throw Error("Gagal membaca Closing Harian untuk range tanggal: "+error.message);
+
+    const rows=data||[];
+    all.push(...rows);
+    if(rows.length<pageSize) break;
+    offset+=pageSize;
+    if(offset>20000) break;
+  }
+  return all;
+}
+
+async function fetchMonitorRangeExpenseRows(start,end,kp){
+  const pageSize=1000;
+  let offset=0;
+  const all=[];
+
+  while(true){
+    let q=db.from("unit_expenses")
+      .select("expense_date,kp_code,category,amount")
+      .gte("expense_date",start)
+      .lte("expense_date",end)
+      .order("expense_date",{ascending:true})
+      .order("kp_code",{ascending:true})
+      .range(offset,offset+pageSize-1);
+
+    if(kp && kp!=="ALL") q=q.eq("kp_code",kp);
+
+    const {data,error}=await q;
+    if(error) throw Error("Gagal membaca Pengeluaran untuk range tanggal: "+error.message);
+
+    const rows=data||[];
+    all.push(...rows);
+    if(rows.length<pageSize) break;
+    offset+=pageSize;
+    if(offset>20000) break;
+  }
+  return all;
+}
+
+function setMonitorRangeLoading(){
+  if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent="...";
+  if($("monitorRangeTotalExpense")) $("monitorRangeTotalExpense").textContent="...";
+  if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent="...";
+  if($("monitorRangeCoverage")) $("monitorRangeCoverage").textContent="...";
+  if($("monitorRangeDetailTable")){
+    $("monitorRangeDetailTable").innerHTML='<div class="master-empty">Menghitung range tanggal...</div>';
+  }
+}
+
+async function loadMonitorRangeDetail(){
+  if(!$("monitorRangeStart") || !$("monitorRangeEnd")) return;
+
+  const start=$("monitorRangeStart").value;
+  const end=$("monitorRangeEnd").value;
+  const kp=$("monitorKp")?.value||"ALL";
+
+  if(!start || !end){
+    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="Pilih Tanggal Mulai dan Tanggal Akhir.";
+    return;
+  }
+  if(end<start){
+    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="Tanggal Akhir tidak boleh lebih kecil dari Tanggal Mulai.";
+    return;
+  }
+
+  setMonitorRangeLoading();
+
+  try{
+    const [closingRows,expenseRows]=await Promise.all([
+      fetchMonitorRangeClosingRows(start,end,kp),
+      fetchMonitorRangeExpenseRows(start,end,kp)
+    ]);
+
+    // Canonical closing rule is preserved:
+    // Excel wins for the same date+KP; otherwise WhatsApp closing is used.
+    const summary=summarizeClosingHistory(closingRows);
+    const selected=summary.selected||[];
+
+    const totalTonnage=selected.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const totalTrips=selected.reduce((a,r)=>a+Number(r.trip_count||0),0);
+    const totalExpense=expenseRows.reduce((a,r)=>a+Number(r.amount||0),0);
+    const closingDates=[...new Set(selected.map(r=>r.report_date))];
+    const requestedDays=inclusiveDateCount(start,end);
+
+    if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent=kg(totalTonnage);
+    if($("monitorRangeTotalExpense")) $("monitorRangeTotalExpense").textContent=rupiah(totalExpense);
+    if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent=Number(totalTrips).toLocaleString("id-ID");
+    if($("monitorRangeCoverage")) $("monitorRangeCoverage").textContent=`${closingDates.length} / ${requestedDays}`;
+
+    const kpLabel=kp==="ALL"?"Semua KP":kp;
+    const sourceLabel=selected.length?closingSourceLabelForRows(selected):"Belum ada Closing";
+    if($("monitorRangeStatus")){
+      $("monitorRangeStatus").textContent=
+        `${kpLabel} • ${dateLabelId(start)} s.d. ${dateLabelId(end)} • ${sourceLabel}`;
+    }
+
+    if($("monitorRangeTonnageSub")){
+      $("monitorRangeTonnageSub").textContent=
+        `${kpLabel} • akumulasi Closing final 00.00`;
+    }
+    if($("monitorRangeExpenseSub")){
+      $("monitorRangeExpenseSub").textContent=
+        `${expenseRows.length.toLocaleString("id-ID")} transaksi biaya dalam range`;
+    }
+    if($("monitorRangeTripSub")){
+      $("monitorRangeTripSub").textContent=
+        `Akumulasi trip dari Closing harian`;
+    }
+    if($("monitorRangeCoverageSub")){
+      $("monitorRangeCoverageSub").textContent=
+        `Hari Closing tersedia / ${requestedDays} hari kalender`;
+    }
+
+    const expenseByKp=groupExpenseRowsByKp(expenseRows);
+
+    if(kp==="ALL"){
+      // ALL: detail is per KP, exactly for the selected date range.
+      const tonByKp=groupTonnageRowsByKp(selected);
+      const closingDaysByKp={};
+      selected.forEach(r=>{
+        if(!closingDaysByKp[r.kp_code]) closingDaysByKp[r.kp_code]=new Set();
+        closingDaysByKp[r.kp_code].add(r.report_date);
+      });
+
+      const rows=FALLBACK_KP_CODES.map(code=>{
+        const t=tonByKp[code]||{tonnage:0,trips:0};
+        const e=expenseByKp[code]||{amount:0,count:0};
+        return [
+          code,
+          kg(t.tonnage),
+          Number(t.trips||0).toLocaleString("id-ID"),
+          rupiah(e.amount),
+          Number(e.count||0).toLocaleString("id-ID"),
+          Number(closingDaysByKp[code]?.size||0).toLocaleString("id-ID")
+        ];
+      });
+
+      $("monitorRangeDetailTitle").textContent="DETAIL TOTAL PER KP — RANGE TANGGAL";
+      $("monitorRangeDetailTable").innerHTML=table(
+        ["KP","Total Tonase","Total Trip","Total Pengeluaran","Transaksi Biaya","Hari Closing"],
+        rows
+      );
+    }else{
+      // One KP: show daily detail so the user can audit exactly how the range total was formed.
+      const byDate={};
+      selected.forEach(r=>{
+        if(!byDate[r.report_date]){
+          byDate[r.report_date]={tonnage:0,trips:0,sources:new Set()};
+        }
+        byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
+        byDate[r.report_date].trips+=Number(r.trip_count||0);
+        byDate[r.report_date].sources.add(closingSourceType(r.source_file));
+      });
+
+      const expenseByDate={};
+      expenseRows.forEach(r=>{
+        if(!expenseByDate[r.expense_date]) expenseByDate[r.expense_date]={amount:0,count:0};
+        expenseByDate[r.expense_date].amount+=Number(r.amount||0);
+        expenseByDate[r.expense_date].count+=1;
+      });
+
+      const dates=[...new Set([
+        ...Object.keys(byDate),
+        ...Object.keys(expenseByDate)
+      ])].sort();
+
+      const rows=dates.map(d=>{
+        const t=byDate[d]||{tonnage:0,trips:0,sources:new Set()};
+        const e=expenseByDate[d]||{amount:0,count:0};
+        let src="Belum ada Closing";
+        if(t.sources?.has("excel")) src="Closing Excel";
+        else if(t.sources?.has("whatsapp")) src="Closing WhatsApp";
+        else if(t.tonnage) src="Closing Harian";
+
+        return [
+          d,
+          kg(t.tonnage),
+          Number(t.trips||0).toLocaleString("id-ID"),
+          rupiah(e.amount),
+          Number(e.count||0).toLocaleString("id-ID"),
+          src
+        ];
+      });
+
+      $("monitorRangeDetailTitle").textContent=`DETAIL HARIAN ${kp} — RANGE TANGGAL`;
+      $("monitorRangeDetailTable").innerHTML=rows.length
+        ? table(["Tanggal","Tonase Closing","Trip","Pengeluaran","Transaksi Biaya","Sumber"],rows)
+        : '<div class="master-empty">Belum ada Closing atau Pengeluaran pada range tanggal ini.</div>';
+    }
+
+  }catch(e){
+    console.error(e);
+    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="ERROR: "+e.message;
+    if($("monitorRangeDetailTable")){
+      $("monitorRangeDetailTable").innerHTML=`<div class="master-empty">ERROR: ${e.message}</div>`;
+    }
+  }
+}
+
 function setMonitorSummary({kp,period,tonnage,trips,coverage,tonnageSub,tripsSub,coverageSub}){
   $("monitorKpiKp").textContent=kp==="ALL"?"Semua KP":kp;
   $("monitorKpiPeriod").textContent=period;
@@ -3660,9 +3918,15 @@ function closingSourceLabelForRows(rows){
 async function loadKPMonitoring(){
   if(!$("monitorKp")) return;
   const kp=$("monitorKp").value || "ALL";
-  if(MONITOR_MODE==="daily") return loadKPDaily(kp);
-  if(MONITOR_MODE==="monthly") return loadKPMonthlyPanel(kp);
-  return loadKPYearlyPanel(kp);
+
+  if(MONITOR_MODE==="daily") await loadKPDaily(kp);
+  else if(MONITOR_MODE==="monthly") await loadKPMonthlyPanel(kp);
+  else await loadKPYearlyPanel(kp);
+
+  // Keep the independent Detail Range in sync with the selected KP.
+  if($("monitorRangeStart")?.value && $("monitorRangeEnd")?.value){
+    await loadMonitorRangeDetail();
+  }
 }
 
 function setMonthlyPanelSummary({kp,period,tonnage,trips,coverage,tonnageSub,tripsSub,coverageSub}){
