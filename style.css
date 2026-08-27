@@ -2586,3 +2586,59 @@ table {
     grid-template-columns:1fr;
   }
 }
+
+
+/* =========================================================
+   MONTHLY CONFLICT GUARD — v4.9.7
+   ========================================================= */
+.monthly-conflict-controls{
+  display:grid;
+  grid-template-columns:minmax(260px,1fr) minmax(300px,1.35fr);
+  gap:9px;
+  align-items:end;
+  min-width:590px;
+}
+.monthly-conflict-controls label{
+  margin:0;
+}
+.monthly-conflict-controls label span{
+  display:block;
+  margin-bottom:5px;
+  color:#ddd5c8;
+  font-size:10px;
+  font-weight:800;
+}
+.monthly-conflict-summary{
+  min-height:43px;
+  display:flex;
+  align-items:center;
+  padding:7px 10px;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:10px;
+  background:rgba(4,11,7,.26);
+  color:#d2cabf;
+  font-size:10px;
+  font-weight:700;
+  line-height:1.35;
+}
+.monthly-conflict-summary.has-conflict{
+  border-color:rgba(242,211,122,.42);
+  background:rgba(96,67,16,.24);
+  color:#f2d37a;
+}
+.monthly-conflict-summary.is-safe{
+  border-color:rgba(80,224,104,.32);
+  background:rgba(13,80,28,.18);
+  color:#82ef91;
+}
+@media(max-width:1150px){
+  .monthly-conflict-controls{
+    min-width:0;
+    width:100%;
+  }
+}
+@media(max-width:720px){
+  .monthly-conflict-controls{
+    grid-template-columns:1fr;
+  }
+}
