@@ -2601,7 +2601,7 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
 
   if(!kp || !cols || !period){
     return {
-      daily:[],recognized:false,
+      daily:[],unassignedRows:[],recognized:false,
       reason:!kp
         ? "KP tidak terdeteksi"
         : !cols
@@ -2612,11 +2612,11 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
 
   const supplier=inferSupplierFromReport(aoa,fileName,kp);
   if(!supplier || supplier==="UNKNOWN"){
-    return {daily:[],recognized:false,reason:"Supplier/Agen tidak terdeteksi"};
+    return {daily:[],unassignedRows:[],recognized:false,reason:"Supplier/Agen tidak terdeteksi"};
   }
 
   const dailyMap=new Map();
-  let lastInPeriodDate=null;
+  const unassignedRows=[];
   let acceptedTransactions=0;
   let blankProofTransactions=0;
   let skippedNumericRows=0;
@@ -2638,29 +2638,36 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
       continue;
     }
 
+    const proof=cols.bukti>=0 ? String(row[cols.bukti]??"").trim() : "";
+    if(!proof) blankProofTransactions++;
+
     const paymentDate=cols.date>=0 ? parseOperationalDate(row[cols.date]) : null;
     let rowDate=null;
 
     if(paymentDate && dateInPeriod(paymentDate,period)){
-      // Use payment date only when it belongs to the report's own period.
       rowDate=paymentDate;
-      lastInPeriodDate=paymentDate;
     }else if(paymentDate && !dateInPeriod(paymentDate,period)){
-      // Payment in the next month still belongs to this report period.
-      // Clamp it to period end so it does not leak into another month.
+      // Keep legacy operational rule for a dated payment just outside the
+      // report window: allocate to period end, but explicitly report it.
       rowDate=period.end;
       outsidePeriodPayments++;
     }else{
+      // CRITICAL AUDIT RULE:
+      // blank TANGGAL BAYAR is not proof of 1 August / previous date.
+      // Keep the transaction unassigned so it cannot inflate a daily closing.
       blankPaymentDates++;
-      // For blank date, use the last in-period date; for the first row use the
-      // next in-period date; if neither exists, use the report start.
-      rowDate=lastInPeriodDate ||
-        findNextTransactionDate(aoa,r,cols.date,period) ||
-        period.start;
+      unassignedRows.push({
+        kp_code:kp,
+        supplier_name:supplier,
+        tonnage_kg:tonKg,
+        trip_count:1,
+        plate,
+        proof:proof||null,
+        sequence:seq,
+        source_file:`MONTHLY:${fileName}`
+      });
+      continue;
     }
-
-    const proof=cols.bukti>=0 ? String(row[cols.bukti]??"").trim() : "";
-    if(!proof) blankProofTransactions++;
 
     const key=`${rowDate}|${kp}|${supplier}`;
     const prev=dailyMap.get(key)||{
@@ -2669,7 +2676,7 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
       supplier_name:supplier,
       tonnage_kg:0,
       trip_count:0,
-      source_file:fileName
+      source_file:`MONTHLY:${fileName}`
     };
     prev.tonnage_kg+=tonKg;
     prev.trip_count+=1;
@@ -2679,13 +2686,16 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
 
   const daily=[...dailyMap.values()];
   const parsedTotal=daily.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const unassignedTonnage=unassignedRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const accountedTotal=parsedTotal+unassignedTonnage;
   const declaredTotal=findDeclaredReportTotal(aoa,rawAoa,cols);
-  const totalDiff=declaredTotal==null ? null : parsedTotal-declaredTotal;
+  const totalDiff=declaredTotal==null ? null : accountedTotal-declaredTotal;
   const integrityOk=declaredTotal==null ? true : Math.abs(totalDiff)<=1;
 
   return {
     daily,
-    recognized:acceptedTransactions>0,
+    unassignedRows,
+    recognized:(acceptedTransactions+unassignedRows.length)>0,
     kp,supplier,period,
     acceptedTransactions,
     blankProofTransactions,
@@ -2693,35 +2703,13 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
     outsidePeriodPayments,
     blankPaymentDates,
     parsedTotal,
+    unassignedTonnage,
+    accountedTotal,
     declaredTotal,
     totalDiff,
     integrityOk,
-    reason:acceptedTransactions?"":"Tidak ada baris transaksi valid"
+    reason:(acceptedTransactions+unassignedRows.length)?"":"Tidak ada baris transaksi valid"
   };
-}
-function parseMonthlySimpleTable(sheet,sheetName,fileName){
-  const rows=XLSX.utils.sheet_to_json(sheet,{defval:null,raw:false});
-  const out=[];
-  for(const r of rows){
-    const kp=canonKP(pickField(r,["kp","kode kp","kantor pencairan","kantor","unit","kode unit"]));
-    const supplierRaw=pickField(r,["supplier","agen","jenis spb","spb","do"]);
-    const supplier=canonSupplierForKP(kp,supplierRaw)||String(supplierRaw||"ALL").trim()||"ALL";
-    const date=parseOperationalDate(pickField(r,["tanggal","date","tgl","report date"]));
-    const tonValue=pickField(r,["tonase kg","tonnage kg","tonase","tonnage","berat kg","berat"]);
-    const ton=transactionTonnageKg(null,tonValue);
-    const trip=parseExcelNumber(pickField(r,["trip","jumlah trip","mobil masuk","jumlah kendaraan","kendaraan"]));
-    if(kp && date && ton>0){
-      out.push({
-        report_date:date,
-        kp_code:kp,
-        supplier_name:supplier,
-        tonnage_kg:ton,
-        trip_count:trip==null?1:Math.max(0,Math.round(trip)),
-        source_file:fileName
-      });
-    }
-  }
-  return out;
 }
 function combineDailyRows(rows){
   const m=new Map();
@@ -2736,6 +2724,7 @@ function combineDailyRows(rows){
 }
 function parseMonthlyWorkbook(wb,fileName){
   let daily=[];
+  let unassignedRows=[];
   let recognizedSheets=0;
   const notes=[];
   const integrityIssues=[];
@@ -2744,31 +2733,39 @@ function parseMonthlyWorkbook(wb,fileName){
     const sheet=wb.Sheets[name];
     const report=parseMonthlyReportSheet(sheet,name,fileName);
 
-    if(report.recognized && report.daily.length){
+    if(report.recognized && (report.daily.length || report.unassignedRows?.length)){
       daily.push(...report.daily);
+      unassignedRows.push(...(report.unassignedRows||[]));
       recognizedSheets++;
 
       notes.push(
         `${name}: ${report.kp} / ${report.supplier}`+
         ` / periode ${report.period.start} s.d ${report.period.end}`+
-        ` / ${report.acceptedTransactions} transaksi`+
+        ` / ${report.acceptedTransactions} transaksi bertanggal`+
+        ` / ${report.blankPaymentDates} transaksi tanpa tanggal`+
+        (report.unassignedTonnage
+          ? ` (${kg(report.unassignedTonnage)} TIDAK dialokasikan otomatis)`
+          : "")+
         ` / ${report.outsidePeriodPayments} pembayaran di luar periode dialokasikan ke akhir periode`+
         ` / ${report.blankProofTransactions} transaksi tanpa No. Bukti`+
         ` / ${report.skippedNumericRows} baris angka non-transaksi diabaikan`+
         (report.declaredTotal!=null
-          ? ` / Total Excel ${kg(report.declaredTotal)} → ${report.integrityOk?"COCOK":"SELISIH"}`
+          ? ` / Total Excel ${kg(report.declaredTotal)} → ${report.integrityOk?"COCOK (termasuk unassigned)":"SELISIH"}`
           : "")
       );
 
       if(!report.integrityOk){
         integrityIssues.push(
-          `${name}: hasil parser ${kg(report.parsedTotal)} ≠ Total Excel ${kg(report.declaredTotal)}`
+          `${name}: transaksi bertanggal + unassigned ${kg(report.accountedTotal)} ≠ Total Excel ${kg(report.declaredTotal)}`
         );
       }
       return;
     }
 
-    const simple=parseMonthlySimpleTable(sheet,name,fileName);
+    const simple=parseMonthlySimpleTable(sheet,name,fileName).map(r=>({
+      ...r,
+      source_file:`MONTHLY:${fileName}`
+    }));
     if(simple.length){
       daily.push(...simple);
       recognizedSheets++;
@@ -2779,8 +2776,11 @@ function parseMonthlyWorkbook(wb,fileName){
   });
 
   daily=combineDailyRows(daily);
+  const unassignedTonnage=unassignedRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+
   return {
-    fileName,daily,recognizedSheets,notes,
+    fileName,daily,unassignedRows,unassignedTonnage,
+    recognizedSheets,notes,
     integrityOk:integrityIssues.length===0,
     integrityIssues
   };
@@ -3134,28 +3134,40 @@ async function previewMonthlyExcels(fileList){
 
     const previews=[];
     let allDaily=[];
+    let allUnassigned=[];
 
     for(const file of files){
       const wb=await readWorkbookFile(file);
       const p=parseMonthlyWorkbook(wb,file.name);
       previews.push(p);
       allDaily.push(...p.daily);
+      allUnassigned.push(...(p.unassignedRows||[]));
     }
 
     allDaily=combineDailyRows(allDaily);
 
+    // A monthly/detail file pulled today can contain incomplete transactions
+    // for the current day. Those rows are Preview-only until the day is closed.
+    const today=localTodayISO();
+    const partialToday=allDaily.filter(r=>r.report_date>=today);
+    const savableDaily=allDaily.filter(r=>r.report_date<today);
+
     $("monthlyExcelPreview").textContent=
-      "Membaca Excel dan memeriksa data yang sudah tersimpan...";
+      "Membaca Excel, memeriksa transaksi tanpa tanggal, data hari ini, dan overlap...";
 
     const [validation,conflictCheck]=await Promise.all([
-      validateMonthlyAgainstAnnual(allDaily),
-      checkMonthlyConflicts(allDaily)
+      validateMonthlyAgainstAnnual(savableDaily),
+      checkMonthlyConflicts(savableDaily)
     ]);
     const integrityBlocked=previews.filter(p=>!p.integrityOk);
 
     MONTHLY_EXCEL_PREVIEW={
       files:files.map(f=>f.name),
       daily:allDaily,
+      savableDaily,
+      partialToday,
+      unassignedRows:allUnassigned,
+      unassignedTonnage:allUnassigned.reduce((a,r)=>a+Number(r.tonnage_kg||0),0),
       fileResults:previews,
       validation,
       integrityBlocked,
@@ -3166,6 +3178,8 @@ async function previewMonthlyExcels(fileList){
     const supplierSet=new Set(allDaily.map(r=>`${r.kp_code}/${r.supplier_name}`));
     const tripTotal=allDaily.reduce((a,r)=>a+Number(r.trip_count||0),0);
     const tonTotal=allDaily.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const partialKg=partialToday.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const partialTrips=partialToday.reduce((a,r)=>a+Number(r.trip_count||0),0);
 
     const validationText=validation.length
       ? "\n\nVALIDASI vs DATA TAHUNAN:\n"+
@@ -3180,26 +3194,46 @@ async function previewMonthlyExcels(fileList){
 
     const conflictText="\n\n"+formatMonthlyConflictPreview(conflictCheck);
 
+    const unassignedText=allUnassigned.length
+      ? `\n\n⚠ TRANSAKSI TANPA TANGGAL BAYAR\n`+
+        `Jumlah: ${allUnassigned.length} transaksi\n`+
+        `Tonase: ${kg(MONTHLY_EXCEL_PREVIEW.unassignedTonnage)}\n`+
+        `Status: TIDAK dialokasikan otomatis ke tanggal mana pun.\n`+
+        `Masukkan melalui Closing resmi / Excel Harian jika tanggal final sudah diketahui.`
+      : `\n\n✓ Tidak ada transaksi tanpa tanggal bayar.`;
+
+    const partialText=partialToday.length
+      ? `\n\n⚠ DATA HARI INI / BELUM CLOSING\n`+
+        `Tanggal >= ${today}: ${partialToday.length} baris harian / ${kg(partialKg)} / ${partialTrips} trip\n`+
+        `Status: hanya Preview — TIDAK disimpan sebagai Closing final.`
+      : `\n\n✓ Tidak ada data current-day yang berisiko dianggap Closing.`;
+
     $("monthlyExcelPreview").textContent=
       `FILE DIPILIH: ${files.length}\n`+
-      `File terbaca: ${previews.filter(p=>p.daily.length).length}/${files.length}\n`+
+      `File terbaca: ${previews.filter(p=>p.daily.length || p.unassignedRows?.length).length}/${files.length}\n`+
       `KP terdeteksi: ${kpSet.size}\n`+
       `Supplier terdeteksi: ${supplierSet.size}\n`+
-      `Baris harian supplier: ${allDaily.length}\n`+
-      `Total trip: ${tripTotal.toLocaleString("id-ID")}\n`+
-      `Total tonase: ${kg(tonTotal)}\n\n`+
+      `Baris harian bertanggal: ${allDaily.length}\n`+
+      `Baris aman untuk disimpan: ${savableDaily.length}\n`+
+      `Total trip bertanggal: ${tripTotal.toLocaleString("id-ID")}\n`+
+      `Total tonase bertanggal: ${kg(tonTotal)}\n\n`+
       previews.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n")+
+      unassignedText+
+      partialText+
       conflictText+
       validationText;
 
     if($("monthlyConflictSummary")){
       const c=conflictCheck;
+      const extra=[];
+      if(allUnassigned.length) extra.push(`${allUnassigned.length} tanpa tanggal`);
+      if(partialToday.length) extra.push(`${partialToday.length} data hari ini`);
       $("monthlyConflictSummary").textContent=
         c.conflicts.length
-          ? `⚠ ${c.conflicts.length} konflik ditemukan. Default: pertahankan data lama.`
-          : `✓ Tidak ada konflik. ${c.same.length} baris identik akan di-skip.`;
+          ? `⚠ ${c.conflicts.length} konflik${extra.length?" • "+extra.join(" • "):""}. Default: pertahankan data lama.`
+          : `✓ ${c.same.length} identik di-skip${extra.length?" • "+extra.join(" • "):""}.`;
       $("monthlyConflictSummary").className=
-        "monthly-conflict-summary "+(c.conflicts.length?"has-conflict":"is-safe");
+        "monthly-conflict-summary "+(c.conflicts.length||allUnassigned.length||partialToday.length?"has-conflict":"is-safe");
     }
 
   }catch(e){
@@ -3220,7 +3254,7 @@ async function replaceRowsFromSameFiles(fileNames){
 async function saveMonthlyExcel(){
   if(!MONTHLY_EXCEL_PREVIEW) return alert("Pilih dan preview Excel bulanan dahulu.");
   const p=MONTHLY_EXCEL_PREVIEW;
-  if(!p.daily.length) return alert("Tidak ada transaksi yang dapat disimpan.");
+  if(!(p.savableDaily||[]).length) return alert("Tidak ada transaksi bertanggal yang aman untuk disimpan.");
 
   const badFiles=(p.integrityBlocked||[]);
   if(badFiles.length){
@@ -3243,11 +3277,21 @@ async function saveMonthlyExcel(){
   // Re-check immediately before save so stale Preview cannot overwrite newer closing data.
   let latestConflict;
   try{
-    latestConflict=await checkMonthlyConflicts(p.daily);
+    latestConflict=await checkMonthlyConflicts(p.savableDaily||[]);
   }catch(e){
     return alert(e.message);
   }
   p.conflictCheck=latestConflict;
+
+  if((p.unassignedRows||[]).length){
+    const ok=confirm(
+      "TRANSAKSI TANPA TANGGAL TIDAK AKAN DISIMPAN\n\n"+
+      `${p.unassignedRows.length} transaksi / ${kg(p.unassignedTonnage||0)} tidak memiliki TANGGAL BAYAR.\n\n`+
+      "Sistem tidak lagi menempelkan transaksi tersebut otomatis ke 1 Agustus atau tanggal lain.\n"+
+      "Klik OK untuk menyimpan hanya data bertanggal yang aman."
+    );
+    if(!ok) return;
+  }
 
   const policy=$("monthlyConflictPolicy")?.value || "keep_existing";
   const conflicts=latestConflict.conflicts||[];
@@ -3294,7 +3338,9 @@ async function saveMonthlyExcel(){
     `SUDAH SAMA / skip  : ${same.length}\n`+
     `KONFLIK ditemukan  : ${conflicts.length}\n`+
     `KONFLIK dioverwrite: ${policy==="use_excel" ? conflicts.length : 0}\n`+
-    `KONFLIK dipertahankan: ${policy==="keep_existing" ? conflicts.length : 0}\n\n`+
+    `KONFLIK dipertahankan: ${policy==="keep_existing" ? conflicts.length : 0}\n`+
+    `Tanpa tanggal tidak disimpan: ${(p.unassignedRows||[]).length}\n`+
+    `Data hari ini/partial tidak disimpan: ${(p.partialToday||[]).length}\n\n`+
     `Historical tahunan tidak diubah.`
   );
 
@@ -3867,6 +3913,54 @@ function setMonitorRangeLoading(){
   }
 }
 
+
+async function fetchRangeLiveSnapshot(start,end,kp){
+  const today=localTodayISO();
+  if(!start || !end || today<start || today>end) return null;
+
+  const {data:snaps,error}=await db.from("monitoring_snapshots")
+    .select("id,report_date,snapshot_time,source_type,total_tonnage_kg,total_trips")
+    .eq("report_date",today)
+    .order("snapshot_time",{ascending:false})
+    .limit(1);
+
+  if(error) throw Error("Gagal membaca snapshot LIVE: "+error.message);
+  const snap=snaps?.[0]||null;
+  if(!snap) return null;
+
+  let q=db.from("monitoring_snapshot_details")
+    .select("kp_code,supplier_name,tonnage_kg,trip_count")
+    .eq("snapshot_id",snap.id);
+  if(kp!=="ALL") q=q.eq("kp_code",kp);
+
+  const {data:details,error:de}=await q;
+  if(de) throw Error("Gagal membaca detail snapshot LIVE: "+de.message);
+
+  const rows=details||[];
+  const total=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const trips=rows.reduce((a,r)=>a+Number(r.trip_count||0),0);
+
+  return {
+    id:snap.id,
+    date:today,
+    time:snap.snapshot_time,
+    source_type:snap.source_type,
+    rows,
+    total,
+    trips
+  };
+}
+
+function groupLiveRowsByKp(rows){
+  const map={};
+  (rows||[]).forEach(r=>{
+    if(!map[r.kp_code]) map[r.kp_code]={tonnage:0,trips:0};
+    map[r.kp_code].tonnage+=Number(r.tonnage_kg||0);
+    map[r.kp_code].trips+=Number(r.trip_count||0);
+  });
+  return map;
+}
+
 async function loadMonitorRangeDetail(){
   if(!$("monitorRangeStart") || !$("monitorRangeEnd")) return;
 
@@ -3884,39 +3978,66 @@ async function loadMonitorRangeDetail(){
   }
 
   setMonitorRangeLoading();
+  if($("monitorRangeClosedTonnage")) $("monitorRangeClosedTonnage").textContent="...";
+  if($("monitorRangeLiveTonnage")) $("monitorRangeLiveTonnage").textContent="...";
 
   try{
-    const [closingRows,expenseRows]=await Promise.all([
+    const [closingRows,expenseRows,live]=await Promise.all([
       fetchMonitorRangeClosingRows(start,end,kp),
-      fetchMonitorRangeExpenseRows(start,end,kp)
+      fetchMonitorRangeExpenseRows(start,end,kp),
+      fetchRangeLiveSnapshot(start,end,kp)
     ]);
 
-    // Canonical closing rule is preserved:
-    // Excel wins for the same date+KP; otherwise WhatsApp closing is used.
-    const summary=summarizeClosingHistory(closingRows);
+    const summary=summarizeClosingHistory(closingRows,{excludeCurrentMonthly:true});
     const selected=summary.selected||[];
+    const today=localTodayISO();
 
-    const totalTonnage=selected.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
-    const totalTrips=selected.reduce((a,r)=>a+Number(r.trip_count||0),0);
+    const closedTonnage=selected.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const closedTrips=selected.reduce((a,r)=>a+Number(r.trip_count||0),0);
     const totalExpense=expenseRows.reduce((a,r)=>a+Number(r.amount||0),0);
     const closingDates=[...new Set(selected.map(r=>r.report_date))];
     const requestedDays=inclusiveDateCount(start,end);
 
-    if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent=kg(totalTonnage);
+    // LIVE is added only when the selected current day has no final closing.
+    const hasFinalToday=selected.some(r=>r.report_date===today);
+    const liveTonnage=(!hasFinalToday && live) ? Number(live.total||0) : 0;
+    const liveTrips=(!hasFinalToday && live) ? Number(live.trips||0) : 0;
+    const runningTonnage=closedTonnage+liveTonnage;
+    const runningTrips=closedTrips+liveTrips;
+
+    if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent=kg(runningTonnage);
+    if($("monitorRangeClosedTonnage")) $("monitorRangeClosedTonnage").textContent=kg(closedTonnage);
+    if($("monitorRangeLiveTonnage")) $("monitorRangeLiveTonnage").textContent=kg(liveTonnage);
     if($("monitorRangeTotalExpense")) $("monitorRangeTotalExpense").textContent=rupiah(totalExpense);
-    if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent=Number(totalTrips).toLocaleString("id-ID");
+    if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent=Number(runningTrips).toLocaleString("id-ID");
     if($("monitorRangeCoverage")) $("monitorRangeCoverage").textContent=`${closingDates.length} / ${requestedDays}`;
 
     const kpLabel=kp==="ALL"?"Semua KP":kp;
     const sourceLabel=selected.length?closingSourceLabelForRows(selected):"Belum ada Closing";
+    const liveLabel=liveTonnage && live
+      ? ` + LIVE ${live.time.slice(0,5)}`
+      : "";
+
     if($("monitorRangeStatus")){
       $("monitorRangeStatus").textContent=
-        `${kpLabel} • ${dateLabelId(start)} s.d. ${dateLabelId(end)} • ${sourceLabel}`;
+        `${kpLabel} • ${dateLabelId(start)} s.d. ${dateLabelId(end)} • ${sourceLabel}${liveLabel}`;
     }
 
     if($("monitorRangeTonnageSub")){
       $("monitorRangeTonnageSub").textContent=
-        `${kpLabel} • akumulasi Closing final 00.00`;
+        `${kpLabel} • Closing final${liveTonnage?" + snapshot LIVE hari ini":""}`;
+    }
+    if($("monitorRangeClosedSub")){
+      $("monitorRangeClosedSub").textContent=
+        `${closingDates.length} hari dengan data final / derived historis`;
+    }
+    if($("monitorRangeLiveSub")){
+      $("monitorRangeLiveSub").textContent=
+        liveTonnage && live
+          ? `${live.date} • snapshot ${live.time.slice(0,5)} • belum Closing`
+          : hasFinalToday
+            ? "Hari ini sudah memiliki Closing final"
+            : "Tidak ada snapshot LIVE dalam range";
     }
     if($("monitorRangeExpenseSub")){
       $("monitorRangeExpenseSub").textContent=
@@ -3924,17 +4045,17 @@ async function loadMonitorRangeDetail(){
     }
     if($("monitorRangeTripSub")){
       $("monitorRangeTripSub").textContent=
-        `Akumulasi trip dari Closing harian`;
+        `Closing ${closedTrips.toLocaleString("id-ID")}${liveTrips?` + LIVE ${liveTrips.toLocaleString("id-ID")}`:""}`;
     }
     if($("monitorRangeCoverageSub")){
       $("monitorRangeCoverageSub").textContent=
-        `Hari Closing tersedia / ${requestedDays} hari kalender`;
+        `Hari final tersedia / ${requestedDays} hari kalender`;
     }
 
     const expenseByKp=groupExpenseRowsByKp(expenseRows);
+    const liveByKp=(!hasFinalToday && live) ? groupLiveRowsByKp(live.rows) : {};
 
     if(kp==="ALL"){
-      // ALL: detail is per KP, exactly for the selected date range.
       const tonByKp=groupTonnageRowsByKp(selected);
       const closingDaysByKp={};
       selected.forEach(r=>{
@@ -3944,28 +4065,30 @@ async function loadMonitorRangeDetail(){
 
       const rows=FALLBACK_KP_CODES.map(code=>{
         const t=tonByKp[code]||{tonnage:0,trips:0};
+        const l=liveByKp[code]||{tonnage:0,trips:0};
         const e=expenseByKp[code]||{amount:0,count:0};
         return [
           code,
           kg(t.tonnage),
-          Number(t.trips||0).toLocaleString("id-ID"),
+          kg(l.tonnage),
+          kg(Number(t.tonnage||0)+Number(l.tonnage||0)),
+          (Number(t.trips||0)+Number(l.trips||0)).toLocaleString("id-ID"),
           rupiah(e.amount),
           Number(e.count||0).toLocaleString("id-ID"),
           Number(closingDaysByKp[code]?.size||0).toLocaleString("id-ID")
         ];
       });
 
-      $("monitorRangeDetailTitle").textContent="DETAIL TOTAL PER KP — RANGE TANGGAL";
+      $("monitorRangeDetailTitle").textContent="DETAIL TOTAL PER KP — CLOSING + LIVE";
       $("monitorRangeDetailTable").innerHTML=table(
-        ["KP","Total Tonase","Total Trip","Total Pengeluaran","Transaksi Biaya","Hari Closing"],
+        ["KP","Closing Final","Live Hari Ini","Total s/d Saat Ini","Trip","Pengeluaran","Transaksi Biaya","Hari Final"],
         rows
       );
     }else{
-      // One KP: show daily detail so the user can audit exactly how the range total was formed.
       const byDate={};
       selected.forEach(r=>{
         if(!byDate[r.report_date]){
-          byDate[r.report_date]={tonnage:0,trips:0,sources:new Set()};
+          byDate[r.report_date]={tonnage:0,trips:0,sources:new Set(),status:"FINAL"};
         }
         byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
         byDate[r.report_date].trips+=Number(r.trip_count||0);
@@ -3979,21 +4102,35 @@ async function loadMonitorRangeDetail(){
         expenseByDate[r.expense_date].count+=1;
       });
 
+      // Add current LIVE row only when current day has no final closing.
+      if(liveTonnage && live){
+        byDate[live.date]={
+          tonnage:liveTonnage,
+          trips:liveTrips,
+          sources:new Set(["live"]),
+          status:`LIVE ${live.time.slice(0,5)}`
+        };
+      }
+
       const dates=[...new Set([
         ...Object.keys(byDate),
         ...Object.keys(expenseByDate)
       ])].sort();
 
       const rows=dates.map(d=>{
-        const t=byDate[d]||{tonnage:0,trips:0,sources:new Set()};
+        const t=byDate[d]||{tonnage:0,trips:0,sources:new Set(),status:"-"};
         const e=expenseByDate[d]||{amount:0,count:0};
-        let src="Belum ada Closing";
-        if(t.sources?.has("excel")) src="Closing Excel";
+        let src="Belum ada tonase";
+        if(t.sources?.has("live")) src="WhatsApp Snapshot";
+        else if(t.sources?.has("audit")) src="Audit Resmi";
+        else if(t.sources?.has("excel")) src="Closing Excel";
         else if(t.sources?.has("whatsapp")) src="Closing WhatsApp";
+        else if(t.sources?.has("monthly")) src="Excel Bulanan (derived)";
         else if(t.tonnage) src="Closing Harian";
 
         return [
           d,
+          t.status||"FINAL",
           kg(t.tonnage),
           Number(t.trips||0).toLocaleString("id-ID"),
           rupiah(e.amount),
@@ -4002,10 +4139,10 @@ async function loadMonitorRangeDetail(){
         ];
       });
 
-      $("monitorRangeDetailTitle").textContent=`DETAIL HARIAN ${kp} — RANGE TANGGAL`;
+      $("monitorRangeDetailTitle").textContent=`AUDIT HARIAN ${kp} — RANGE TANGGAL`;
       $("monitorRangeDetailTable").innerHTML=rows.length
-        ? table(["Tanggal","Tonase Closing","Trip","Pengeluaran","Transaksi Biaya","Sumber"],rows)
-        : '<div class="master-empty">Belum ada Closing atau Pengeluaran pada range tanggal ini.</div>';
+        ? table(["Tanggal","Status","Tonase","Trip","Pengeluaran","Transaksi Biaya","Sumber"],rows)
+        : '<div class="master-empty">Belum ada Closing, snapshot LIVE, atau Pengeluaran pada range tanggal ini.</div>';
     }
 
   }catch(e){
@@ -4034,25 +4171,57 @@ function renderMonitorEmpty(message){
 }
 function closingSourceType(sourceFile){
   const s=String(sourceFile||"");
+  if(s.startsWith("AUDIT:")) return "audit";
   if(s.startsWith("WHATSAPP:CLOSING:")) return "whatsapp";
   if(s.startsWith("DAILY:")) return "excel";
+  if(s.startsWith("MONTHLY:")) return "monthly";
+  // Legacy monthly uploads before v4.9.8 used the raw .xlsx filename.
+  if(/\.xlsx?$/i.test(s)) return "monthly";
   return "other";
 }
 
-function summarizeClosingHistory(rows){
-  // Canonical rule per date + KP:
-  // Closing Excel is authoritative when present for that KP/date.
-  // Otherwise use Closing WhatsApp. This prevents double-counting mixed sources.
+function closingSourceDisplay(type){
+  if(type==="audit") return "Audit Resmi";
+  if(type==="excel") return "Closing Excel";
+  if(type==="whatsapp") return "Closing WhatsApp";
+  if(type==="monthly") return "Excel Bulanan (derived)";
+  return "Closing Harian";
+}
+
+function summarizeClosingHistory(rows,{excludeCurrentMonthly=true}={}){
+  // Canonical rule is per Date + KP + Supplier, not merely Date + KP.
+  // This avoids losing other suppliers when one supplier has a stronger source.
+  // Priority: audited correction > explicit Daily Excel > WhatsApp Closing
+  // > Monthly derived detail > legacy/other.
   const grouped=new Map();
   (rows||[]).forEach(r=>{
-    const key=`${r.report_date}|${r.kp_code}`;
-    if(!grouped.has(key)) grouped.set(key,{excel:[],whatsapp:[],other:[]});
+    const supplier=String(r.supplier_name||"ALL").toUpperCase();
+    const key=`${r.report_date}|${r.kp_code}|${supplier}`;
+    if(!grouped.has(key)) grouped.set(key,{
+      audit:[],excel:[],whatsapp:[],monthly:[],other:[]
+    });
     grouped.get(key)[closingSourceType(r.source_file)].push(r);
   });
 
   const selected=[];
+  const today=typeof localTodayISO==="function" ? localTodayISO() : null;
+
   grouped.forEach((g,key)=>{
-    const chosen=g.excel.length ? g.excel : g.whatsapp.length ? g.whatsapp : g.other;
+    let chosen=
+      g.audit.length ? g.audit :
+      g.excel.length ? g.excel :
+      g.whatsapp.length ? g.whatsapp :
+      g.monthly.length ? g.monthly :
+      g.other;
+
+    // A row derived from a monthly/detail file on the current date is not a
+    // Closing 00.00. It stays out of final totals until a real closing arrives.
+    if(excludeCurrentMonthly && today && chosen.length &&
+       chosen.every(r=>closingSourceType(r.source_file)==="monthly") &&
+       chosen[0].report_date>=today){
+      chosen=[];
+    }
+
     selected.push(...chosen);
   });
 
@@ -4069,10 +4238,8 @@ function summarizeClosingHistory(rows){
   });
 
   Object.values(byDate).forEach(d=>{
-    if(d.sources.has("excel") && d.sources.has("whatsapp")) d.sourceLabel="Closing Excel + WhatsApp";
-    else if(d.sources.has("excel")) d.sourceLabel="Closing Excel";
-    else if(d.sources.has("whatsapp")) d.sourceLabel="Closing WhatsApp";
-    else d.sourceLabel="Closing Harian";
+    const labels=[...d.sources].map(closingSourceDisplay);
+    d.sourceLabel=labels.length ? labels.join(" + ") : "Closing Harian";
     d.kpCount=d.kps.size;
   });
 
@@ -4080,12 +4247,9 @@ function summarizeClosingHistory(rows){
 }
 
 function closingSourceLabelForRows(rows){
-  const types=new Set((rows||[]).map(r=>closingSourceType(r.source_file)));
+  const types=[...new Set((rows||[]).map(r=>closingSourceType(r.source_file)))];
   const kps=new Set((rows||[]).map(r=>r.kp_code));
-  let label="Closing Harian";
-  if(types.has("excel") && types.has("whatsapp")) label="Closing Excel + WhatsApp";
-  else if(types.has("excel")) label="Closing Excel";
-  else if(types.has("whatsapp")) label="Closing WhatsApp";
+  let label=types.length ? types.map(closingSourceDisplay).join(" + ") : "Closing Harian";
   if(kps.size>1) label+=` (${kps.size} KP)`;
   return label;
 }
@@ -4150,7 +4314,7 @@ async function loadKPMonthlyPanel(kp){
     const trips=dates.reduce((a,d)=>a+byDate[d].trips,0);
     const avg=dates.length?total/dates.length:0;
     const sourceSet=new Set(dates.map(d=>byDate[d].sourceLabel));
-    const monthSource=sourceSet.size===1?[...sourceSet][0]:"Closing WhatsApp + Excel";
+    const monthSource=sourceSet.size===1?[...sourceSet][0]:"Sumber Closing Campuran";
 
     const monthlyExpense=await getMonitorExpenseSummary(kp,"monthly");
     setMonitorPeriodBusinessKpis({
