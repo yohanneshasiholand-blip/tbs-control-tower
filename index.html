@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.9.8">
+  <link rel="stylesheet" href="style.css?v=4.10.0">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -403,7 +403,7 @@
               <span id="monitorKpiTripsSub">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>DATA TERSEDIA</small>
+              <small>STATUS HARI DATA</small>
               <strong id="monitorKpiCoverage">0</strong>
               <span id="monitorKpiCoverageSub">-</span>
             </article>
@@ -520,25 +520,23 @@
           <div class="monitor-subpanel-head">
             <div>
               <span class="subpanel-kicker">MONITORING BULANAN</span>
-              <h3>Akumulasi Closing Harian dalam Bulan</h3>
+              <h3>Total Bulanan — Excel Final sebagai Sumber Utama</h3>
+              <p class="monthly-final-rule">WhatsApp Closing = sementara. Setelah Excel Bulanan lolos Preview Audit dan disimpan, Excel menjadi FINAL pada tanggal + KP + supplier yang tercakup.</p>
             </div>
-            <span id="monthlySourceBadge" class="monitor-source-badge">Closing Harian</span>
+            <span id="monthlySourceBadge" class="monitor-source-badge temporary-source">SEMENTARA</span>
           </div>
 
           <article class="panel glass period-upload-panel">
             <div class="period-upload-info">
               <div>
                 <strong>Upload Data Excel Bulanan</strong>
-                <span>Gunakan file detail harian per KP atau rekap bulanan. Sistem memeriksa overlap, transaksi tanpa tanggal, dan data hari ini sebelum Simpan.</span>
+                <span>Gunakan file detail harian per KP atau rekap bulanan. Preview Audit memeriksa overlap, double input, selisih, konflik, transaksi tanpa tanggal, dan integritas total.</span>
               </div>
-              <div class="monthly-conflict-controls">
-                <label>
-                  <span>Jika Ada Konflik</span>
-                  <select id="monthlyConflictPolicy">
-                    <option value="keep_existing" selected>Pertahankan Data Lama — Disarankan</option>
-                    <option value="use_excel">Gunakan Excel Bulanan — Minta Konfirmasi</option>
-                  </select>
-                </label>
+              <div class="monthly-final-controls">
+                <div class="monthly-final-priority">
+                  <strong>ATURAN FINAL</strong>
+                  <span>Excel Bulanan = FINAL • Sama = SKIP • Konflik = putuskan per baris • Edit Manual = wajib alasan • Tanpa tanggal = BLOKIR</span>
+                </div>
                 <div id="monthlyConflictSummary" class="monthly-conflict-summary">Belum ada hasil pemeriksaan.</div>
               </div>
               <div class="period-upload-actions">
@@ -546,9 +544,90 @@
                   Pilih Excel Bulanan
                   <input id="monthlyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewMonthlyExcels(this.files)">
                 </label>
-                <button class="btn btn-secondary" onclick="saveMonthlyExcel()">Simpan Bulanan</button>
+                <button class="btn btn-secondary monthly-final-save" onclick="saveMonthlyExcel()">Simpan sebagai FINAL Excel</button>
               </div>
             </div>
+
+            <section id="monthlyFinalAuditBar" class="monthly-final-audit-bar">
+              <div class="monthly-audit-title-row">
+                <div>
+                  <span class="subpanel-kicker">PREVIEW AUDIT SEBELUM SIMPAN</span>
+                  <h4>Excel Final — Pemeriksaan Double Input, Selisih & Integritas</h4>
+                </div>
+                <span id="monthlyFinalStatus" class="monthly-final-status">BELUM DIPERIKSA</span>
+              </div>
+
+              <div class="monthly-audit-cards">
+                <article id="monthlyAuditFinalTotal" class="monthly-audit-card">
+                  <small>TOTAL EXCEL FINAL</small>
+                  <strong data-value>0 kg</strong>
+                  <span data-sub>-</span>
+                </article>
+                <article id="monthlyAuditDated" class="monthly-audit-card">
+                  <small>TRANSAKSI BERTANGGAL</small>
+                  <strong data-value>0 kg</strong>
+                  <span data-sub>-</span>
+                </article>
+                <article id="monthlyAuditExisting" class="monthly-audit-card">
+                  <small>DATA OVERLAP DI SISTEM</small>
+                  <strong data-value>0 kg</strong>
+                  <span data-sub>-</span>
+                </article>
+                <article id="monthlyAuditDifference" class="monthly-audit-card">
+                  <small>SELISIH KONFLIK</small>
+                  <strong data-value>0 kg</strong>
+                  <span data-sub>-</span>
+                </article>
+                <article id="monthlyAuditDuplicate" class="monthly-audit-card">
+                  <small>DOUBLE / SAMA</small>
+                  <strong data-value>0</strong>
+                  <span data-sub>-</span>
+                </article>
+                <article id="monthlyAuditConflict" class="monthly-audit-card">
+                  <small>KONFLIK</small>
+                  <strong data-value>0</strong>
+                  <span data-sub>-</span>
+                </article>
+                <article id="monthlyAuditUnassigned" class="monthly-audit-card">
+                  <small>TANPA TANGGAL</small>
+                  <strong data-value>0</strong>
+                  <span data-sub>-</span>
+                </article>
+              </div>
+
+              <div class="monthly-audit-progress-wrap">
+                <div class="monthly-audit-progress">
+                  <span id="monthlyAuditBarNew" class="audit-progress-new"></span>
+                  <span id="monthlyAuditBarSame" class="audit-progress-same"></span>
+                  <span id="monthlyAuditBarConflict" class="audit-progress-conflict"></span>
+                </div>
+                <small id="monthlyAuditBarLegend">BARU 0 • SAMA 0 • KONFLIK 0</small>
+              </div>
+            </section>
+
+            <section id="monthlyConflictResolution" class="monthly-conflict-resolution">
+              <div class="monthly-resolution-title-row">
+                <div>
+                  <span class="subpanel-kicker">CONFLICT RESOLUTION PANEL</span>
+                  <h4>Putuskan setiap konflik sebelum Excel disimpan sebagai Final</h4>
+                  <p>Setiap keputusan disimpan ke Audit Trail. Edit Manual wajib memiliki alasan.</p>
+                </div>
+                <span id="monthlyResolutionStatus" class="monthly-resolution-status">Belum ada konflik</span>
+              </div>
+
+              <div class="monthly-resolution-bulk">
+                <button class="btn btn-primary" onclick="applyMonthlyConflictBulk('use_excel_final')">Gunakan Excel untuk Semua Konflik</button>
+                <button class="btn btn-secondary" onclick="applyMonthlyConflictBulk('keep_existing')">Pertahankan Semua Data Lama</button>
+              </div>
+
+              <div id="monthlyConflictResolutionList" class="monthly-resolution-list"></div>
+
+              <details class="monthly-audit-history">
+                <summary>Riwayat Revisi / Audit Trail</summary>
+                <div id="monthlyRevisionAuditTable" class="table-wrap monthly-revision-audit-table"></div>
+              </details>
+            </section>
+
             <pre id="monthlyExcelPreview" class="preview compact-preview">Belum ada file bulanan dipilih.</pre>
           </article>
 
@@ -559,7 +638,7 @@
               <span id="monthlyKpiPeriod">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>TOTAL TONASE KP / BULAN</small>
+              <small>TOTAL BULANAN SAAT INI</small>
               <strong id="monthlyKpiTonnage">0 kg</strong>
               <span id="monthlyKpiTonnageSub">-</span>
             </article>
@@ -840,6 +919,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.9.8"></script>
+  <script src="app.js?v=4.10.0"></script>
 </body>
 </html>
