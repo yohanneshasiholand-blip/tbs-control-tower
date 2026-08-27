@@ -3018,10 +3018,120 @@ async function saveDailyExcel(){
   await loadKPDaily($("monitorKp").value||"ALL");
   await loadDashboard();
 }
+
+function monthlyRowKey(r){
+  return `${r.report_date}|${String(r.kp_code||"").toUpperCase()}|${String(r.supplier_name||"ALL").toUpperCase()}`;
+}
+
+function monthlyValuesEqual(a,b){
+  return Number(a?.tonnage_kg||0)===Number(b?.tonnage_kg||0) &&
+         Number(a?.trip_count||0)===Number(b?.trip_count||0);
+}
+
+async function fetchExistingMonthlyOverlap(dailyRows){
+  if(!dailyRows?.length) return [];
+
+  const dates=dailyRows.map(r=>r.report_date).filter(Boolean).sort();
+  const start=dates[0], end=dates[dates.length-1];
+  const wantedKeys=new Set(dailyRows.map(monthlyRowKey));
+  const pageSize=1000;
+  let offset=0;
+  const all=[];
+
+  while(true){
+    const {data,error}=await db.from("kp_daily_history")
+      .select("id,report_date,kp_code,supplier_name,tonnage_kg,trip_count,source_file,created_at")
+      .gte("report_date",start)
+      .lte("report_date",end)
+      .order("report_date",{ascending:true})
+      .order("kp_code",{ascending:true})
+      .range(offset,offset+pageSize-1);
+
+    if(error) throw Error("Gagal memeriksa overlap data bulanan: "+error.message);
+
+    const rows=data||[];
+    all.push(...rows.filter(r=>wantedKeys.has(monthlyRowKey(r))));
+    if(rows.length<pageSize) break;
+    offset+=pageSize;
+    if(offset>30000) break;
+  }
+  return all;
+}
+
+function classifyMonthlyConflicts(dailyRows,existingRows){
+  const existingByKey=new Map();
+  (existingRows||[]).forEach(r=>existingByKey.set(monthlyRowKey(r),r));
+
+  const fresh=[];
+  const same=[];
+  const conflicts=[];
+
+  (dailyRows||[]).forEach(incoming=>{
+    const existing=existingByKey.get(monthlyRowKey(incoming));
+    if(!existing){
+      fresh.push({incoming});
+      return;
+    }
+
+    if(monthlyValuesEqual(incoming,existing)){
+      same.push({incoming,existing});
+      return;
+    }
+
+    conflicts.push({
+      incoming,
+      existing,
+      tonnage_diff:Number(incoming.tonnage_kg||0)-Number(existing.tonnage_kg||0),
+      trip_diff:Number(incoming.trip_count||0)-Number(existing.trip_count||0)
+    });
+  });
+
+  return {fresh,same,conflicts};
+}
+
+async function checkMonthlyConflicts(dailyRows){
+  const existing=await fetchExistingMonthlyOverlap(dailyRows);
+  const classified=classifyMonthlyConflicts(dailyRows,existing);
+  return {...classified,existingCount:existing.length,checked:true};
+}
+
+function formatMonthlyConflictPreview(conflictCheck){
+  const c=conflictCheck||{fresh:[],same:[],conflicts:[]};
+  const lines=[
+    "DETEKSI OVERLAP / ANTI-DOUBLE",
+    `DATA BARU        : ${c.fresh.length}`,
+    `SUDAH SAMA/SKIP : ${c.same.length}`,
+    `KONFLIK         : ${c.conflicts.length}`
+  ];
+
+  if(c.conflicts.length){
+    lines.push("", "DETAIL KONFLIK:");
+    c.conflicts.slice(0,60).forEach(x=>{
+      const n=x.incoming, e=x.existing;
+      lines.push(
+        `• ${n.report_date} | ${n.kp_code} / ${n.supplier_name}`,
+        `  Tersimpan : ${kg(e.tonnage_kg)} | ${Number(e.trip_count||0)} trip | ${e.source_file||"-"}`,
+        `  Excel baru: ${kg(n.tonnage_kg)} | ${Number(n.trip_count||0)} trip`,
+        `  Selisih   : ${x.tonnage_diff>=0?"+":""}${kg(x.tonnage_diff)} | ${x.trip_diff>=0?"+":""}${x.trip_diff} trip`
+      );
+    });
+    if(c.conflicts.length>60){
+      lines.push(`... ${c.conflicts.length-60} konflik lain tidak ditampilkan di Preview.`);
+    }
+  }
+
+  if(c.same.length){
+    lines.push("", `✓ ${c.same.length} baris identik akan dilewati agar tidak ditulis ulang.`);
+  }
+
+  return lines.join("\n");
+}
+
 async function previewMonthlyExcels(fileList){
   try{
     const files=[...(fileList||[])];
     if(!files.length) throw Error("Pilih minimal 1 file.");
+
     const previews=[];
     let allDaily=[];
 
@@ -3033,7 +3143,14 @@ async function previewMonthlyExcels(fileList){
     }
 
     allDaily=combineDailyRows(allDaily);
-    const validation=await validateMonthlyAgainstAnnual(allDaily);
+
+    $("monthlyExcelPreview").textContent=
+      "Membaca Excel dan memeriksa data yang sudah tersimpan...";
+
+    const [validation,conflictCheck]=await Promise.all([
+      validateMonthlyAgainstAnnual(allDaily),
+      checkMonthlyConflicts(allDaily)
+    ]);
     const integrityBlocked=previews.filter(p=>!p.integrityOk);
 
     MONTHLY_EXCEL_PREVIEW={
@@ -3041,7 +3158,8 @@ async function previewMonthlyExcels(fileList){
       daily:allDaily,
       fileResults:previews,
       validation,
-      integrityBlocked
+      integrityBlocked,
+      conflictCheck
     };
 
     const kpSet=new Set(allDaily.map(r=>r.kp_code));
@@ -3060,6 +3178,8 @@ async function previewMonthlyExcels(fileList){
         }).join("\n")
       : "";
 
+    const conflictText="\n\n"+formatMonthlyConflictPreview(conflictCheck);
+
     $("monthlyExcelPreview").textContent=
       `FILE DIPILIH: ${files.length}\n`+
       `File terbaca: ${previews.filter(p=>p.daily.length).length}/${files.length}\n`+
@@ -3069,10 +3189,26 @@ async function previewMonthlyExcels(fileList){
       `Total trip: ${tripTotal.toLocaleString("id-ID")}\n`+
       `Total tonase: ${kg(tonTotal)}\n\n`+
       previews.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n")+
+      conflictText+
       validationText;
+
+    if($("monthlyConflictSummary")){
+      const c=conflictCheck;
+      $("monthlyConflictSummary").textContent=
+        c.conflicts.length
+          ? `⚠ ${c.conflicts.length} konflik ditemukan. Default: pertahankan data lama.`
+          : `✓ Tidak ada konflik. ${c.same.length} baris identik akan di-skip.`;
+      $("monthlyConflictSummary").className=
+        "monthly-conflict-summary "+(c.conflicts.length?"has-conflict":"is-safe");
+    }
+
   }catch(e){
     MONTHLY_EXCEL_PREVIEW=null;
     $("monthlyExcelPreview").textContent="ERROR: "+e.message;
+    if($("monthlyConflictSummary")){
+      $("monthlyConflictSummary").textContent="Belum ada hasil pemeriksaan.";
+      $("monthlyConflictSummary").className="monthly-conflict-summary";
+    }
   }
 }
 async function replaceRowsFromSameFiles(fileNames){
@@ -3104,17 +3240,46 @@ async function saveMonthlyExcel(){
     );
   }
 
-  // Re-uploading the same source file replaces its prior imported rows.
-  // This also removes legacy rows that were previously saved with supplier_name=SPB.
+  // Re-check immediately before save so stale Preview cannot overwrite newer closing data.
+  let latestConflict;
   try{
-    await replaceRowsFromSameFiles(p.files);
+    latestConflict=await checkMonthlyConflicts(p.daily);
   }catch(e){
-    return alert("Gagal membersihkan versi import lama: "+e.message);
+    return alert(e.message);
+  }
+  p.conflictCheck=latestConflict;
+
+  const policy=$("monthlyConflictPolicy")?.value || "keep_existing";
+  const conflicts=latestConflict.conflicts||[];
+  const same=latestConflict.same||[];
+  const fresh=latestConflict.fresh||[];
+
+  let rowsToSave=fresh.map(x=>x.incoming);
+
+  if(policy==="use_excel" && conflicts.length){
+    const conflictKg=conflicts.reduce((a,x)=>a+Math.abs(Number(x.tonnage_diff||0)),0);
+    const ok=confirm(
+      "KONFIRMASI OVERWRITE KONFLIK\n\n"+
+      `${conflicts.length} baris berbeda dengan Closing/data yang sudah tersimpan.\n`+
+      `Total absolut selisih tonase: ${kg(conflictKg)}\n\n`+
+      "Jika klik OK, nilai dari Excel Bulanan akan menggantikan data lama pada tanggal + KP + supplier yang konflik.\n\n"+
+      "Cancel = pertahankan data lama."
+    );
+    if(!ok) return;
+    rowsToSave.push(...conflicts.map(x=>x.incoming));
   }
 
+  // keep_existing:
+  // - fresh -> save
+  // - same -> skip
+  // - conflict -> untouched
+  // use_excel:
+  // - fresh -> save
+  // - same -> skip
+  // - conflict -> explicit overwrite after confirmation
   const chunkSize=500;
-  for(let i=0;i<p.daily.length;i+=chunkSize){
-    const chunk=p.daily.slice(i,i+chunkSize);
+  for(let i=0;i<rowsToSave.length;i+=chunkSize){
+    const chunk=rowsToSave.slice(i,i+chunkSize);
     const {error}=await db.from("kp_daily_history")
       .upsert(chunk,{onConflict:"report_date,kp_code,supplier_name"});
     if(error) return alert("Gagal simpan detail bulanan: "+error.message);
@@ -3124,18 +3289,28 @@ async function saveMonthlyExcel(){
   // Monthly detail NEVER writes to historical_summary.
   // historical_summary is authoritative annual/historical workbook data only.
   alert(
-    `Upload bulanan berhasil.\n`+
-    `File: ${p.files.length}\n`+
-    `Baris harian supplier: ${p.daily.length}\n\n`+
+    `Upload bulanan selesai.\n\n`+
+    `DATA BARU disimpan : ${fresh.length}\n`+
+    `SUDAH SAMA / skip  : ${same.length}\n`+
+    `KONFLIK ditemukan  : ${conflicts.length}\n`+
+    `KONFLIK dioverwrite: ${policy==="use_excel" ? conflicts.length : 0}\n`+
+    `KONFLIK dipertahankan: ${policy==="keep_existing" ? conflicts.length : 0}\n\n`+
     `Historical tahunan tidak diubah.`
   );
 
   MONTHLY_EXCEL_PREVIEW=null;
   if($("monthlyExcelFile")) $("monthlyExcelFile").value="";
+  if($("monthlyConflictPolicy")) $("monthlyConflictPolicy").value="keep_existing";
+  if($("monthlyConflictSummary")){
+    $("monthlyConflictSummary").textContent="Belum ada hasil pemeriksaan.";
+    $("monthlyConflictSummary").className="monthly-conflict-summary";
+  }
   $("monthlyExcelPreview").textContent="Belum ada file bulanan dipilih.";
   await loadKPMonthlyPanel($("monitorKp").value || "ALL");
+  if($("monitorRangeStart")?.value && $("monitorRangeEnd")?.value){
+    await loadMonitorRangeDetail();
+  }
 }
-
 // ---------- ANNUAL ----------
 function annualMonthColumns(aoa){
   const map={};
