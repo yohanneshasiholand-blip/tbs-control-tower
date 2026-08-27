@@ -3357,6 +3357,233 @@ function setMonitorMode(mode){
 
   loadKPMonitoring();
 }
+
+function monitorPeriodLabel(mode){
+  if(mode==="daily") return $("monitorDate")?.value || "-";
+  if(mode==="monthly") return $("monitorMonth")?.value || "-";
+  return $("monitorYear")?.value || "-";
+}
+
+function monitorPeriodBounds(mode){
+  if(mode==="daily"){
+    const d=$("monitorDate")?.value || null;
+    return d ? {start:d,end:d} : null;
+  }
+  if(mode==="monthly"){
+    const m=$("monitorMonth")?.value || null;
+    return m ? yearMonthBounds(m) : null;
+  }
+  const y=Number($("monitorYear")?.value||0);
+  return y ? {start:`${y}-01-01`,end:`${y}-12-31`} : null;
+}
+
+async function getMonitorExpenseSummary(kp,mode){
+  const bounds=monitorPeriodBounds(mode);
+  if(!bounds) return {total:0,count:0,categories:0,kpCount:0,rows:[]};
+
+  let q=db.from("unit_expenses")
+    .select("expense_date,kp_code,category,amount")
+    .gte("expense_date",bounds.start)
+    .lte("expense_date",bounds.end);
+
+  if(kp!=="ALL") q=q.eq("kp_code",kp);
+
+  const {data,error}=await q;
+  if(error){
+    console.error("Monitor expense summary error:",error);
+    return {total:0,count:0,categories:0,kpCount:0,rows:[],error:error.message};
+  }
+
+  const rows=data||[];
+  return {
+    total:rows.reduce((a,r)=>a+Number(r.amount||0),0),
+    count:rows.length,
+    categories:new Set(rows.map(r=>r.category||"Lainnya")).size,
+    kpCount:new Set(rows.map(r=>r.kp_code)).size,
+    rows
+  };
+}
+
+function setMonitorPeriodBusinessKpis({kp,mode,tonnage,trips,tonnageSource,expense}){
+  const kpLabel=kp==="ALL"?"Semua KP":kp;
+  const periodLabel=monitorPeriodLabel(mode);
+  const modeLabel=mode==="daily"?"Harian":mode==="monthly"?"Bulanan":"Tahunan";
+
+  if($("monitorPeriodTonnage")){
+    $("monitorPeriodTonnage").textContent=kg(tonnage||0);
+    $("monitorPeriodTonnageSub").textContent=
+      `${kpLabel} • ${modeLabel} ${periodLabel}${tonnageSource?" • "+tonnageSource:""}`;
+  }
+
+  if($("monitorPeriodExpense")){
+    $("monitorPeriodExpense").textContent=rupiah(expense?.total||0);
+    $("monitorPeriodExpenseSub").textContent=
+      `${kpLabel} • ${Number(expense?.count||0).toLocaleString("id-ID")} transaksi biaya`;
+  }
+
+  if($("monitorPeriodTrip")){
+    $("monitorPeriodTrip").textContent=trips==null?"—":Number(trips||0).toLocaleString("id-ID");
+    $("monitorPeriodTripSub").textContent=
+      trips==null ? "Trip tidak tersedia untuk periode ini" : `${kpLabel} • total trip periode`;
+  }
+
+  if($("monitorPeriodExpenseCategories")){
+    $("monitorPeriodExpenseCategories").textContent=Number(expense?.categories||0).toLocaleString("id-ID");
+    $("monitorPeriodExpenseCategoriesSub").textContent=
+      `${Number(expense?.kpCount||0).toLocaleString("id-ID")} KP memiliki pengeluaran`;
+  }
+}
+
+function groupTonnageRowsByKp(rows){
+  const map={};
+  (rows||[]).forEach(r=>{
+    const kp=r.kp_code;
+    if(!kp) return;
+    if(!map[kp]) map[kp]={tonnage:0,trips:0};
+    map[kp].tonnage+=Number(r.tonnage_kg||0);
+    map[kp].trips+=Number(r.trip_count||0);
+  });
+  return map;
+}
+
+function groupExpenseRowsByKp(rows){
+  const map={};
+  (rows||[]).forEach(r=>{
+    const kp=r.kp_code;
+    if(!kp) return;
+    if(!map[kp]) map[kp]={amount:0,count:0};
+    map[kp].amount+=Number(r.amount||0);
+    map[kp].count+=1;
+  });
+  return map;
+}
+
+async function loadMonitorKpPeriodTable(mode,selectedKp){
+  if(!$("monitorKpPeriodSummaryTable")) return;
+
+  const bounds=monitorPeriodBounds(mode);
+  if(!bounds){
+    $("monitorKpPeriodSummaryTable").innerHTML=table(["Keterangan"],[["Periode belum dipilih"]]);
+    return;
+  }
+
+  let tonnageMap={};
+  let tripAvailable=true;
+  let sourceLabel="";
+
+  if(mode==="daily"){
+    const date=bounds.start;
+
+    // Prefer final closing for the day.
+    const {data:closingRows}=await db.from("kp_daily_history")
+      .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count,source_file")
+      .eq("report_date",date);
+
+    const chosen=summarizeClosingHistory(closingRows||[]).selected;
+    if(chosen.length){
+      tonnageMap=groupTonnageRowsByKp(chosen);
+      sourceLabel=closingSourceLabelForRows(chosen);
+    }else{
+      // No closing yet: use latest snapshot as temporary reference.
+      const {data:latestSnaps}=await db.from("monitoring_snapshots")
+        .select("id,snapshot_time,source_type")
+        .eq("report_date",date)
+        .order("snapshot_time",{ascending:false})
+        .limit(1);
+
+      const latest=latestSnaps?.[0]||null;
+      if(latest){
+        const {data:details}=await db.from("monitoring_snapshot_details")
+          .select("kp_code,tonnage_kg,trip_count")
+          .eq("snapshot_id",latest.id);
+        tonnageMap=groupTonnageRowsByKp(details||[]);
+        sourceLabel=`Snapshot ${latest.snapshot_time.slice(0,5)}`;
+      }else{
+        sourceLabel="Belum ada tonase";
+      }
+    }
+  }else if(mode==="monthly"){
+    const {data:dailyRows}=await db.from("kp_daily_history")
+      .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count,source_file")
+      .gte("report_date",bounds.start)
+      .lte("report_date",bounds.end);
+
+    if(dailyRows?.length){
+      const chosen=summarizeClosingHistory(dailyRows).selected;
+      tonnageMap=groupTonnageRowsByKp(chosen);
+      sourceLabel=closingSourceLabelForRows(chosen);
+    }else{
+      const [y,m]=String($("monitorMonth")?.value||"").split("-").map(Number);
+      const {data:hist}=await db.from("historical_summary")
+        .select("kp_code,tonnage_kg")
+        .eq("year",y).eq("month",m);
+      (hist||[]).forEach(r=>{
+        if(!tonnageMap[r.kp_code]) tonnageMap[r.kp_code]={tonnage:0,trips:0};
+        tonnageMap[r.kp_code].tonnage+=Number(r.tonnage_kg||0);
+      });
+      tripAvailable=false;
+      sourceLabel="Summary Bulanan";
+    }
+  }else{
+    const year=Number($("monitorYear")?.value||0);
+    const {data:hist}=await db.from("historical_summary")
+      .select("kp_code,tonnage_kg")
+      .eq("year",year);
+
+    (hist||[]).forEach(r=>{
+      if(!tonnageMap[r.kp_code]) tonnageMap[r.kp_code]={tonnage:0,trips:0};
+      tonnageMap[r.kp_code].tonnage+=Number(r.tonnage_kg||0);
+    });
+    tripAvailable=false;
+    sourceLabel="Historical Summary";
+  }
+
+  let eq=db.from("unit_expenses")
+    .select("expense_date,kp_code,amount")
+    .gte("expense_date",bounds.start)
+    .lte("expense_date",bounds.end);
+  const {data:expenseRows,error:expenseError}=await eq;
+  if(expenseError){
+    console.error("KP period expense table error:",expenseError);
+  }
+  const expenseMap=groupExpenseRowsByKp(expenseRows||[]);
+
+  const codes=(selectedKp==="ALL"
+    ? FALLBACK_KP_CODES
+    : [selectedKp]
+  ).filter(Boolean);
+
+  const rows=codes.map(code=>{
+    const t=tonnageMap[code]||{tonnage:0,trips:0};
+    const e=expenseMap[code]||{amount:0,count:0};
+    return [
+      code,
+      kg(t.tonnage),
+      tripAvailable ? Number(t.trips||0).toLocaleString("id-ID") : "—",
+      rupiah(e.amount),
+      Number(e.count||0).toLocaleString("id-ID"),
+      sourceLabel
+    ];
+  });
+
+  $("monitorKpPeriodSummaryTable").innerHTML=table(
+    ["KP","Total Tonase","Total Trip","Total Pengeluaran","Transaksi Biaya","Sumber Tonase"],
+    rows
+  );
+
+  if($("monitorKpPeriodSummaryTitle")){
+    $("monitorKpPeriodSummaryTitle").textContent=
+      selectedKp==="ALL"
+        ? "RINGKASAN TONASE & PENGELUARAN SELURUH KP"
+        : `RINGKASAN TONASE & PENGELUARAN • ${selectedKp}`;
+  }
+
+  if($("monitorKpPeriodSummaryNote")){
+    $("monitorKpPeriodSummaryNote").textContent=
+      `${mode==="daily"?"Harian":mode==="monthly"?"Bulanan":"Tahunan"} • ${monitorPeriodLabel(mode)}`;
+  }
+}
+
 function setMonitorSummary({kp,period,tonnage,trips,coverage,tonnageSub,tripsSub,coverageSub}){
   $("monitorKpiKp").textContent=kp==="ALL"?"Semua KP":kp;
   $("monitorKpiPeriod").textContent=period;
@@ -3486,6 +3713,13 @@ async function loadKPMonthlyPanel(kp){
     const sourceSet=new Set(dates.map(d=>byDate[d].sourceLabel));
     const monthSource=sourceSet.size===1?[...sourceSet][0]:"Closing WhatsApp + Excel";
 
+    const monthlyExpense=await getMonitorExpenseSummary(kp,"monthly");
+    setMonitorPeriodBusinessKpis({
+      kp,mode:"monthly",tonnage:total,trips,
+      tonnageSource:monthSource,expense:monthlyExpense
+    });
+    await loadMonitorKpPeriodTable("monthly",kp);
+
     setMonthlyPanelSummary({
       kp,period:monthLabelId(month),tonnage:total,trips,
       coverage:`${dates.length} hari`,
@@ -3534,6 +3768,14 @@ async function loadKPMonthlyPanel(kp){
   const {data:summary}=await sq;
   const rows=summary||[];
   const total=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+
+  const monthlyExpense=await getMonitorExpenseSummary(kp,"monthly");
+  setMonitorPeriodBusinessKpis({
+    kp,mode:"monthly",tonnage:total,trips:null,
+    tonnageSource:rows.length?"Summary Bulanan":"Belum ada tonase",
+    expense:monthlyExpense
+  });
+  await loadMonitorKpPeriodTable("monthly",kp);
 
   setMonthlyPanelSummary({
     kp,period:monthLabelId(month),tonnage:total,trips:null,
@@ -3599,6 +3841,15 @@ async function loadKPYearlyPanel(kp){
 
   const total=monthly.reduce((a,b)=>a+b,0);
   const avg=monthsPresent.size?total/monthsPresent.size:0;
+
+  const yearlyExpense=await getMonitorExpenseSummary(kp,"yearly");
+  setMonitorPeriodBusinessKpis({
+    kp,mode:"yearly",tonnage:total,trips:null,
+    tonnageSource:rows.length?"Historical Summary":"Belum ada tonase",
+    expense:yearlyExpense
+  });
+  await loadMonitorKpPeriodTable("yearly",kp);
+
   setYearlyPanelSummary({
     kp,period:String(year),tonnage:total,
     coverage:`${monthsPresent.size} bulan`,
@@ -3700,6 +3951,22 @@ async function loadKPDaily(kp){
 
   const latest=snapList.length ? snapList[snapList.length-1] : null;
   const latestVal=latest ? (values[latest.id]||{tonnage:0,trips:0}) : {tonnage:0,trips:0};
+
+  // Unified KP business summary: final closing is preferred for daily total.
+  const dailyExpense=await getMonitorExpenseSummary(kp,"daily");
+  const periodTonnage=hasActual ? actualTonnage : latestVal.tonnage;
+  const periodTrips=hasActual ? actualTrips : latestVal.trips;
+  const periodTonnageSource=hasActual
+    ? closingSourceLabel
+    : latest ? `Snapshot ${latest.snapshot_time.slice(0,5)}` : "Belum ada tonase";
+  setMonitorPeriodBusinessKpis({
+    kp,mode:"daily",
+    tonnage:periodTonnage,
+    trips:periodTrips,
+    tonnageSource:periodTonnageSource,
+    expense:dailyExpense
+  });
+  await loadMonitorKpPeriodTable("daily",kp);
 
   // Main KPI continues to represent latest operational snapshot.
   setMonitorSummary({
