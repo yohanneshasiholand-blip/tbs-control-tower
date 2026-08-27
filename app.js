@@ -2664,7 +2664,7 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
         plate,
         proof:proof||null,
         sequence:seq,
-        source_file:`MONTHLY:${fileName}`
+        source_file:`MONTHLY:FINAL:${fileName}`
       });
       continue;
     }
@@ -2676,7 +2676,7 @@ function parseMonthlyReportSheet(sheet,sheetName,fileName){
       supplier_name:supplier,
       tonnage_kg:0,
       trip_count:0,
-      source_file:`MONTHLY:${fileName}`
+      source_file:`MONTHLY:FINAL:${fileName}`
     };
     prev.tonnage_kg+=tonKg;
     prev.trip_count+=1;
@@ -2728,6 +2728,9 @@ function parseMonthlyWorkbook(wb,fileName){
   let recognizedSheets=0;
   const notes=[];
   const integrityIssues=[];
+  let declaredTotalSum=0;
+  let declaredSheets=0;
+  let accountedTotalSum=0;
 
   wb.SheetNames.forEach(name=>{
     const sheet=wb.Sheets[name];
@@ -2737,6 +2740,11 @@ function parseMonthlyWorkbook(wb,fileName){
       daily.push(...report.daily);
       unassignedRows.push(...(report.unassignedRows||[]));
       recognizedSheets++;
+      accountedTotalSum+=Number(report.accountedTotal||0);
+      if(report.declaredTotal!=null){
+        declaredTotalSum+=Number(report.declaredTotal||0);
+        declaredSheets++;
+      }
 
       notes.push(
         `${name}: ${report.kp} / ${report.supplier}`+
@@ -2764,7 +2772,7 @@ function parseMonthlyWorkbook(wb,fileName){
 
     const simple=parseMonthlySimpleTable(sheet,name,fileName).map(r=>({
       ...r,
-      source_file:`MONTHLY:${fileName}`
+      source_file:`MONTHLY:FINAL:${fileName}`
     }));
     if(simple.length){
       daily.push(...simple);
@@ -2781,6 +2789,9 @@ function parseMonthlyWorkbook(wb,fileName){
   return {
     fileName,daily,unassignedRows,unassignedTonnage,
     recognizedSheets,notes,
+    declaredTotalSum:declaredSheets?declaredTotalSum:null,
+    declaredSheets,
+    accountedTotalSum,
     integrityOk:integrityIssues.length===0,
     integrityIssues
   };
@@ -3095,6 +3106,510 @@ async function checkMonthlyConflicts(dailyRows){
   return {...classified,existingCount:existing.length,checked:true};
 }
 
+
+function monthlyConflictTotals(c){
+  const fresh=c?.fresh||[];
+  const same=c?.same||[];
+  const conflicts=c?.conflicts||[];
+
+  const newKg=fresh.reduce((a,x)=>a+Number(x.incoming?.tonnage_kg||0),0);
+  const sameKg=same.reduce((a,x)=>a+Number(x.incoming?.tonnage_kg||0),0);
+  const conflictExcelKg=conflicts.reduce((a,x)=>a+Number(x.incoming?.tonnage_kg||0),0);
+  const conflictExistingKg=conflicts.reduce((a,x)=>a+Number(x.existing?.tonnage_kg||0),0);
+  const conflictDiffKg=conflictExcelKg-conflictExistingKg;
+
+  const newTrips=fresh.reduce((a,x)=>a+Number(x.incoming?.trip_count||0),0);
+  const sameTrips=same.reduce((a,x)=>a+Number(x.incoming?.trip_count||0),0);
+  const conflictExcelTrips=conflicts.reduce((a,x)=>a+Number(x.incoming?.trip_count||0),0);
+  const conflictExistingTrips=conflicts.reduce((a,x)=>a+Number(x.existing?.trip_count||0),0);
+
+  return {
+    newKg,sameKg,conflictExcelKg,conflictExistingKg,conflictDiffKg,
+    newTrips,sameTrips,conflictExcelTrips,conflictExistingTrips,
+    conflictDiffTrips:conflictExcelTrips-conflictExistingTrips
+  };
+}
+
+function setMonthlyAuditCard(id,value,sub,status){
+  const root=$(id);
+  if(!root) return;
+  const valueEl=root.querySelector("[data-value]");
+  const subEl=root.querySelector("[data-sub]");
+  if(valueEl) valueEl.textContent=value;
+  if(subEl) subEl.textContent=sub||"";
+  root.classList.remove("audit-safe","audit-warn","audit-danger","audit-info");
+  if(status) root.classList.add(status);
+}
+
+
+function monthlyConflictSignature(c){
+  return (c?.conflicts||[])
+    .map(x=>[
+      monthlyRowKey(x.incoming),
+      Number(x.existing?.tonnage_kg||0),
+      Number(x.existing?.trip_count||0),
+      Number(x.incoming?.tonnage_kg||0),
+      Number(x.incoming?.trip_count||0)
+    ].join("~"))
+    .sort()
+    .join("||");
+}
+
+function initMonthlyConflictDecisions(p,{reset=false}={}){
+  if(!p) return;
+  if(reset || !p.conflictDecisions) p.conflictDecisions={};
+
+  (p.conflictCheck?.conflicts||[]).forEach(x=>{
+    const key=monthlyRowKey(x.incoming);
+    if(!p.conflictDecisions[key]){
+      p.conflictDecisions[key]={
+        decision:"",
+        manual_tonnage:Number(x.incoming.tonnage_kg||0),
+        manual_trips:Number(x.incoming.trip_count||0),
+        reason:""
+      };
+    }
+  });
+
+  // Drop decisions for conflicts that no longer exist.
+  const active=new Set((p.conflictCheck?.conflicts||[]).map(x=>monthlyRowKey(x.incoming)));
+  Object.keys(p.conflictDecisions||{}).forEach(key=>{
+    if(!active.has(key)) delete p.conflictDecisions[key];
+  });
+
+  p.conflictSignature=monthlyConflictSignature(p.conflictCheck);
+}
+
+function monthlyResolutionStats(p){
+  const conflicts=p?.conflictCheck?.conflicts||[];
+  let unresolved=0,useExcel=0,keep=0,manual=0,invalidManual=0;
+
+  conflicts.forEach(x=>{
+    const key=monthlyRowKey(x.incoming);
+    const d=p?.conflictDecisions?.[key];
+    if(!d?.decision){
+      unresolved++;
+      return;
+    }
+    if(d.decision==="use_excel_final") useExcel++;
+    else if(d.decision==="keep_existing") keep++;
+    else if(d.decision==="manual_edit"){
+      manual++;
+      const ton=Number(d.manual_tonnage);
+      const trips=Number(d.manual_trips);
+      if(!Number.isFinite(ton) || ton<0 || !Number.isInteger(trips) || trips<0 || !String(d.reason||"").trim()){
+        invalidManual++;
+      }
+    }
+  });
+
+  return {total:conflicts.length,unresolved,useExcel,keep,manual,invalidManual};
+}
+
+function refreshMonthlyResolutionStatus(){
+  const p=MONTHLY_EXCEL_PREVIEW;
+  if(!p) return;
+  const s=monthlyResolutionStats(p);
+
+  if($("monthlyResolutionStatus")){
+    $("monthlyResolutionStatus").textContent=
+      s.total
+        ? `Belum diputuskan ${s.unresolved} • Excel ${s.useExcel} • Pertahankan ${s.keep} • Manual ${s.manual}`
+        : "Tidak ada konflik";
+    $("monthlyResolutionStatus").className=
+      "monthly-resolution-status "+(
+        s.unresolved||s.invalidManual ? "needs-review" : "resolved"
+      );
+  }
+
+  if($("monthlyFinalStatus") && !p.finalBlocked){
+    if(s.total && (s.unresolved||s.invalidManual)){
+      $("monthlyFinalStatus").textContent=
+        s.invalidManual
+          ? "FINAL DIBLOKIR — lengkapi Edit Manual"
+          : `FINAL DIBLOKIR — ${s.unresolved} konflik belum diputuskan`;
+      $("monthlyFinalStatus").className="monthly-final-status blocked";
+    }else if(s.total){
+      $("monthlyFinalStatus").textContent="SIAP FINAL — semua konflik sudah diputuskan";
+      $("monthlyFinalStatus").className="monthly-final-status ready";
+    }
+  }
+}
+
+function escapeHtml(v){
+  return String(v??"")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+
+async function loadMonthlyRevisionAudit(){
+  if(!$("monthlyRevisionAuditTable")) return;
+
+  const {data,error}=await db.from("tonnage_revision_audit")
+    .select("report_date,kp_code,supplier_name,decision,old_tonnage_kg,old_trip_count,final_tonnage_kg,final_trip_count,reason,apply_status,created_at")
+    .order("created_at",{ascending:false})
+    .limit(50);
+
+  if(error){
+    $("monthlyRevisionAuditTable").innerHTML=
+      `<div class="master-empty">Audit Trail gagal dimuat: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  const label={
+    use_excel_final:"Excel Final",
+    keep_existing:"Pertahankan",
+    manual_edit:"Edit Manual"
+  };
+
+  const rows=(data||[]).map(r=>[
+    new Date(r.created_at).toLocaleString("id-ID"),
+    r.report_date,
+    `${r.kp_code} / ${r.supplier_name}`,
+    label[r.decision]||r.decision,
+    `${kg(r.old_tonnage_kg)} / ${Number(r.old_trip_count||0)} trip`,
+    `${kg(r.final_tonnage_kg)} / ${Number(r.final_trip_count||0)} trip`,
+    r.reason||"—",
+    String(r.apply_status||"").toUpperCase()
+  ]);
+
+  $("monthlyRevisionAuditTable").innerHTML=rows.length
+    ? table(["Waktu","Tanggal Data","KP / Supplier","Keputusan","Sebelum","Sesudah","Alasan","Status"],rows)
+    : '<div class="master-empty">Belum ada revisi konflik yang tercatat.</div>';
+}
+
+function renderMonthlyConflictResolution(p){
+  const root=$("monthlyConflictResolution");
+  const list=$("monthlyConflictResolutionList");
+  if(!root || !list) return;
+
+  const conflicts=p?.conflictCheck?.conflicts||[];
+  if(!conflicts.length){
+    root.classList.remove("visible");
+    list.innerHTML="";
+    refreshMonthlyResolutionStatus();
+    return;
+  }
+
+  initMonthlyConflictDecisions(p);
+
+  list.innerHTML=conflicts.map((x,i)=>{
+    const n=x.incoming, e=x.existing;
+    const key=monthlyRowKey(n);
+    const enc=encodeURIComponent(key);
+    const d=p.conflictDecisions[key]||{};
+    const manual=d.decision==="manual_edit";
+    const source=e.source_file||"-";
+
+    return `
+      <article class="monthly-resolution-card" data-resolution-key="${escapeHtml(key)}">
+        <div class="monthly-resolution-card-head">
+          <div>
+            <span class="resolution-index">KONFLIK ${i+1}</span>
+            <strong>${escapeHtml(n.report_date)} • ${escapeHtml(n.kp_code)} / ${escapeHtml(n.supplier_name)}</strong>
+          </div>
+          <span class="resolution-diff ${x.tonnage_diff>=0?"positive":"negative"}">
+            ${x.tonnage_diff>=0?"+":""}${kg(x.tonnage_diff)}
+          </span>
+        </div>
+
+        <div class="monthly-resolution-compare">
+          <div class="resolution-old">
+            <small>DATA SISTEM</small>
+            <strong>${kg(e.tonnage_kg)}</strong>
+            <span>${Number(e.trip_count||0)} trip</span>
+            <em>${escapeHtml(source)}</em>
+          </div>
+          <div class="resolution-arrow">→</div>
+          <div class="resolution-new">
+            <small>EXCEL FINAL</small>
+            <strong>${kg(n.tonnage_kg)}</strong>
+            <span>${Number(n.trip_count||0)} trip</span>
+            <em>Selisih trip ${x.trip_diff>=0?"+":""}${x.trip_diff}</em>
+          </div>
+        </div>
+
+        <div class="monthly-resolution-choice">
+          <label>
+            <span>Keputusan</span>
+            <select onchange="setMonthlyConflictDecision('${enc}',this.value)">
+              <option value="" ${!d.decision?"selected":""}>Pilih keputusan...</option>
+              <option value="use_excel_final" ${d.decision==="use_excel_final"?"selected":""}>Gunakan Excel Final</option>
+              <option value="keep_existing" ${d.decision==="keep_existing"?"selected":""}>Pertahankan Data Lama</option>
+              <option value="manual_edit" ${d.decision==="manual_edit"?"selected":""}>Edit Manual</option>
+            </select>
+          </label>
+
+          <label class="resolution-reason ${manual?"manual-visible":""}">
+            <span>Alasan / Catatan</span>
+            <input
+              type="text"
+              value="${escapeHtml(d.reason||"")}"
+              placeholder="${manual?"Wajib untuk Edit Manual":"Opsional"}"
+              oninput="setMonthlyConflictReason('${enc}',this.value)"
+            >
+          </label>
+        </div>
+
+        <div class="monthly-manual-fields ${manual?"visible":""}">
+          <label>
+            <span>Tonase Final (kg)</span>
+            <input type="number" min="0" step="1"
+              value="${Number((d.manual_tonnage ?? n.tonnage_kg) || 0)}"
+              oninput="setMonthlyConflictManual('${enc}','tonnage',this.value)">
+          </label>
+          <label>
+            <span>Trip Final</span>
+            <input type="number" min="0" step="1"
+              value="${Number((d.manual_trips ?? n.trip_count) || 0)}"
+              oninput="setMonthlyConflictManual('${enc}','trips',this.value)">
+          </label>
+          <div class="manual-edit-note">Edit Manual wajib memiliki alasan dan akan disimpan sebagai <b>Audit Resmi</b>.</div>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  root.classList.add("visible");
+  refreshMonthlyResolutionStatus();
+  loadMonthlyRevisionAudit();
+}
+
+function setMonthlyConflictDecision(encodedKey,value){
+  const p=MONTHLY_EXCEL_PREVIEW;
+  if(!p) return;
+  const key=decodeURIComponent(encodedKey);
+  if(!p.conflictDecisions?.[key]) return;
+
+  const d=p.conflictDecisions[key];
+  d.decision=value;
+
+  if(value==="use_excel_final" && !d.reason){
+    d.reason="Menggunakan Excel Final";
+  }else if(value==="keep_existing" && !d.reason){
+    d.reason="Data lama dipertahankan setelah review konflik";
+  }else if(value==="manual_edit"){
+    if(d.reason==="Menggunakan Excel Final" || d.reason==="Data lama dipertahankan setelah review konflik"){
+      d.reason="";
+    }
+  }
+
+  renderMonthlyConflictResolution(p);
+}
+
+function setMonthlyConflictReason(encodedKey,value){
+  const p=MONTHLY_EXCEL_PREVIEW;
+  if(!p) return;
+  const key=decodeURIComponent(encodedKey);
+  if(!p.conflictDecisions?.[key]) return;
+  p.conflictDecisions[key].reason=value;
+  refreshMonthlyResolutionStatus();
+}
+
+function setMonthlyConflictManual(encodedKey,field,value){
+  const p=MONTHLY_EXCEL_PREVIEW;
+  if(!p) return;
+  const key=decodeURIComponent(encodedKey);
+  if(!p.conflictDecisions?.[key]) return;
+
+  if(field==="tonnage") p.conflictDecisions[key].manual_tonnage=Number(value);
+  if(field==="trips") p.conflictDecisions[key].manual_trips=Number(value);
+  refreshMonthlyResolutionStatus();
+}
+
+function applyMonthlyConflictBulk(decision){
+  const p=MONTHLY_EXCEL_PREVIEW;
+  if(!p) return;
+
+  (p.conflictCheck?.conflicts||[]).forEach(x=>{
+    const key=monthlyRowKey(x.incoming);
+    if(!p.conflictDecisions?.[key]) return;
+    p.conflictDecisions[key].decision=decision;
+    p.conflictDecisions[key].reason=
+      decision==="use_excel_final"
+        ? "Menggunakan Excel Final"
+        : "Data lama dipertahankan setelah review konflik";
+  });
+
+  renderMonthlyConflictResolution(p);
+}
+
+function buildMonthlyConflictResolution(p){
+  const conflicts=p?.conflictCheck?.conflicts||[];
+  const rowsToWrite=[];
+  const audits=[];
+  const decisions={useExcel:0,keep:0,manual:0};
+
+  for(const x of conflicts){
+    const n=x.incoming, e=x.existing;
+    const key=monthlyRowKey(n);
+    const d=p.conflictDecisions?.[key];
+
+    if(!d?.decision){
+      throw Error(`Konflik ${n.report_date} ${n.kp_code}/${n.supplier_name} belum diputuskan.`);
+    }
+
+    let finalRow=null;
+    let finalTonnage=Number(e.tonnage_kg||0);
+    let finalTrips=Number(e.trip_count||0);
+    let newSource=e.source_file||null;
+
+    if(d.decision==="use_excel_final"){
+      decisions.useExcel++;
+      finalTonnage=Number(n.tonnage_kg||0);
+      finalTrips=Number(n.trip_count||0);
+      newSource=String(n.source_file||"").startsWith("MONTHLY:FINAL:")
+        ? n.source_file
+        : `MONTHLY:FINAL:${n.source_file||"UPLOAD"}`;
+      finalRow={...n,tonnage_kg:finalTonnage,trip_count:finalTrips,source_file:newSource};
+    }else if(d.decision==="keep_existing"){
+      decisions.keep++;
+    }else if(d.decision==="manual_edit"){
+      decisions.manual++;
+      finalTonnage=Number(d.manual_tonnage);
+      finalTrips=Number(d.manual_trips);
+
+      if(!Number.isFinite(finalTonnage) || finalTonnage<0){
+        throw Error(`Tonase manual tidak valid untuk ${n.report_date} ${n.kp_code}/${n.supplier_name}.`);
+      }
+      if(!Number.isInteger(finalTrips) || finalTrips<0){
+        throw Error(`Trip manual harus bilangan bulat untuk ${n.report_date} ${n.kp_code}/${n.supplier_name}.`);
+      }
+      if(!String(d.reason||"").trim()){
+        throw Error(`Alasan Edit Manual wajib diisi untuk ${n.report_date} ${n.kp_code}/${n.supplier_name}.`);
+      }
+
+      newSource=`AUDIT:MANUAL:EXCEL_FINAL:${p.files?.[0]||"UPLOAD"}`;
+      finalRow={
+        ...n,
+        tonnage_kg:finalTonnage,
+        trip_count:finalTrips,
+        source_file:newSource
+      };
+    }
+
+    if(finalRow) rowsToWrite.push(finalRow);
+
+    audits.push({
+      report_date:n.report_date,
+      kp_code:n.kp_code,
+      supplier_name:n.supplier_name,
+      decision:d.decision,
+      old_tonnage_kg:Number(e.tonnage_kg||0),
+      old_trip_count:Number(e.trip_count||0),
+      old_source:e.source_file||null,
+      proposed_tonnage_kg:Number(n.tonnage_kg||0),
+      proposed_trip_count:Number(n.trip_count||0),
+      final_tonnage_kg:finalTonnage,
+      final_trip_count:finalTrips,
+      new_source:newSource,
+      reason:String(d.reason||"").trim() || (
+        d.decision==="use_excel_final"
+          ? "Menggunakan Excel Final"
+          : "Data lama dipertahankan setelah review konflik"
+      ),
+      apply_status:"pending"
+    });
+  }
+
+  return {rowsToWrite,audits,decisions};
+}
+
+function renderMonthlyFinalAuditBar(p){
+  if(!$("monthlyFinalAuditBar")) return;
+
+  const c=p?.conflictCheck||{fresh:[],same:[],conflicts:[]};
+  const totals=monthlyConflictTotals(c);
+  const datedKg=(p?.daily||[]).reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const datedTrips=(p?.daily||[]).reduce((a,r)=>a+Number(r.trip_count||0),0);
+  const declaredKg=(p?.declaredTotalKg==null) ? null : Number(p.declaredTotalKg);
+  const unassignedKg=Number(p?.unassignedTonnage||0);
+  const finalBlocked=!!p?.finalBlocked;
+
+  setMonthlyAuditCard(
+    "monthlyAuditFinalTotal",
+    declaredKg==null ? kg(datedKg+unassignedKg) : kg(declaredKg),
+    declaredKg==null ? "Total terhitung dari transaksi Excel" : "TOTAL Excel / nilai final file",
+    finalBlocked ? "audit-warn" : "audit-safe"
+  );
+
+  setMonthlyAuditCard(
+    "monthlyAuditDated",
+    kg(datedKg),
+    `${datedTrips.toLocaleString("id-ID")} trip bertanggal`,
+    "audit-info"
+  );
+
+  setMonthlyAuditCard(
+    "monthlyAuditExisting",
+    kg(totals.sameKg+totals.conflictExistingKg),
+    "Nilai sistem pada key yang overlap",
+    c.conflicts.length ? "audit-warn" : "audit-info"
+  );
+
+  setMonthlyAuditCard(
+    "monthlyAuditDifference",
+    `${totals.conflictDiffKg>=0?"+":""}${kg(totals.conflictDiffKg)}`,
+    `${totals.conflictDiffTrips>=0?"+":""}${totals.conflictDiffTrips} trip pada konflik`,
+    c.conflicts.length ? "audit-warn" : "audit-safe"
+  );
+
+  setMonthlyAuditCard(
+    "monthlyAuditDuplicate",
+    `${c.same.length}`,
+    "Baris identik • otomatis SKIP",
+    "audit-safe"
+  );
+
+  setMonthlyAuditCard(
+    "monthlyAuditConflict",
+    `${c.conflicts.length}`,
+    "Baris berbeda • Excel akan mengganti setelah konfirmasi",
+    c.conflicts.length ? "audit-warn" : "audit-safe"
+  );
+
+  setMonthlyAuditCard(
+    "monthlyAuditUnassigned",
+    `${(p?.unassignedRows||[]).length}`,
+    unassignedKg ? `${kg(unassignedKg)} tanpa tanggal • SIMPAN DIBLOKIR` : "Tidak ada transaksi tanpa tanggal",
+    (p?.unassignedRows||[]).length ? "audit-danger" : "audit-safe"
+  );
+
+  const totalChecks=Math.max(1,c.fresh.length+c.same.length+c.conflicts.length);
+  const newPct=Math.round(c.fresh.length/totalChecks*100);
+  const samePct=Math.round(c.same.length/totalChecks*100);
+  const conflictPct=Math.max(0,100-newPct-samePct);
+
+  const newBar=$("monthlyAuditBarNew");
+  const sameBar=$("monthlyAuditBarSame");
+  const conflictBar=$("monthlyAuditBarConflict");
+  if(newBar) newBar.style.width=`${newPct}%`;
+  if(sameBar) sameBar.style.width=`${samePct}%`;
+  if(conflictBar) conflictBar.style.width=`${conflictPct}%`;
+
+  if($("monthlyAuditBarLegend")){
+    $("monthlyAuditBarLegend").textContent=
+      `BARU ${c.fresh.length} • SAMA ${c.same.length} • KONFLIK ${c.conflicts.length}`;
+  }
+
+  if($("monthlyFinalStatus")){
+    $("monthlyFinalStatus").textContent=finalBlocked
+      ? "FINAL DIBLOKIR — perbaiki item merah sebelum Simpan"
+      : c.conflicts.length
+        ? "REVIEW KONFLIK — putuskan setiap baris"
+        : "SIAP FINAL — tidak ada konflik";
+    $("monthlyFinalStatus").className=
+      "monthly-final-status "+(finalBlocked?"blocked":c.conflicts.length?"warning":"ready");
+  }
+
+  $("monthlyFinalAuditBar").classList.add("visible");
+  renderMonthlyConflictResolution(p);
+}
+
 function formatMonthlyConflictPreview(conflictCheck){
   const c=conflictCheck||{fresh:[],same:[],conflicts:[]};
   const lines=[
@@ -3146,40 +3661,46 @@ async function previewMonthlyExcels(fileList){
 
     allDaily=combineDailyRows(allDaily);
 
-    // A monthly/detail file pulled today can contain incomplete transactions
-    // for the current day. Those rows are Preview-only until the day is closed.
-    const today=localTodayISO();
-    const partialToday=allDaily.filter(r=>r.report_date>=today);
-    const savableDaily=allDaily.filter(r=>r.report_date<today);
-
     $("monthlyExcelPreview").textContent=
-      "Membaca Excel, memeriksa transaksi tanpa tanggal, data hari ini, dan overlap...";
+      "Membaca Excel FINAL dan melakukan audit anti-double / selisih...";
 
     const [validation,conflictCheck]=await Promise.all([
-      validateMonthlyAgainstAnnual(savableDaily),
-      checkMonthlyConflicts(savableDaily)
+      validateMonthlyAgainstAnnual(allDaily),
+      checkMonthlyConflicts(allDaily)
     ]);
     const integrityBlocked=previews.filter(p=>!p.integrityOk);
+
+    const declaredTotals=previews
+      .map(p=>p.declaredTotalSum)
+      .filter(v=>v!=null);
+    const declaredTotalKg=declaredTotals.length
+      ? declaredTotals.reduce((a,b)=>a+Number(b||0),0)
+      : null;
+
+    const unassignedTonnage=allUnassigned.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const finalBlocked=integrityBlocked.length>0 || allUnassigned.length>0;
 
     MONTHLY_EXCEL_PREVIEW={
       files:files.map(f=>f.name),
       daily:allDaily,
-      savableDaily,
-      partialToday,
       unassignedRows:allUnassigned,
-      unassignedTonnage:allUnassigned.reduce((a,r)=>a+Number(r.tonnage_kg||0),0),
+      unassignedTonnage,
+      declaredTotalKg,
       fileResults:previews,
       validation,
       integrityBlocked,
-      conflictCheck
+      conflictCheck,
+      finalBlocked,
+      conflictDecisions:{},
+      conflictSignature:monthlyConflictSignature(conflictCheck)
     };
+    initMonthlyConflictDecisions(MONTHLY_EXCEL_PREVIEW,{reset:true});
 
     const kpSet=new Set(allDaily.map(r=>r.kp_code));
     const supplierSet=new Set(allDaily.map(r=>`${r.kp_code}/${r.supplier_name}`));
     const tripTotal=allDaily.reduce((a,r)=>a+Number(r.trip_count||0),0);
     const tonTotal=allDaily.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
-    const partialKg=partialToday.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
-    const partialTrips=partialToday.reduce((a,r)=>a+Number(r.trip_count||0),0);
+    const totals=monthlyConflictTotals(conflictCheck);
 
     const validationText=validation.length
       ? "\n\nVALIDASI vs DATA TAHUNAN:\n"+
@@ -3187,7 +3708,7 @@ async function previewMonthlyExcels(fileList){
           const ref=v.reference_kg==null?"-":kg(v.reference_kg);
           const diff=v.diff_kg==null?"-":`${v.diff_kg>=0?"+":""}${kg(v.diff_kg)}`;
           return `• ${v.kp_code} ${String(v.month).padStart(2,"0")}/${v.year}: ${v.status}\n`+
-                 `  Bulanan: ${kg(v.parsed_kg)} | Tahunan: ${ref} | Selisih: ${diff}\n`+
+                 `  Excel Final: ${kg(v.parsed_kg)} | Tahunan: ${ref} | Selisih: ${diff}\n`+
                  `  ${v.note}`;
         }).join("\n")
       : "";
@@ -3195,46 +3716,54 @@ async function previewMonthlyExcels(fileList){
     const conflictText="\n\n"+formatMonthlyConflictPreview(conflictCheck);
 
     const unassignedText=allUnassigned.length
-      ? `\n\n⚠ TRANSAKSI TANPA TANGGAL BAYAR\n`+
+      ? `\n\n✕ FINAL DIBLOKIR — TRANSAKSI TANPA TANGGAL\n`+
         `Jumlah: ${allUnassigned.length} transaksi\n`+
-        `Tonase: ${kg(MONTHLY_EXCEL_PREVIEW.unassignedTonnage)}\n`+
-        `Status: TIDAK dialokasikan otomatis ke tanggal mana pun.\n`+
-        `Masukkan melalui Closing resmi / Excel Harian jika tanggal final sudah diketahui.`
-      : `\n\n✓ Tidak ada transaksi tanpa tanggal bayar.`;
+        `Tonase: ${kg(unassignedTonnage)}\n`+
+        `Excel dianggap FINAL, sehingga semua transaksi harus memiliki tanggal yang dapat dipertanggungjawabkan.\n`+
+        `Perbaiki file / tanggal terlebih dahulu sebelum Simpan Final.`
+      : `\n\n✓ Semua transaksi memiliki tanggal yang dapat dialokasikan.`;
 
-    const partialText=partialToday.length
-      ? `\n\n⚠ DATA HARI INI / BELUM CLOSING\n`+
-        `Tanggal >= ${today}: ${partialToday.length} baris harian / ${kg(partialKg)} / ${partialTrips} trip\n`+
-        `Status: hanya Preview — TIDAK disimpan sebagai Closing final.`
-      : `\n\n✓ Tidak ada data current-day yang berisiko dianggap Closing.`;
+    const integrityText=integrityBlocked.length
+      ? `\n\n✕ FINAL DIBLOKIR — TOTAL FILE TIDAK COCOK\n`+
+        integrityBlocked.map(f=>`• ${f.fileName}: ${f.integrityIssues.join("; ")}`).join("\n")
+      : `\n\n✓ Integritas total Excel cocok.`;
+
+    const finalStatus=finalBlocked
+      ? "DIBLOKIR"
+      : conflictCheck.conflicts.length
+        ? "SIAP FINAL SETELAH KONFIRMASI KONFLIK"
+        : "SIAP FINAL";
 
     $("monthlyExcelPreview").textContent=
+      `STATUS FINAL: ${finalStatus}\n`+
       `FILE DIPILIH: ${files.length}\n`+
       `File terbaca: ${previews.filter(p=>p.daily.length || p.unassignedRows?.length).length}/${files.length}\n`+
       `KP terdeteksi: ${kpSet.size}\n`+
       `Supplier terdeteksi: ${supplierSet.size}\n`+
-      `Baris harian bertanggal: ${allDaily.length}\n`+
-      `Baris aman untuk disimpan: ${savableDaily.length}\n`+
+      `Baris bertanggal: ${allDaily.length}\n`+
       `Total trip bertanggal: ${tripTotal.toLocaleString("id-ID")}\n`+
-      `Total tonase bertanggal: ${kg(tonTotal)}\n\n`+
+      `Total tonase bertanggal: ${kg(tonTotal)}\n`+
+      `Total Excel Final: ${declaredTotalKg==null?kg(tonTotal+unassignedTonnage):kg(declaredTotalKg)}\n`+
+      `Nilai overlap di sistem: ${kg(totals.sameKg+totals.conflictExistingKg)}\n`+
+      `Selisih konflik Excel vs sistem: ${totals.conflictDiffKg>=0?"+":""}${kg(totals.conflictDiffKg)}\n\n`+
       previews.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n")+
+      integrityText+
       unassignedText+
-      partialText+
       conflictText+
       validationText;
 
     if($("monthlyConflictSummary")){
       const c=conflictCheck;
-      const extra=[];
-      if(allUnassigned.length) extra.push(`${allUnassigned.length} tanpa tanggal`);
-      if(partialToday.length) extra.push(`${partialToday.length} data hari ini`);
-      $("monthlyConflictSummary").textContent=
-        c.conflicts.length
-          ? `⚠ ${c.conflicts.length} konflik${extra.length?" • "+extra.join(" • "):""}. Default: pertahankan data lama.`
-          : `✓ ${c.same.length} identik di-skip${extra.length?" • "+extra.join(" • "):""}.`;
+      $("monthlyConflictSummary").textContent=finalBlocked
+        ? `✕ FINAL DIBLOKIR • ${allUnassigned.length} tanpa tanggal • ${integrityBlocked.length} file gagal integritas`
+        : c.conflicts.length
+          ? `⚠ ${c.conflicts.length} konflik • pilih keputusan pada Conflict Resolution Panel`
+          : `✓ Siap FINAL • ${c.same.length} identik akan di-skip`;
       $("monthlyConflictSummary").className=
-        "monthly-conflict-summary "+(c.conflicts.length||allUnassigned.length||partialToday.length?"has-conflict":"is-safe");
+        "monthly-conflict-summary "+(finalBlocked?"has-error":c.conflicts.length?"has-conflict":"is-safe");
     }
+
+    renderMonthlyFinalAuditBar(MONTHLY_EXCEL_PREVIEW);
 
   }catch(e){
     MONTHLY_EXCEL_PREVIEW=null;
@@ -3243,6 +3772,8 @@ async function previewMonthlyExcels(fileList){
       $("monthlyConflictSummary").textContent="Belum ada hasil pemeriksaan.";
       $("monthlyConflictSummary").className="monthly-conflict-summary";
     }
+    if($("monthlyFinalAuditBar")) $("monthlyFinalAuditBar").classList.remove("visible");
+    if($("monthlyConflictResolution")) $("monthlyConflictResolution").classList.remove("visible");
   }
 }
 async function replaceRowsFromSameFiles(fileNames){
@@ -3252,105 +3783,169 @@ async function replaceRowsFromSameFiles(fileNames){
   }
 }
 async function saveMonthlyExcel(){
-  if(!MONTHLY_EXCEL_PREVIEW) return alert("Pilih dan preview Excel bulanan dahulu.");
+  if(!MONTHLY_EXCEL_PREVIEW) return alert("Pilih dan Preview Audit Excel Bulanan dahulu.");
   const p=MONTHLY_EXCEL_PREVIEW;
-  if(!(p.savableDaily||[]).length) return alert("Tidak ada transaksi bertanggal yang aman untuk disimpan.");
+  if(!p.daily.length) return alert("Tidak ada transaksi bertanggal yang dapat disimpan.");
 
   const badFiles=(p.integrityBlocked||[]);
   if(badFiles.length){
     return alert(
-      "SIMPAN DIBLOKIR.\n\n"+
+      "SIMPAN FINAL DIBLOKIR.\n\n"+
       badFiles.map(f=>`${f.fileName}: ${f.integrityIssues.join("; ")}`).join("\n")+
       "\n\nTotal transaksi parser belum sama dengan Total Excel."
+    );
+  }
+
+  if((p.unassignedRows||[]).length){
+    return alert(
+      "SIMPAN FINAL DIBLOKIR.\n\n"+
+      `${p.unassignedRows.length} transaksi / ${kg(p.unassignedTonnage||0)} belum memiliki tanggal yang dapat dipertanggungjawabkan.\n\n`+
+      "Karena Excel Bulanan adalah DATA FINAL, sistem tidak akan menebak tanggal transaksi."
     );
   }
 
   const blocked=(p.validation||[]).filter(v=>v.block);
   if(blocked.length){
     return alert(
-      "SIMPAN DIBLOKIR.\n\n"+
+      "SIMPAN FINAL DIBLOKIR.\n\n"+
       blocked.map(v=>`${v.kp_code}: hasil parser melebihi referensi tahunan.`).join("\n")+
       "\n\nPeriksa file/preview terlebih dahulu."
     );
   }
 
-  // Re-check immediately before save so stale Preview cannot overwrite newer closing data.
+  // Re-check immediately before final save.
   let latestConflict;
   try{
-    latestConflict=await checkMonthlyConflicts(p.savableDaily||[]);
+    latestConflict=await checkMonthlyConflicts(p.daily);
   }catch(e){
     return alert(e.message);
   }
+
+  const latestSignature=monthlyConflictSignature(latestConflict);
+  if(latestSignature!==p.conflictSignature){
+    p.conflictCheck=latestConflict;
+    initMonthlyConflictDecisions(p,{reset:true});
+    renderMonthlyFinalAuditBar(p);
+    return alert(
+      "DATA BERUBAH SEJAK PREVIEW.\n\n"+
+      "Konflik telah diperiksa ulang dan Conflict Resolution Panel diperbarui.\n"+
+      "Silakan review keputusan konflik sekali lagi sebelum Simpan Final."
+    );
+  }
+
   p.conflictCheck=latestConflict;
 
-  if((p.unassignedRows||[]).length){
-    const ok=confirm(
-      "TRANSAKSI TANPA TANGGAL TIDAK AKAN DISIMPAN\n\n"+
-      `${p.unassignedRows.length} transaksi / ${kg(p.unassignedTonnage||0)} tidak memiliki TANGGAL BAYAR.\n\n`+
-      "Sistem tidak lagi menempelkan transaksi tersebut otomatis ke 1 Agustus atau tanggal lain.\n"+
-      "Klik OK untuk menyimpan hanya data bertanggal yang aman."
+  const s=monthlyResolutionStats(p);
+  if(s.unresolved){
+    renderMonthlyConflictResolution(p);
+    return alert(
+      `SIMPAN FINAL DIBLOKIR.\n\n${s.unresolved} konflik belum memiliki keputusan.\n`+
+      "Pilih Gunakan Excel Final, Pertahankan Data Lama, atau Edit Manual."
     );
-    if(!ok) return;
+  }
+  if(s.invalidManual){
+    renderMonthlyConflictResolution(p);
+    return alert(
+      `SIMPAN FINAL DIBLOKIR.\n\n${s.invalidManual} Edit Manual belum valid.\n`+
+      "Pastikan tonase/trip valid dan alasan revisi sudah diisi."
+    );
   }
 
-  const policy=$("monthlyConflictPolicy")?.value || "keep_existing";
-  const conflicts=latestConflict.conflicts||[];
-  const same=latestConflict.same||[];
+  let resolution;
+  try{
+    resolution=buildMonthlyConflictResolution(p);
+  }catch(e){
+    return alert("SIMPAN FINAL DIBLOKIR.\n\n"+e.message);
+  }
+
   const fresh=latestConflict.fresh||[];
+  const same=latestConflict.same||[];
 
-  let rowsToSave=fresh.map(x=>x.incoming);
+  const freshRows=fresh.map(x=>({
+    ...x.incoming,
+    source_file:String(x.incoming.source_file||"").startsWith("MONTHLY:FINAL:")
+      ? x.incoming.source_file
+      : `MONTHLY:FINAL:${x.incoming.source_file||"UPLOAD"}`
+  }));
 
-  if(policy==="use_excel" && conflicts.length){
-    const conflictKg=conflicts.reduce((a,x)=>a+Math.abs(Number(x.tonnage_diff||0)),0);
-    const ok=confirm(
-      "KONFIRMASI OVERWRITE KONFLIK\n\n"+
-      `${conflicts.length} baris berbeda dengan Closing/data yang sudah tersimpan.\n`+
-      `Total absolut selisih tonase: ${kg(conflictKg)}\n\n`+
-      "Jika klik OK, nilai dari Excel Bulanan akan menggantikan data lama pada tanggal + KP + supplier yang konflik.\n\n"+
-      "Cancel = pertahankan data lama."
-    );
-    if(!ok) return;
-    rowsToSave.push(...conflicts.map(x=>x.incoming));
+  const rowsToSave=[...freshRows,...resolution.rowsToWrite];
+
+  const finalConfirmation=confirm(
+    "KONFIRMASI SIMPAN FINAL\n\n"+
+    `Data baru             : ${fresh.length}\n`+
+    `Sudah sama / skip     : ${same.length}\n`+
+    `Konflik pakai Excel   : ${resolution.decisions.useExcel}\n`+
+    `Konflik dipertahankan : ${resolution.decisions.keep}\n`+
+    `Konflik edit manual   : ${resolution.decisions.manual}\n\n`+
+    "Semua keputusan konflik akan disimpan ke Audit Trail.\n\n"+
+    "Klik OK untuk menerapkan keputusan."
+  );
+  if(!finalConfirmation) return;
+
+  // 1) Create pending audit trail before data mutation.
+  let auditIds=[];
+  if(resolution.audits.length){
+    const {data:auditInserted,error:auditError}=await db
+      .from("tonnage_revision_audit")
+      .insert(resolution.audits)
+      .select("id");
+
+    if(auditError){
+      return alert("SIMPAN DIBATALKAN — Audit Trail gagal dibuat:\n"+auditError.message);
+    }
+    auditIds=(auditInserted||[]).map(x=>x.id);
   }
 
-  // keep_existing:
-  // - fresh -> save
-  // - same -> skip
-  // - conflict -> untouched
-  // use_excel:
-  // - fresh -> save
-  // - same -> skip
-  // - conflict -> explicit overwrite after confirmation
+  // 2) Apply new/final rows. Same rows and keep-existing decisions are not rewritten.
   const chunkSize=500;
   for(let i=0;i<rowsToSave.length;i+=chunkSize){
     const chunk=rowsToSave.slice(i,i+chunkSize);
     const {error}=await db.from("kp_daily_history")
       .upsert(chunk,{onConflict:"report_date,kp_code,supplier_name"});
-    if(error) return alert("Gagal simpan detail bulanan: "+error.message);
+
+    if(error){
+      if(auditIds.length){
+        await db.from("tonnage_revision_audit")
+          .update({apply_status:"failed",error_message:error.message})
+          .in("id",auditIds);
+      }
+      return alert("Gagal menerapkan Excel Final:\n"+error.message);
+    }
   }
 
-  // IMPORTANT:
-  // Monthly detail NEVER writes to historical_summary.
-  // historical_summary is authoritative annual/historical workbook data only.
+  // 3) Mark audit records applied.
+  if(auditIds.length){
+    const {error:auditUpdateError}=await db.from("tonnage_revision_audit")
+      .update({apply_status:"applied",error_message:null})
+      .in("id",auditIds);
+
+    if(auditUpdateError){
+      alert(
+        "Data Final berhasil diterapkan, tetapi status Audit Trail gagal diperbarui.\n"+
+        "Detail: "+auditUpdateError.message
+      );
+    }
+  }
+
   alert(
-    `Upload bulanan selesai.\n\n`+
-    `DATA BARU disimpan : ${fresh.length}\n`+
-    `SUDAH SAMA / skip  : ${same.length}\n`+
-    `KONFLIK ditemukan  : ${conflicts.length}\n`+
-    `KONFLIK dioverwrite: ${policy==="use_excel" ? conflicts.length : 0}\n`+
-    `KONFLIK dipertahankan: ${policy==="keep_existing" ? conflicts.length : 0}\n`+
-    `Tanpa tanggal tidak disimpan: ${(p.unassignedRows||[]).length}\n`+
-    `Data hari ini/partial tidak disimpan: ${(p.partialToday||[]).length}\n\n`+
-    `Historical tahunan tidak diubah.`
+    `EXCEL BULANAN FINAL BERHASIL DIPROSES ✓\n\n`+
+    `DATA BARU             : ${fresh.length}\n`+
+    `SUDAH SAMA / SKIP    : ${same.length}\n`+
+    `PAKAI EXCEL FINAL    : ${resolution.decisions.useExcel}\n`+
+    `PERTAHANKAN DATA LAMA: ${resolution.decisions.keep}\n`+
+    `EDIT MANUAL          : ${resolution.decisions.manual}\n`+
+    `AUDIT TRAIL          : ${resolution.audits.length} keputusan\n\n`+
+    `Setiap konflik sudah diproses sesuai keputusan Anda.`
   );
 
   MONTHLY_EXCEL_PREVIEW=null;
   if($("monthlyExcelFile")) $("monthlyExcelFile").value="";
-  if($("monthlyConflictPolicy")) $("monthlyConflictPolicy").value="keep_existing";
   if($("monthlyConflictSummary")){
     $("monthlyConflictSummary").textContent="Belum ada hasil pemeriksaan.";
     $("monthlyConflictSummary").className="monthly-conflict-summary";
   }
+  if($("monthlyFinalAuditBar")) $("monthlyFinalAuditBar").classList.remove("visible");
+  if($("monthlyConflictResolution")) $("monthlyConflictResolution").classList.remove("visible");
   $("monthlyExcelPreview").textContent="Belum ada file bulanan dipilih.";
   await loadKPMonthlyPanel($("monitorKp").value || "ALL");
   if($("monitorRangeStart")?.value && $("monitorRangeEnd")?.value){
@@ -4123,9 +4718,10 @@ async function loadMonitorRangeDetail(){
         let src="Belum ada tonase";
         if(t.sources?.has("live")) src="WhatsApp Snapshot";
         else if(t.sources?.has("audit")) src="Audit Resmi";
+        else if(t.sources?.has("excel_final")) src="Excel Final";
         else if(t.sources?.has("excel")) src="Closing Excel";
-        else if(t.sources?.has("whatsapp")) src="Closing WhatsApp";
-        else if(t.sources?.has("monthly")) src="Excel Bulanan (derived)";
+        else if(t.sources?.has("whatsapp")) src="Closing WhatsApp (sementara)";
+        else if(t.sources?.has("monthly")) src="Excel Bulanan Lama";
         else if(t.tonnage) src="Closing Harian";
 
         return [
@@ -4172,33 +4768,33 @@ function renderMonitorEmpty(message){
 function closingSourceType(sourceFile){
   const s=String(sourceFile||"");
   if(s.startsWith("AUDIT:")) return "audit";
-  if(s.startsWith("WHATSAPP:CLOSING:")) return "whatsapp";
+  if(s.startsWith("MONTHLY:FINAL:")) return "excel_final";
   if(s.startsWith("DAILY:")) return "excel";
+  if(s.startsWith("WHATSAPP:CLOSING:")) return "whatsapp";
   if(s.startsWith("MONTHLY:")) return "monthly";
-  // Legacy monthly uploads before v4.9.8 used the raw .xlsx filename.
+  // Legacy monthly uploads before source prefixes used raw .xlsx filenames.
   if(/\.xlsx?$/i.test(s)) return "monthly";
   return "other";
 }
 
 function closingSourceDisplay(type){
   if(type==="audit") return "Audit Resmi";
+  if(type==="excel_final") return "Excel Final";
   if(type==="excel") return "Closing Excel";
-  if(type==="whatsapp") return "Closing WhatsApp";
-  if(type==="monthly") return "Excel Bulanan (derived)";
+  if(type==="whatsapp") return "Closing WhatsApp (sementara)";
+  if(type==="monthly") return "Excel Bulanan Lama";
   return "Closing Harian";
 }
 
 function summarizeClosingHistory(rows,{excludeCurrentMonthly=true}={}){
-  // Canonical rule is per Date + KP + Supplier, not merely Date + KP.
-  // This avoids losing other suppliers when one supplier has a stronger source.
-  // Priority: audited correction > explicit Daily Excel > WhatsApp Closing
-  // > Monthly derived detail > legacy/other.
+  // Canonical priority is per Date + KP + Supplier.
+  // Excel Bulanan FINAL is authoritative over operational WhatsApp closing.
   const grouped=new Map();
   (rows||[]).forEach(r=>{
     const supplier=String(r.supplier_name||"ALL").toUpperCase();
     const key=`${r.report_date}|${r.kp_code}|${supplier}`;
     if(!grouped.has(key)) grouped.set(key,{
-      audit:[],excel:[],whatsapp:[],monthly:[],other:[]
+      audit:[],excel_final:[],excel:[],whatsapp:[],monthly:[],other:[]
     });
     grouped.get(key)[closingSourceType(r.source_file)].push(r);
   });
@@ -4206,16 +4802,17 @@ function summarizeClosingHistory(rows,{excludeCurrentMonthly=true}={}){
   const selected=[];
   const today=typeof localTodayISO==="function" ? localTodayISO() : null;
 
-  grouped.forEach((g,key)=>{
+  grouped.forEach(g=>{
     let chosen=
       g.audit.length ? g.audit :
+      g.excel_final.length ? g.excel_final :
       g.excel.length ? g.excel :
       g.whatsapp.length ? g.whatsapp :
       g.monthly.length ? g.monthly :
       g.other;
 
-    // A row derived from a monthly/detail file on the current date is not a
-    // Closing 00.00. It stays out of final totals until a real closing arrives.
+    // Only legacy monthly-derived rows are excluded on current day.
+    // MONTHLY:FINAL is explicitly accepted as final even if uploaded today.
     if(excludeCurrentMonthly && today && chosen.length &&
        chosen.every(r=>closingSourceType(r.source_file)==="monthly") &&
        chosen[0].report_date>=today){
@@ -4314,7 +4911,19 @@ async function loadKPMonthlyPanel(kp){
     const trips=dates.reduce((a,d)=>a+byDate[d].trips,0);
     const avg=dates.length?total/dates.length:0;
     const sourceSet=new Set(dates.map(d=>byDate[d].sourceLabel));
-    const monthSource=sourceSet.size===1?[...sourceSet][0]:"Sumber Closing Campuran";
+    const monthSource=sourceSet.size===1?[...sourceSet][0]:"Sumber Campuran";
+
+    const finalDates=dates.filter(d=>{
+      const s=byDate[d].sourceLabel||"";
+      return s.includes("Excel Final") || s.includes("Audit Resmi") || s.includes("Closing Excel");
+    });
+    const temporaryDates=dates.filter(d=>!finalDates.includes(d));
+    const monthlyStatus=
+      dates.length && finalDates.length===dates.length
+        ? "FINAL EXCEL"
+        : finalDates.length
+          ? "FINAL + SEMENTARA"
+          : "SEMENTARA";
 
     const monthlyExpense=await getMonitorExpenseSummary(kp,"monthly");
     setMonitorPeriodBusinessKpis({
@@ -4326,12 +4935,16 @@ async function loadKPMonthlyPanel(kp){
     setMonthlyPanelSummary({
       kp,period:monthLabelId(month),tonnage:total,trips,
       coverage:`${dates.length} hari`,
-      tonnageSub:`Akumulasi Closing Harian • rata-rata ${kg(avg)} / hari`,
-      tripsSub:`Total trip closing • ${monthSource}`,
-      coverageSub:"Hari closing yang sudah tersedia"
+      tonnageSub:`${monthlyStatus} • rata-rata ${kg(avg)} / hari`,
+      tripsSub:`${finalDates.length} hari final • ${temporaryDates.length} hari sementara`,
+      coverageSub:`Final ${finalDates.length} hari • Sementara ${temporaryDates.length} hari`
     });
 
-    if($("monthlySourceBadge")) $("monthlySourceBadge").textContent=monthSource;
+    if($("monthlySourceBadge")){
+      $("monthlySourceBadge").textContent=monthlyStatus;
+      $("monthlySourceBadge").className=
+        "monitor-source-badge "+(monthlyStatus==="FINAL EXCEL"?"final-source":monthlyStatus==="SEMENTARA"?"temporary-source":"mixed-source");
+    }
 
     resetPlotContainer("monthlyMonitorChart");
     Plotly.newPlot("monthlyMonitorChart",[{
