@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.9.4">
+  <link rel="stylesheet" href="style.css?v=4.9.5">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -276,6 +276,40 @@
           </div>
         </article>
 
+        <!-- KP BUSINESS SUMMARY: follows Harian / Bulanan / Tahunan filter -->
+        <section class="monitor-business-summary">
+          <div class="monitor-business-kpi-grid">
+            <article class="monitor-kpi glass monitor-business-tonnage">
+              <small>TOTAL TONASE PERIODE</small>
+              <strong id="monitorPeriodTonnage">0 kg</strong>
+              <span id="monitorPeriodTonnageSub">Pilih KP dan periode</span>
+            </article>
+            <article class="monitor-kpi glass monitor-business-expense">
+              <small>TOTAL PENGELUARAN PERIODE</small>
+              <strong id="monitorPeriodExpense">Rp0</strong>
+              <span id="monitorPeriodExpenseSub">Pilih KP dan periode</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>TOTAL TRIP PERIODE</small>
+              <strong id="monitorPeriodTrip">0</strong>
+              <span id="monitorPeriodTripSub">Pilih KP dan periode</span>
+            </article>
+            <article class="monitor-kpi glass">
+              <small>KATEGORI BIAYA</small>
+              <strong id="monitorPeriodExpenseCategories">0</strong>
+              <span id="monitorPeriodExpenseCategoriesSub">0 KP memiliki pengeluaran</span>
+            </article>
+          </div>
+
+          <article class="panel glass monitor-kp-business-table-panel">
+            <div class="panel-head row-space">
+              <h3 id="monitorKpPeriodSummaryTitle">RINGKASAN TONASE & PENGELUARAN SELURUH KP</h3>
+              <span id="monitorKpPeriodSummaryNote" class="monitor-rule-note">-</span>
+            </div>
+            <div id="monitorKpPeriodSummaryTable" class="table-wrap monitor-kp-business-table"></div>
+          </article>
+        </section>
+
         <!-- HARIAN -->
         <div id="monitorDailyPanel" class="monitor-subpanel active">
           <div class="monitor-subpanel-head">
@@ -293,7 +327,7 @@
               <span id="monitorKpiPeriod">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>TONASE</small>
+              <small>SNAPSHOT / ACUAN TONASE</small>
               <strong id="monitorKpiTonnage">0 kg</strong>
               <span id="monitorKpiTonnageSub">-</span>
             </article>
@@ -449,7 +483,7 @@
               <span id="monthlyKpiPeriod">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>TOTAL TONASE</small>
+              <small>TOTAL TONASE KP / BULAN</small>
               <strong id="monthlyKpiTonnage">0 kg</strong>
               <span id="monthlyKpiTonnageSub">-</span>
             </article>
@@ -514,7 +548,7 @@
               <span id="yearlyKpiPeriod">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>TOTAL TONASE</small>
+              <small>TOTAL TONASE KP / TAHUN</small>
               <strong id="yearlyKpiTonnage">0 kg</strong>
               <span id="yearlyKpiTonnageSub">-</span>
             </article>
@@ -730,6 +764,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.9.4"></script>
+  <script src="app.js?v=4.9.5"></script>
 </body>
 </html>
