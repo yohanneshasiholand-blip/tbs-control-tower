@@ -2429,3 +2429,68 @@ table {
     grid-column:auto;
   }
 }
+
+
+/* =========================================================
+   KP TONNAGE + EXPENSE MONITORING SUMMARY — v4.9.5
+   ========================================================= */
+.monitor-business-summary{
+  margin-top:10px;
+}
+.monitor-business-kpi-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+}
+.monitor-business-kpi-grid .monitor-kpi{
+  min-height:86px;
+}
+.monitor-business-tonnage{
+  border-color:rgba(73,222,95,.24) !important;
+}
+.monitor-business-expense{
+  border-color:rgba(242,211,122,.28) !important;
+}
+.monitor-business-expense strong{
+  color:#f2d37a;
+}
+.monitor-business-tonnage strong{
+  color:#78f487;
+}
+.monitor-kp-business-table-panel{
+  margin-top:8px;
+}
+.monitor-kp-business-table{
+  max-height:260px;
+}
+.monitor-kp-business-table table{
+  min-width:850px;
+}
+.monitor-kp-business-table td:nth-child(2),
+.monitor-kp-business-table td:nth-child(4){
+  font-weight:800;
+  white-space:nowrap;
+}
+.monitor-kp-business-table td:nth-child(4){
+  color:#f2d37a;
+}
+.monitor-kp-business-table td:nth-child(1){
+  font-weight:900;
+  color:#7cff89;
+}
+@media (min-width:1100px) and (max-width:1499px){
+  .monitor-business-summary{margin-top:5px}
+  .monitor-business-kpi-grid{gap:5px}
+  .monitor-business-kpi-grid .monitor-kpi{
+    min-height:61px;
+    padding:6px 8px;
+  }
+  .monitor-kp-business-table-panel{margin-top:5px}
+  .monitor-kp-business-table{max-height:175px}
+}
+@media(max-width:900px){
+  .monitor-business-kpi-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:540px){
+  .monitor-business-kpi-grid{grid-template-columns:1fr}
+}
