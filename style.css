@@ -2494,3 +2494,95 @@ table {
 @media(max-width:540px){
   .monitor-business-kpi-grid{grid-template-columns:1fr}
 }
+
+
+/* =========================================================
+   KP DETAIL DATE RANGE — v4.9.6
+   ========================================================= */
+.monitor-range-divider{
+  height:1px;
+  margin:14px 0;
+  background:rgba(255,255,255,.10);
+}
+.monitor-range-head h3{
+  margin:3px 0 4px;
+}
+.monitor-range-head p{
+  margin:0;
+  max-width:920px;
+  color:#c9c0b4;
+  font-size:11px;
+  line-height:1.45;
+}
+.monitor-range-filters{
+  display:grid;
+  grid-template-columns:minmax(155px,.8fr) minmax(155px,.8fr) auto auto;
+  gap:9px;
+  align-items:end;
+  margin-top:12px;
+}
+.monitor-range-filters label{
+  margin:0;
+}
+.monitor-range-filters label span{
+  display:block;
+  margin-bottom:5px;
+  color:#ddd5c8;
+  font-size:10px;
+  font-weight:800;
+}
+.monitor-range-filters .btn{
+  height:43px;
+}
+.monitor-range-status{
+  margin-top:9px;
+  padding:8px 10px;
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:10px;
+  background:rgba(5,12,8,.24);
+  color:#d6cec2;
+  font-size:11px;
+}
+.monitor-range-kpi-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:7px;
+  margin-top:9px;
+}
+.monitor-range-kpi-grid .monitor-kpi{
+  min-height:76px;
+}
+.monitor-range-detail-head{
+  margin-top:11px;
+}
+.monitor-range-detail-table{
+  max-height:340px;
+}
+.monitor-range-detail-table table{
+  min-width:850px;
+}
+.monitor-range-detail-table td:nth-child(2),
+.monitor-range-detail-table td:nth-child(4){
+  font-weight:800;
+}
+@media (min-width:1100px) and (max-width:1499px){
+  .monitor-range-divider{margin:8px 0}
+  .monitor-range-filters{margin-top:7px;gap:6px}
+  .monitor-range-kpi-grid{margin-top:6px;gap:5px}
+  .monitor-range-kpi-grid .monitor-kpi{min-height:60px;padding:6px 8px}
+  .monitor-range-detail-table{max-height:210px}
+}
+@media(max-width:850px){
+  .monitor-range-filters{
+    grid-template-columns:1fr 1fr;
+  }
+  .monitor-range-kpi-grid{
+    grid-template-columns:1fr 1fr;
+  }
+}
+@media(max-width:520px){
+  .monitor-range-filters,
+  .monitor-range-kpi-grid{
+    grid-template-columns:1fr;
+  }
+}
