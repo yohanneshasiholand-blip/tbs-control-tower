@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.9.5">
+  <link rel="stylesheet" href="style.css?v=4.9.6">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -307,6 +307,62 @@
               <span id="monitorKpPeriodSummaryNote" class="monitor-rule-note">-</span>
             </div>
             <div id="monitorKpPeriodSummaryTable" class="table-wrap monitor-kp-business-table"></div>
+
+            <div class="monitor-range-divider"></div>
+
+            <div class="monitor-range-head">
+              <div>
+                <span class="subpanel-kicker">DETAIL RANGE TANGGAL</span>
+                <h3>Total Tonase & Pengeluaran berdasarkan Tanggal Mulai–Tanggal Akhir</h3>
+                <p>Range ini khusus untuk detail. Total tonase memakai Closing final 00.00 per hari agar snapshot 10/12/15/17 tidak terhitung ganda.</p>
+              </div>
+            </div>
+
+            <div class="monitor-range-filters">
+              <label>
+                <span>Tanggal Mulai</span>
+                <input id="monitorRangeStart" type="date">
+              </label>
+              <label>
+                <span>Tanggal Akhir</span>
+                <input id="monitorRangeEnd" type="date">
+              </label>
+              <button class="btn btn-primary" onclick="loadMonitorRangeDetail()">Tampilkan Range</button>
+              <button class="btn btn-secondary" onclick="syncMonitorRangeFromActivePeriod()">Gunakan Periode Aktif</button>
+            </div>
+
+            <div id="monitorRangeStatus" class="monitor-range-status">Pilih range tanggal untuk melihat total detail.</div>
+
+            <div class="monitor-range-kpi-grid">
+              <article class="monitor-kpi glass monitor-business-tonnage">
+                <small>TOTAL TONASE RANGE</small>
+                <strong id="monitorRangeTotalTonnage">0 kg</strong>
+                <span id="monitorRangeTonnageSub">Akumulasi Closing final</span>
+              </article>
+              <article class="monitor-kpi glass monitor-business-expense">
+                <small>TOTAL PENGELUARAN RANGE</small>
+                <strong id="monitorRangeTotalExpense">Rp0</strong>
+                <span id="monitorRangeExpenseSub">Transaksi biaya pada range</span>
+              </article>
+              <article class="monitor-kpi glass">
+                <small>TOTAL TRIP RANGE</small>
+                <strong id="monitorRangeTotalTrips">0</strong>
+                <span id="monitorRangeTripSub">Akumulasi trip Closing</span>
+              </article>
+              <article class="monitor-kpi glass">
+                <small>COVERAGE CLOSING</small>
+                <strong id="monitorRangeCoverage">0 / 0</strong>
+                <span id="monitorRangeCoverageSub">Hari Closing tersedia</span>
+              </article>
+            </div>
+
+            <div class="panel-head row-space monitor-range-detail-head">
+              <h3 id="monitorRangeDetailTitle">DETAIL TOTAL PER KP — RANGE TANGGAL</h3>
+              <span class="monitor-rule-note">Excel Closing diprioritaskan jika tersedia pada KP/tanggal yang sama</span>
+            </div>
+            <div id="monitorRangeDetailTable" class="table-wrap monitor-range-detail-table">
+              <div class="master-empty">Belum ada range tanggal dipilih.</div>
+            </div>
           </article>
         </section>
 
@@ -764,6 +820,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.9.5"></script>
+  <script src="app.js?v=4.9.6"></script>
 </body>
 </html>
