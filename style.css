@@ -2642,3 +2642,39 @@ table {
     grid-template-columns:1fr;
   }
 }
+
+
+/* =========================================================
+   TONNAGE AUDIT + LIVE CURRENT DAY — v4.9.8
+   ========================================================= */
+.monitor-range-audit-grid{
+  grid-template-columns:repeat(6,minmax(0,1fr));
+}
+.monitor-running-total{
+  border-color:rgba(89,255,112,.45) !important;
+  box-shadow:0 0 0 1px rgba(89,255,112,.10) inset;
+}
+.monitor-running-total strong{
+  color:#72ff83 !important;
+}
+.monitor-live-kpi{
+  border-color:rgba(85,195,255,.38) !important;
+}
+.monitor-live-kpi strong{
+  color:#89d8ff;
+}
+@media(max-width:1250px){
+  .monitor-range-audit-grid{
+    grid-template-columns:repeat(3,1fr);
+  }
+}
+@media(max-width:760px){
+  .monitor-range-audit-grid{
+    grid-template-columns:1fr 1fr;
+  }
+}
+@media(max-width:480px){
+  .monitor-range-audit-grid{
+    grid-template-columns:1fr;
+  }
+}
