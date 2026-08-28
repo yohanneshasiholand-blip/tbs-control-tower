@@ -3627,6 +3627,26 @@ function ensureFinalSourceFile(row,p=MONTHLY_EXCEL_PREVIEW){
     : `MONTHLY:FINAL:${s||"UPLOAD"}`;
 }
 
+
+function setPasteDetailSaveState(enabled=false){
+  const btn=$("pasteDetailSaveBtn");
+  if(!btn) return;
+  btn.disabled=!enabled;
+  btn.classList.toggle("is-ready",!!enabled);
+  btn.textContent=enabled ? "Simpan Paste sebagai FINAL" : "Preview dahulu untuk menyimpan";
+}
+
+async function savePastedDetailFinal(){
+  const p=MONTHLY_EXCEL_PREVIEW;
+  if(!p || p.sourceMode!=="paste_detail"){
+    return alert(
+      "Preview Paste Detail terlebih dahulu.\n\n"+
+      "Klik 'Preview Audit Paste Detail', periksa hasil audit, lalu tombol Simpan Paste sebagai FINAL akan aktif."
+    );
+  }
+  await saveMonthlyExcel();
+}
+
 async function previewPastedDetail(){
   try{
     const raw=$("pasteDetailText")?.value||"";
@@ -3735,11 +3755,13 @@ async function previewPastedDetail(){
     }
 
     renderMonthlyFinalAuditBar(MONTHLY_EXCEL_PREVIEW);
+    setPasteDetailSaveState(true);
   }catch(e){
     MONTHLY_EXCEL_PREVIEW=null;
     $("monthlyExcelPreview").textContent="ERROR PASTE DETAIL: "+e.message;
     if($("monthlyFinalAuditBar")) $("monthlyFinalAuditBar").classList.remove("visible");
     if($("monthlyConflictResolution")) $("monthlyConflictResolution").classList.remove("visible");
+    setPasteDetailSaveState(false);
   }
 }
 
@@ -4358,6 +4380,7 @@ function formatMonthlyConflictPreview(conflictCheck){
 
 async function previewMonthlyExcels(fileList){
   try{
+    setPasteDetailSaveState(false);
     const files=[...(fileList||[])];
     if(!files.length) throw Error("Pilih minimal 1 file.");
 
@@ -4703,6 +4726,7 @@ async function saveMonthlyExcel(){
   MONTHLY_EXCEL_PREVIEW=null;
   if($("monthlyExcelFile")) $("monthlyExcelFile").value="";
   if($("pasteDetailText")) $("pasteDetailText").value="";
+  setPasteDetailSaveState(false);
   if($("monthlyConflictSummary")){
     $("monthlyConflictSummary").textContent="Belum ada hasil pemeriksaan.";
     $("monthlyConflictSummary").className="monthly-conflict-summary";
