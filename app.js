@@ -3429,17 +3429,37 @@ function splitDetailPasteLine(raw){
   return m ? m.slice(1).map(cleanDetailPasteCell) : [];
 }
 
-function detailTransactionKey(row){
+function findPasteDetailPeriod(text){
+  const monthNames="Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember";
+  const source=String(text||"").replace(/\u00a0/g," ");
+  const m=source.match(new RegExp(
+    `(\\d{1,2}\\s+(?:${monthNames})\\s+\\d{4})\\s*(?:s\\.?\\s*d\\.?|sampai|-)\\s*`+
+    `(\\d{1,2}\\s+(?:${monthNames})\\s+\\d{4})`,
+    "i"
+  ));
+  if(!m) return null;
+  const start=parseOperationalDate(m[1]);
+  const end=parseOperationalDate(m[2]);
+  return start&&end ? {start,end} : null;
+}
+
+function detailStableKey(row){
   return [
+    row.period_start||"",
     canonKP(row.kp_code||""),
     supplierToken(row.supplier_name||""),
-    row.report_date||"",
-    String(row.proof_no||"").toUpperCase().replace(/\s+/g,""),
+    Number(row.sequence_no||0),
     String(row.vehicle_plate||"").toUpperCase().replace(/\s+/g,""),
     Number(row.tonnage_kg||0),
     supplierToken(row.agent_name||"")
   ].join("|");
 }
+
+function detailTransactionKey(row){
+  // v4.10.4: stable across HOLD -> PAID transition.
+  return detailStableKey(row);
+}
+
 
 function detectPasteDetailKp(text){
   const explicit=String(text||"").match(/\b(?:KP|KANTOR)\s*[.:\-]?\s*(ASMJ[\s-]*[12]|TKWL[\s-]*[12]|MSB[\s-]*2|KS[\s-]*2|[A-Z]{2,12}(?:-[A-Z0-9]+)?)\b/i);
@@ -3485,8 +3505,8 @@ function parsePastedDetailTable(text,kp,supplier){
   if(!kp) throw Error("Pilih KP terlebih dahulu.");
   if(!supplier) throw Error("Pilih Supplier / SPB terlebih dahulu.");
 
+  const period=findPasteDetailPeriod(text);
   const transactions=[];
-  const unassignedRows=[];
   let declaredTotal=null;
   let purchaseDeclared=null;
   let ignored=0;
@@ -3501,8 +3521,6 @@ function parsePastedDetailTable(text,kp,supplier){
     }
 
     if(/^TOTAL\b/i.test(first)){
-      // In copied Markdown generated from the internal system,
-      // the first numeric cell after TOTAL is tonnage, next large Rp value is purchase total.
       const nums=cells.slice(1).map(detailPasteNumber).filter(n=>n>0);
       if(nums.length) declaredTotal=nums[0];
       const rpCell=cells.slice(1).find(v=>/Rp/i.test(v));
@@ -3514,7 +3532,6 @@ function parsePastedDetailTable(text,kp,supplier){
       ignored++;
       continue;
     }
-
     if(cells.length<8){
       ignored++;
       continue;
@@ -3535,7 +3552,10 @@ function parsePastedDetailTable(text,kp,supplier){
       continue;
     }
 
-    const base={
+    const row={
+      report_date:date||null,
+      period_start:period?.start||null,
+      period_end:period?.end||null,
       kp_code:kp,
       supplier_name:supplier,
       sequence_no:sequence,
@@ -3546,54 +3566,93 @@ function parsePastedDetailTable(text,kp,supplier){
       price_per_kg:price||null,
       purchase_value:purchase||null,
       payment_method:payment,
+      payment_status:date?"paid":"hold",
+      trip_count:1,
       raw_line:String(rawLine||"").trim(),
       source_type:"paste_detail"
     };
-
-    if(!date){
-      unassignedRows.push({...base,report_date:null,trip_count:1});
-      continue;
-    }
-
-    const row={...base,report_date:date,trip_count:1};
-    row.transaction_key=detailTransactionKey(row);
+    row.stable_key=detailStableKey(row);
+    row.transaction_key=row.stable_key;
     transactions.push(row);
   }
 
-  if(!transactions.length && !unassignedRows.length){
+  if(!transactions.length){
     throw Error("Tidak ada baris transaksi detail yang berhasil dibaca.");
   }
 
+  const paidTransactions=transactions.filter(r=>r.payment_status==="paid");
+  const holdTransactions=transactions.filter(r=>r.payment_status==="hold");
   const totalKg=transactions.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const paidKg=paidTransactions.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const holdKg=holdTransactions.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
   const purchaseTotal=transactions.reduce((a,r)=>a+Number(r.purchase_value||0),0);
-  const dates=transactions.map(r=>r.report_date).sort();
+  const dates=paidTransactions.map(r=>r.report_date).filter(Boolean).sort();
 
   return {
-    kp,supplier,transactions,unassignedRows,
-    totalKg,purchaseTotal,declaredTotal,purchaseDeclared,
+    kp,supplier,period,
+    transactions,paidTransactions,holdTransactions,
+    totalKg,paidKg,holdKg,purchaseTotal,declaredTotal,purchaseDeclared,
     integrityOk:declaredTotal==null || declaredTotal===totalKg,
     purchaseIntegrityOk:purchaseDeclared==null || purchaseDeclared===purchaseTotal,
     ignored,
-    startDate:dates[0]||null,
-    endDate:dates[dates.length-1]||null
+    startDate:period?.start || dates[0] || null,
+    endDate:period?.end || dates[dates.length-1] || null
   };
 }
 
-async function fetchExistingDetailTransactions(transactions){
-  const keys=[...new Set((transactions||[]).map(r=>r.transaction_key).filter(Boolean))];
-  if(!keys.length) return new Set();
+async function fetchExistingDetailStableRows(transactions){
+  const keys=[...new Set((transactions||[]).map(r=>r.stable_key).filter(Boolean))];
+  if(!keys.length) return new Map();
 
-  const found=new Set();
+  const found=new Map();
   const chunkSize=150;
   for(let i=0;i<keys.length;i+=chunkSize){
     const chunk=keys.slice(i,i+chunkSize);
     const {data,error}=await db.from("tonnage_detail_transactions")
-      .select("transaction_key")
-      .in("transaction_key",chunk);
+      .select("stable_key,report_date,payment_status,proof_no,tonnage_kg,vehicle_plate,agent_name")
+      .in("stable_key",chunk);
     if(error) throw Error("Gagal memeriksa double transaksi detail: "+error.message);
-    (data||[]).forEach(r=>found.add(r.transaction_key));
+    (data||[]).forEach(r=>found.set(r.stable_key,r));
   }
   return found;
+}
+
+async function comparePasteDetailPeriodToClosing(parsed){
+  if(!parsed.startDate || !parsed.endDate){
+    throw Error("Periode laporan tidak terdeteksi. Pastikan baris 'Tanggal ... s.d ...' ikut dicopy.");
+  }
+
+  let q=db.from("kp_daily_history")
+    .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count,source_file")
+    .gte("report_date",parsed.startDate)
+    .lte("report_date",parsed.endDate)
+    .eq("kp_code",parsed.kp)
+    .eq("supplier_name",parsed.supplier)
+    .order("report_date",{ascending:true});
+
+  const {data,error}=await q;
+  if(error) throw Error("Gagal membaca Closing Harian untuk rekonsiliasi: "+error.message);
+
+  const canonical=summarizeClosingHistory(data||[]).selected;
+  const closingTotal=canonical.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const closingTrips=canonical.reduce((a,r)=>a+Number(r.trip_count||0),0);
+  const closingDays=new Set(canonical.map(r=>r.report_date)).size;
+
+  return {
+    closingRows:canonical,
+    closingTotal,
+    closingTrips,
+    closingDays,
+    correctionKg:Number(parsed.totalKg||0)-closingTotal,
+    correctionTrips:Number(parsed.transactions.length||0)-closingTrips,
+    sourceLabel:canonical.length?closingSourceLabelForRows(canonical):"Belum ada Closing"
+  };
+}
+
+
+async function fetchExistingDetailTransactions(transactions){
+  const found=await fetchExistingDetailStableRows(transactions);
+  return new Set(found.keys());
 }
 
 function pastedDetailToDaily(parsed){
@@ -3644,7 +3703,129 @@ async function savePastedDetailFinal(){
       "Klik 'Preview Audit Paste Detail', periksa hasil audit, lalu tombol Simpan Paste sebagai FINAL akan aktif."
     );
   }
-  await saveMonthlyExcel();
+  if(p.finalBlocked){
+    return alert("SIMPAN FINAL DIBLOKIR.\n\nPerbaiki masalah integritas pada Preview terlebih dahulu.");
+  }
+
+  const parsed=p.parsedDetail;
+  const rec=p.reconciliation;
+  if(!parsed?.period){
+    return alert("SIMPAN FINAL DIBLOKIR.\n\nPeriode laporan tidak terdeteksi.");
+  }
+
+  // Recheck operational Closing immediately before save.
+  let latestRec;
+  try{
+    latestRec=await comparePasteDetailPeriodToClosing(parsed);
+  }catch(e){
+    return alert(e.message);
+  }
+
+  const ok=confirm(
+    "KONFIRMASI SIMPAN PASTE FINAL\n\n"+
+    `KP / Supplier      : ${parsed.kp} / ${parsed.supplier}\n`+
+    `Periode            : ${parsed.startDate} s.d. ${parsed.endDate}\n`+
+    `Total Paste Final  : ${kg(parsed.totalKg)}\n`+
+    `PAID               : ${kg(parsed.paidKg)} / ${parsed.paidTransactions.length} trip\n`+
+    `HOLD               : ${kg(parsed.holdKg)} / ${parsed.holdTransactions.length} trip\n`+
+    `Akumulasi Closing  : ${kg(latestRec.closingTotal)}\n`+
+    `Koreksi Otomatis   : ${latestRec.correctionKg>=0?"+":""}${kg(latestRec.correctionKg)}\n\n`+
+    "Paste Final tidak akan mengganti tanggal Closing Harian.\n"+
+    "Koreksi disimpan di level periode agar tidak membuat tanggal transaksi palsu.\n\n"+
+    "Klik OK untuk menyimpan."
+  );
+  if(!ok) return;
+
+  const chunkSize=300;
+  let detailWritten=0;
+
+  const detailRows=(parsed.transactions||[]).map(r=>({
+    report_date:r.report_date,
+    period_start:parsed.startDate,
+    period_end:parsed.endDate,
+    kp_code:r.kp_code,
+    supplier_name:r.supplier_name,
+    sequence_no:r.sequence_no,
+    proof_no:r.proof_no,
+    vehicle_plate:r.vehicle_plate,
+    agent_name:r.agent_name,
+    tonnage_kg:r.tonnage_kg,
+    price_per_kg:r.price_per_kg,
+    purchase_value:r.purchase_value,
+    payment_method:r.payment_method,
+    payment_status:r.payment_status,
+    stable_key:r.stable_key,
+    transaction_key:r.stable_key,
+    raw_line:r.raw_line,
+    source_type:"paste_detail"
+  }));
+
+  for(let i=0;i<detailRows.length;i+=chunkSize){
+    const chunk=detailRows.slice(i,i+chunkSize);
+    const {data,error}=await db.from("tonnage_detail_transactions")
+      .upsert(chunk,{onConflict:"stable_key"})
+      .select("id");
+    if(error) return alert("Gagal menyimpan detail transaksi:\n"+error.message);
+    detailWritten+=data?.length||chunk.length;
+  }
+
+  const recPayload={
+    period_start:parsed.startDate,
+    period_end:parsed.endDate,
+    kp_code:parsed.kp,
+    supplier_name:parsed.supplier,
+    paste_total_kg:parsed.totalKg,
+    paste_trip_count:parsed.transactions.length,
+    paid_tonnage_kg:parsed.paidKg,
+    paid_trip_count:parsed.paidTransactions.length,
+    hold_tonnage_kg:parsed.holdKg,
+    hold_trip_count:parsed.holdTransactions.length,
+    closing_total_kg:latestRec.closingTotal,
+    closing_trip_count:latestRec.closingTrips,
+    reconciliation_kg:latestRec.correctionKg,
+    reconciliation_trip_count:latestRec.correctionTrips,
+    source_type:"paste_detail",
+    raw_text:p.rawPaste,
+    updated_at:new Date().toISOString()
+  };
+
+  const {error:recError}=await db.from("tonnage_period_reconciliation")
+    .upsert(recPayload,{onConflict:"period_start,kp_code,supplier_name"});
+  if(recError){
+    return alert(
+      "Detail transaksi sudah tersimpan, tetapi Rekonsiliasi Periode gagal disimpan.\n\n"+
+      recError.message
+    );
+  }
+
+  alert(
+    `PASTE DETAIL FINAL BERHASIL DISIMPAN ✓\n\n`+
+    `Total Final       : ${kg(parsed.totalKg)}\n`+
+    `Trip              : ${parsed.transactions.length}\n`+
+    `PAID              : ${kg(parsed.paidKg)} / ${parsed.paidTransactions.length} trip\n`+
+    `HOLD              : ${kg(parsed.holdKg)} / ${parsed.holdTransactions.length} trip\n`+
+    `Akumulasi Closing : ${kg(latestRec.closingTotal)}\n`+
+    `Koreksi Otomatis  : ${latestRec.correctionKg>=0?"+":""}${kg(latestRec.correctionKg)}\n`+
+    `Detail tersimpan  : ${detailWritten}\n\n`+
+    `Closing Harian tidak diubah. Total Bulanan memakai Paste Final + rekonsiliasi periode.`
+  );
+
+  MONTHLY_EXCEL_PREVIEW=null;
+  if($("pasteDetailText")) $("pasteDetailText").value="";
+  setPasteDetailSaveState(false);
+  if($("monthlyConflictSummary")){
+    $("monthlyConflictSummary").textContent="Belum ada hasil pemeriksaan.";
+    $("monthlyConflictSummary").className="monthly-conflict-summary";
+  }
+  if($("monthlyFinalAuditBar")) $("monthlyFinalAuditBar").classList.remove("visible");
+  if($("monthlyConflictResolution")) $("monthlyConflictResolution").classList.remove("visible");
+  $("monthlyExcelPreview").textContent="Belum ada data final dipreview.";
+
+  await loadKPMonthlyPanel($("monitorKp")?.value||parsed.kp);
+  if($("monitorRangeStart")?.value && $("monitorRangeEnd")?.value){
+    await loadMonitorRangeDetail();
+  }
+  await loadDashboard();
 }
 
 async function previewPastedDetail(){
@@ -3657,22 +3838,34 @@ async function previewPastedDetail(){
     const kp=$("pasteDetailKp")?.value||"";
     const supplier=$("pasteDetailSupplier")?.value||"";
     const parsed=parsePastedDetailTable(raw,kp,supplier);
-    const daily=pastedDetailToDaily(parsed);
 
-    $("monthlyExcelPreview").textContent="Membaca Paste Detail dan menjalankan Preview Audit...";
+    $("monthlyExcelPreview").textContent="Membaca Paste Detail dan merekonsiliasi Total Periode vs Closing Harian...";
 
-    const [existingDetailKeys,validation,conflictCheck]=await Promise.all([
-      fetchExistingDetailTransactions(parsed.transactions),
-      validateMonthlyAgainstAnnual(daily),
-      checkMonthlyConflicts(daily)
+    const [existingStable,reconciliation]=await Promise.all([
+      fetchExistingDetailStableRows(parsed.transactions),
+      comparePasteDetailPeriodToClosing(parsed)
     ]);
 
-    const exactDuplicateCount=parsed.transactions.filter(r=>existingDetailKeys.has(r.transaction_key)).length;
-    const exactNewCount=parsed.transactions.length-exactDuplicateCount;
-    const integrityBlocked=(!parsed.integrityOk || !parsed.purchaseIntegrityOk)
+    let exactDuplicateCount=0;
+    let holdToPaidCount=0;
+    let updateCount=0;
+    parsed.transactions.forEach(r=>{
+      const old=existingStable.get(r.stable_key);
+      if(!old) return;
+      const sameStatus=String(old.payment_status||"")==String(r.payment_status||"");
+      const sameDate=(old.report_date||null)===(r.report_date||null);
+      if(sameStatus && sameDate) exactDuplicateCount++;
+      else{
+        updateCount++;
+        if(old.payment_status==="hold" && r.payment_status==="paid") holdToPaidCount++;
+      }
+    });
+
+    const integrityBlocked=(!parsed.integrityOk || !parsed.purchaseIntegrityOk || !parsed.period)
       ? [{
           fileName:"PASTE DETAIL",
           integrityIssues:[
+            !parsed.period ? "Periode laporan tidak terdeteksi" : null,
             !parsed.integrityOk
               ? `Total tonase transaksi ${kg(parsed.totalKg)} ≠ Total laporan ${kg(parsed.declaredTotal)}`
               : null,
@@ -3683,79 +3876,115 @@ async function previewPastedDetail(){
         }]
       : [];
 
-    const finalBlocked=integrityBlocked.length>0 || parsed.unassignedRows.length>0;
+    const finalBlocked=integrityBlocked.length>0;
 
     MONTHLY_EXCEL_PREVIEW={
       files:["PASTE DETAIL SISTEM INTERNAL"],
-      daily,
-      unassignedRows:parsed.unassignedRows,
-      unassignedTonnage:parsed.unassignedRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0),
+      daily:[],
+      unassignedRows:[],
+      unassignedTonnage:0,
       declaredTotalKg:parsed.declaredTotal ?? parsed.totalKg,
       fileResults:[],
-      validation,
+      validation:[],
       integrityBlocked,
-      conflictCheck,
+      conflictCheck:{fresh:[],same:[],conflicts:[],checked:true},
       finalBlocked,
       conflictDecisions:{},
-      conflictSignature:monthlyConflictSignature(conflictCheck),
+      conflictSignature:"",
       sourceMode:"paste_detail",
       detailTransactions:parsed.transactions,
-      detailDuplicateKeys:existingDetailKeys,
       detailDuplicateCount:exactDuplicateCount,
-      detailNewCount:exactNewCount,
+      detailNewCount:parsed.transactions.length-existingStable.size,
+      detailUpdateCount:updateCount,
+      holdToPaidCount,
       detailPurchaseTotal:parsed.purchaseTotal,
       detailPurchaseDeclared:parsed.purchaseDeclared,
+      parsedDetail:parsed,
+      reconciliation,
       rawPaste:raw
     };
-    initMonthlyConflictDecisions(MONTHLY_EXCEL_PREVIEW,{reset:true});
 
-    const totals=monthlyConflictTotals(conflictCheck);
-    const status=finalBlocked
-      ? "FINAL DIBLOKIR"
-      : conflictCheck.conflicts.length
-        ? "REVIEW KONFLIK"
-        : "SIAP FINAL";
+    const status=finalBlocked ? "FINAL DIBLOKIR" : "SIAP FINAL";
+    const corr=reconciliation.correctionKg;
+    const corrTrip=reconciliation.correctionTrips;
+    const corrLabel=corr===0
+      ? "COCOK ✓"
+      : corr>0
+        ? `KEKURANGAN CLOSING ${kg(corr)}`
+        : `CLOSING LEBIH BESAR ${kg(Math.abs(corr))}`;
 
     $("monthlyExcelPreview").textContent=
       `SUMBER: PASTE DETAIL SISTEM INTERNAL\n`+
       `STATUS: ${status}\n`+
       `KP / Supplier: ${kp} / ${supplier}\n`+
-      `Periode: ${parsed.startDate||"-"} s.d. ${parsed.endDate||"-"}\n`+
-      `Transaksi terbaca: ${parsed.transactions.length}\n`+
-      `Trip: ${parsed.transactions.length}\n`+
+      `Periode: ${parsed.startDate||"-"} s.d. ${parsed.endDate||"-"}\n\n`+
+
+      `TOTAL FINAL PASTE\n`+
+      `Transaksi / Trip: ${parsed.transactions.length}\n`+
       `Total tonase: ${kg(parsed.totalKg)}\n`+
       `TOTAL laporan: ${parsed.declaredTotal==null?"tidak ditemukan":kg(parsed.declaredTotal)} ${parsed.integrityOk?"✓":"✕"}\n`+
       `Nilai pembelian: ${rupiah(parsed.purchaseTotal)}\n`+
-      `TOTAL nilai laporan: ${parsed.purchaseDeclared==null?"tidak ditemukan":rupiah(parsed.purchaseDeclared)} ${parsed.purchaseIntegrityOk?"✓":"✕"}\n`+
-      `Double transaksi persis: ${exactDuplicateCount}\n`+
-      `Transaksi baru: ${exactNewCount}\n`+
-      `Tanpa tanggal: ${parsed.unassignedRows.length}\n`+
-      `Baris diabaikan: ${parsed.ignored}\n\n`+
-      `AUDIT AGREGAT HARIAN\n`+
-      `Data baru: ${conflictCheck.fresh.length}\n`+
-      `Sama: ${conflictCheck.same.length}\n`+
-      `Konflik: ${conflictCheck.conflicts.length}\n`+
-      `Nilai overlap sistem: ${kg(totals.sameKg+totals.conflictExistingKg)}\n`+
-      `Selisih konflik: ${totals.conflictDiffKg>=0?"+":""}${kg(totals.conflictDiffKg)}\n\n`+
-      formatMonthlyConflictPreview(conflictCheck);
+      `TOTAL nilai laporan: ${parsed.purchaseDeclared==null?"tidak ditemukan":rupiah(parsed.purchaseDeclared)} ${parsed.purchaseIntegrityOk?"✓":"✕"}\n\n`+
 
-    if(parsed.unassignedRows.length){
-      $("monthlyExcelPreview").textContent+=
-        `\n\n✕ ${parsed.unassignedRows.length} transaksi tanpa tanggal — Simpan Final diblokir.`;
-    }
+      `STATUS PEMBAYARAN\n`+
+      `PAID / bertanggal: ${parsed.paidTransactions.length} trip • ${kg(parsed.paidKg)}\n`+
+      `HOLD / tanggal kosong: ${parsed.holdTransactions.length} trip • ${kg(parsed.holdKg)}\n`+
+      `Catatan: HOLD tetap dihitung dalam Total Final, tetapi tidak dialokasikan ke tanggal Closing.\n\n`+
+
+      `ANTI-DOUBLE DETAIL\n`+
+      `Sudah sama: ${exactDuplicateCount}\n`+
+      `Transaksi baru: ${parsed.transactions.length-existingStable.size}\n`+
+      `Data diperbarui: ${updateCount}\n`+
+      `HOLD → PAID: ${holdToPaidCount}\n\n`+
+
+      `REKONSILIASI OTOMATIS PERIODE\n`+
+      `Total Paste Final: ${kg(parsed.totalKg)}\n`+
+      `Akumulasi Closing: ${kg(reconciliation.closingTotal)}\n`+
+      `Closing tersedia: ${reconciliation.closingDays} hari\n`+
+      `Sumber Closing: ${reconciliation.sourceLabel}\n`+
+      `Koreksi Otomatis: ${corr>=0?"+":""}${kg(corr)}\n`+
+      `Koreksi Trip: ${corrTrip>=0?"+":""}${corrTrip}\n`+
+      `STATUS REKONSILIASI: ${corrLabel}\n\n`+
+      `PENTING: Koreksi periode TIDAK ditempelkan ke tanggal harian tertentu. `+
+      `Closing WA tetap menjadi distribusi operasional harian; Paste Detail menjadi Total Final periode.`;
 
     if($("monthlyConflictSummary")){
       $("monthlyConflictSummary").textContent=finalBlocked
-        ? `✕ FINAL DIBLOKIR • ${parsed.unassignedRows.length} tanpa tanggal • ${integrityBlocked.length} gagal integritas`
-        : conflictCheck.conflicts.length
-          ? `⚠ ${conflictCheck.conflicts.length} konflik • putuskan di Conflict Resolution Panel`
-          : `✓ Siap FINAL • ${exactDuplicateCount} transaksi double persis terdeteksi`;
+        ? `✕ FINAL DIBLOKIR • ${integrityBlocked.length} masalah integritas`
+        : corr===0
+          ? `✓ COCOK • Paste Final = Akumulasi Closing`
+          : corr>0
+            ? `✓ SIAP FINAL • Koreksi otomatis +${kg(corr)} karena Closing masih kurang`
+            : `⚠ SIAP FINAL • Closing melebihi Paste ${kg(Math.abs(corr))} — tersimpan sebagai rekonsiliasi negatif`;
       $("monthlyConflictSummary").className=
-        "monthly-conflict-summary "+(finalBlocked?"has-error":conflictCheck.conflicts.length?"has-conflict":"is-safe");
+        "monthly-conflict-summary "+(finalBlocked?"has-error":corr===0?"is-safe":"has-conflict");
     }
 
+    // Reuse audit cards but do not show per-date Conflict Resolution for Paste Detail.
     renderMonthlyFinalAuditBar(MONTHLY_EXCEL_PREVIEW);
-    setPasteDetailSaveState(true);
+    if($("monthlyConflictResolution")) $("monthlyConflictResolution").classList.remove("visible");
+
+    setMonthlyAuditCard("monthlyAuditFinalTotal",kg(parsed.totalKg),"Total Final Paste termasuk HOLD",finalBlocked?"audit-warn":"audit-safe");
+    setMonthlyAuditCard("monthlyAuditDated",kg(parsed.paidKg),`${parsed.paidTransactions.length} trip PAID / bertanggal`,"audit-info");
+    setMonthlyAuditCard("monthlyAuditExisting",kg(reconciliation.closingTotal),`${reconciliation.closingDays} hari Closing operasional`,"audit-info");
+    setMonthlyAuditCard(
+      "monthlyAuditDifference",
+      `${corr>=0?"+":""}${kg(corr)}`,
+      corr===0?"Cocok":corr>0?"Kekurangan Closing → Koreksi otomatis":"Closing lebih besar dari Paste",
+      corr===0?"audit-safe":"audit-warn"
+    );
+    setMonthlyAuditCard("monthlyAuditDuplicate",`${exactDuplicateCount}`,`${parsed.transactions.length-existingStable.size} baru • ${updateCount} update`,"audit-safe");
+    setMonthlyAuditCard("monthlyAuditConflict","0","Konflik tanggal tidak dipakai untuk Paste Detail","audit-safe");
+    setMonthlyAuditCard("monthlyAuditUnassigned",`${parsed.holdTransactions.length}`,`${kg(parsed.holdKg)} HOLD • tetap dihitung Final`,"audit-info");
+
+    if($("monthlyFinalStatus")){
+      $("monthlyFinalStatus").textContent=finalBlocked
+        ? "FINAL DIBLOKIR — periksa integritas"
+        : "SIAP FINAL — rekonsiliasi periode";
+      $("monthlyFinalStatus").className="monthly-final-status "+(finalBlocked?"blocked":"ready");
+    }
+
+    setPasteDetailSaveState(!finalBlocked);
   }catch(e){
     MONTHLY_EXCEL_PREVIEW=null;
     $("monthlyExcelPreview").textContent="ERROR PASTE DETAIL: "+e.message;
@@ -5674,6 +5903,104 @@ function setYearlyPanelSummary({kp,period,tonnage,coverage,tonnageSub,coverageSu
   $("yearlyKpiCoverage").textContent=coverage;
   $("yearlyKpiCoverageSub").textContent=coverageSub||"-";
 }
+
+async function getMonthlyPasteReconciliations(kp,monthStart,monthEnd){
+  let q=db.from("tonnage_period_reconciliation")
+    .select("period_start,period_end,kp_code,supplier_name,paste_total_kg,paste_trip_count,paid_tonnage_kg,paid_trip_count,hold_tonnage_kg,hold_trip_count,closing_total_kg,closing_trip_count,reconciliation_kg,reconciliation_trip_count,source_type,updated_at")
+    .eq("period_start",monthStart)
+    .lte("period_end",monthEnd)
+    .order("period_end",{ascending:false});
+  if(kp!=="ALL") q=q.eq("kp_code",kp);
+  const {data,error}=await q;
+  if(error){
+    console.error("tonnage_period_reconciliation:",error);
+    return [];
+  }
+
+  // Latest period_end per KP + supplier.
+  const latest=new Map();
+  (data||[]).forEach(r=>{
+    const key=`${r.kp_code}|${String(r.supplier_name||"ALL").toUpperCase()}`;
+    if(!latest.has(key)) latest.set(key,r);
+  });
+  return [...latest.values()];
+}
+
+function monthlyFinalWithReconciliation(closingRows,recs,monthEnd){
+  const selected=summarizeClosingHistory(closingRows||[]).selected;
+  const recByKey=new Map((recs||[]).map(r=>[
+    `${r.kp_code}|${String(r.supplier_name||"ALL").toUpperCase()}`,r
+  ]));
+
+  const closingByKey=new Map();
+  selected.forEach(r=>{
+    const key=`${r.kp_code}|${String(r.supplier_name||"ALL").toUpperCase()}`;
+    if(!closingByKey.has(key)) closingByKey.set(key,[]);
+    closingByKey.get(key).push(r);
+  });
+
+  const allKeys=new Set([...closingByKey.keys(),...recByKey.keys()]);
+  let total=0,trips=0,holdKg=0,holdTrips=0,correctionKg=0,correctionTrips=0;
+  const detail=[];
+
+  allKeys.forEach(key=>{
+    const closing=closingByKey.get(key)||[];
+    const rec=recByKey.get(key)||null;
+    const [kpCode,supplierKey]=key.split("|");
+
+    if(rec){
+      const afterRows=closing.filter(r=>r.report_date>rec.period_end && r.report_date<=monthEnd);
+      const afterKg=afterRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+      const afterTrips=afterRows.reduce((a,r)=>a+Number(r.trip_count||0),0);
+      const finalKg=Number(rec.paste_total_kg||0)+afterKg;
+      const finalTrips=Number(rec.paste_trip_count||0)+afterTrips;
+
+      total+=finalKg;
+      trips+=finalTrips;
+      holdKg+=Number(rec.hold_tonnage_kg||0);
+      holdTrips+=Number(rec.hold_trip_count||0);
+      correctionKg+=Number(rec.reconciliation_kg||0);
+      correctionTrips+=Number(rec.reconciliation_trip_count||0);
+
+      detail.push({
+        kp_code:rec.kp_code,
+        supplier_name:rec.supplier_name,
+        period_end:rec.period_end,
+        final_kg:finalKg,
+        final_trips:finalTrips,
+        paste_kg:Number(rec.paste_total_kg||0),
+        after_kg:afterKg,
+        hold_kg:Number(rec.hold_tonnage_kg||0),
+        hold_trips:Number(rec.hold_trip_count||0),
+        correction_kg:Number(rec.reconciliation_kg||0),
+        source:"Paste Detail Final"
+      });
+    }else{
+      const kgTotal=closing.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+      const tripTotal=closing.reduce((a,r)=>a+Number(r.trip_count||0),0);
+      total+=kgTotal;
+      trips+=tripTotal;
+      if(closing.length){
+        detail.push({
+          kp_code:kpCode,
+          supplier_name:closing[0].supplier_name||supplierKey,
+          period_end:null,
+          final_kg:kgTotal,
+          final_trips:tripTotal,
+          paste_kg:0,
+          after_kg:0,
+          hold_kg:0,
+          hold_trips:0,
+          correction_kg:0,
+          source:"Closing Sementara"
+        });
+      }
+    }
+  });
+
+  return {total,trips,holdKg,holdTrips,correctionKg,correctionTrips,detail};
+}
+
 async function loadKPMonthlyPanel(kp){
   const month=$("monitorMonth").value;
   if(!month) return;
@@ -5686,85 +6013,112 @@ async function loadKPMonthlyPanel(kp){
     .order("report_date",{ascending:true});
   if(kp!=="ALL") dq=dq.eq("kp_code",kp);
 
-  const {data:daily,error:de}=await dq;
+  const [{data:daily,error:de},recs]=await Promise.all([
+    dq,
+    getMonthlyPasteReconciliations(kp,start,end)
+  ]);
+
   if(de){
     resetPlotContainer("monthlyMonitorChart");
     $("monthlyMonitorChart").innerHTML=`<div class="chart-empty-state">${de.message}</div>`;
     return;
   }
 
-  if(daily?.length){
-    const closing=summarizeClosingHistory(daily);
+  if((daily?.length) || recs.length){
+    const closing=summarizeClosingHistory(daily||[]);
     const byDate=closing.byDate;
     const dates=Object.keys(byDate).sort();
     const vals=dates.map(d=>byDate[d].tonnage);
-    const total=vals.reduce((a,b)=>a+b,0);
-    const trips=dates.reduce((a,d)=>a+byDate[d].trips,0);
-    const avg=dates.length?total/dates.length:0;
-    const sourceSet=new Set(dates.map(d=>byDate[d].sourceLabel));
-    const monthSource=sourceSet.size===1?[...sourceSet][0]:"Sumber Campuran";
+    const finalMonth=monthlyFinalWithReconciliation(daily||[],recs,end);
 
-    const finalDates=dates.filter(d=>{
-      const s=byDate[d].sourceLabel||"";
-      return s.includes("Paste Detail Final") || s.includes("Excel Final") || s.includes("Audit Resmi") || s.includes("Closing Excel");
-    });
-    const temporaryDates=dates.filter(d=>!finalDates.includes(d));
-    const monthlyStatus=
-      dates.length && finalDates.length===dates.length
-        ? "FINAL EXCEL"
-        : finalDates.length
-          ? "FINAL + SEMENTARA"
-          : "SEMENTARA";
+    const closingTotal=vals.reduce((a,b)=>a+b,0);
+    const closingTrips=dates.reduce((a,d)=>a+byDate[d].trips,0);
+    const total=finalMonth.total;
+    const trips=finalMonth.trips;
+    const avg=dates.length?closingTotal/dates.length:0;
+
+    const monthlyStatus=recs.length
+      ? (finalMonth.detail.some(r=>r.source==="Closing Sementara") ? "FINAL + SEMENTARA" : "FINAL PASTE")
+      : "SEMENTARA";
 
     const monthlyExpense=await getMonitorExpenseSummary(kp,"monthly");
     setMonitorPeriodBusinessKpis({
       kp,mode:"monthly",tonnage:total,trips,
-      tonnageSource:monthSource,expense:monthlyExpense
+      tonnageSource:recs.length?"Paste Detail Final + Closing":"Closing Harian",
+      expense:monthlyExpense
     });
     await loadMonitorKpPeriodTable("monthly",kp);
 
     setMonthlyPanelSummary({
       kp,period:monthLabelId(month),tonnage:total,trips,
-      coverage:`${dates.length} hari`,
-      tonnageSub:`${monthlyStatus} • rata-rata ${kg(avg)} / hari`,
-      tripsSub:`${finalDates.length} hari final • ${temporaryDates.length} hari sementara`,
-      coverageSub:`Final ${finalDates.length} hari • Sementara ${temporaryDates.length} hari`
+      coverage:`${dates.length} hari Closing`,
+      tonnageSub:recs.length
+        ? `${monthlyStatus} • Koreksi periode ${finalMonth.correctionKg>=0?"+":""}${kg(finalMonth.correctionKg)}`
+        : `SEMENTARA • rata-rata Closing ${kg(avg)} / hari`,
+      tripsSub:recs.length
+        ? `HOLD ${finalMonth.holdTrips} trip / ${kg(finalMonth.holdKg)}`
+        : `${closingTrips} trip Closing`,
+      coverageSub:recs.length
+        ? `${recs.length} supplier memiliki Paste Final`
+        : "Belum ada Paste Final"
     });
 
     if($("monthlySourceBadge")){
       $("monthlySourceBadge").textContent=monthlyStatus;
       $("monthlySourceBadge").className=
-        "monitor-source-badge "+(monthlyStatus==="FINAL EXCEL"?"final-source":monthlyStatus==="SEMENTARA"?"temporary-source":"mixed-source");
+        "monitor-source-badge "+(monthlyStatus==="FINAL PASTE"?"final-source":monthlyStatus==="SEMENTARA"?"temporary-source":"mixed-source");
     }
 
     resetPlotContainer("monthlyMonitorChart");
-    Plotly.newPlot("monthlyMonitorChart",[{
-      x:dates.map(d=>d.slice(8,10)),
-      y:vals,type:"bar",
-      text:vals.map(v=>compactKg(v)),
-      textposition:"outside",
-      cliponaxis:false,
-      marker:{color:"#49de5f"},
-      customdata:dates.map(d=>[byDate[d].trips,byDate[d].kpCount,byDate[d].sourceLabel]),
-      hovertemplate:"Tanggal %{x}<br>%{y:,.0f} kg<br>%{customdata[0]} trip<br>%{customdata[1]} KP<br>%{customdata[2]}<extra></extra>"
-    }],{
-      ...darkLayout,
-      margin:{t:28,l:58,r:18,b:42},
-      xaxis:{...darkLayout.xaxis,fixedrange:true},
-      yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
-      showlegend:false
-    },plotConfig);
+    if(dates.length){
+      Plotly.newPlot("monthlyMonitorChart",[{
+        x:dates.map(d=>d.slice(8,10)),
+        y:vals,type:"bar",
+        text:vals.map(v=>compactKg(v)),
+        textposition:"outside",
+        cliponaxis:false,
+        marker:{color:"#49de5f"},
+        customdata:dates.map(d=>[byDate[d].trips,byDate[d].kpCount,byDate[d].sourceLabel]),
+        hovertemplate:"Tanggal %{x}<br>%{y:,.0f} kg<br>%{customdata[0]} trip<br>%{customdata[1]} KP<br>%{customdata[2]}<extra></extra>"
+      }],{
+        ...darkLayout,
+        margin:{t:28,l:58,r:18,b:42},
+        xaxis:{...darkLayout.xaxis,fixedrange:true},
+        yaxis:{...darkLayout.yaxis,rangemode:"tozero",tickformat:"~s",fixedrange:true},
+        showlegend:false
+      },plotConfig);
+    }else{
+      $("monthlyMonitorChart").innerHTML="<div class='chart-empty-state'>Paste Final tersedia, tetapi belum ada distribusi Closing Harian.</div>";
+    }
 
-    $("monthlyMonitorTable").innerHTML=table(
-      ["Tanggal","Closing Tonase","Trip","KP","Sumber"],
-      dates.map(d=>[
-        d,
-        kg(byDate[d].tonnage),
-        byDate[d].trips,
-        kp==="ALL"?`${byDate[d].kpCount} KP`:kp,
-        byDate[d].sourceLabel
-      ])
-    );
+    const dateRows=dates.map(d=>[
+      d,
+      kg(byDate[d].tonnage),
+      byDate[d].trips,
+      kp==="ALL"?`${byDate[d].kpCount} KP`:kp,
+      byDate[d].sourceLabel
+    ]);
+
+    const recRows=finalMonth.detail
+      .filter(r=>r.source==="Paste Detail Final")
+      .map(r=>[
+        `KOREKSI s.d. ${r.period_end}`,
+        `${r.kp_code}/${r.supplier_name}`,
+        kg(r.final_kg),
+        `${r.final_trips} trip`,
+        `${r.correction_kg>=0?"+":""}${kg(r.correction_kg)}`,
+        `${kg(r.hold_kg)} / ${r.hold_trips} HOLD`,
+        "Paste Detail Final"
+      ]);
+
+    $("monthlyMonitorTable").innerHTML=
+      (dateRows.length
+        ? table(["Tanggal","Closing Tonase","Trip","KP","Sumber"],dateRows)
+        : "")+
+      (recRows.length
+        ? `<div class="monthly-reconciliation-table-title">REKONSILIASI FINAL PERIODE</div>`+
+          table(["Periode","KP / Supplier","Total Final","Trip Final","Koreksi vs Closing","HOLD","Sumber"],recRows)
+        : "");
     return;
   }
 
@@ -5788,7 +6142,7 @@ async function loadKPMonthlyPanel(kp){
     kp,period:monthLabelId(month),tonnage:total,trips:null,
     coverage:`${rows.length} KP`,
     tonnageSub:rows.length?"Summary bulanan tersedia":"Belum ada data",
-    tripsSub:"Upload/paste closing harian untuk trip",
+    tripsSub:"Paste detail atau Closing harian untuk trip",
     coverageSub:rows.length?"Data summary":"Belum ada data"
   });
 
@@ -5796,7 +6150,7 @@ async function loadKPMonthlyPanel(kp){
 
   if(!rows.length){
     resetPlotContainer("monthlyMonitorChart");
-    $("monthlyMonitorChart").innerHTML="<div class='chart-empty-state'>Belum ada data. Paste Closing WhatsApp atau Upload Excel Bulanan.</div>";
+    $("monthlyMonitorChart").innerHTML="<div class='chart-empty-state'>Belum ada data. Paste Closing WhatsApp, Paste Detail, atau Upload Excel Bulanan.</div>";
     $("monthlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data bulanan"]]);
     return;
   }
@@ -5822,6 +6176,7 @@ async function loadKPMonthlyPanel(kp){
     pairs.map(([code,val])=>[code,kg(val),"Summary Bulanan"])
   );
 }
+
 async function loadKPYearlyPanel(kp){
   const year=Number($("monitorYear").value);
   let q=db.from("historical_summary")
