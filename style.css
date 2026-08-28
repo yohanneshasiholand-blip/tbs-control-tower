@@ -3208,3 +3208,40 @@ table {
   .paste-detail-meta{grid-template-columns:1fr}
   .paste-detail-meta-note{grid-column:auto}
 }
+
+
+/* =========================================================
+   DEDICATED PASTE DETAIL SAVE BUTTON — v4.10.3
+   ========================================================= */
+.paste-detail-action-stack{
+  flex-direction:column;
+  align-items:flex-start;
+}
+.paste-detail-action-buttons{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.paste-detail-save-btn{
+  min-width:215px;
+  transition:opacity .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.paste-detail-save-btn:disabled{
+  opacity:.42;
+  cursor:not-allowed;
+  filter:saturate(.55);
+}
+.paste-detail-save-btn.is-ready{
+  opacity:1;
+  border-color:rgba(112,244,132,.42) !important;
+  box-shadow:0 0 0 1px rgba(112,244,132,.08) inset;
+}
+@media(max-width:560px){
+  .paste-detail-action-buttons{
+    width:100%;
+    flex-direction:column;
+  }
+  .paste-detail-action-buttons .btn{
+    width:100%;
+  }
+}
