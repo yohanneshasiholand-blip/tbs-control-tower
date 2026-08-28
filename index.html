@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.10.3">
+  <link rel="stylesheet" href="style.css?v=4.10.4">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -546,7 +546,7 @@
               <div class="monthly-final-controls">
                 <div class="monthly-final-priority">
                   <strong>ATURAN FINAL</strong>
-                  <span>Excel / Paste Detail = FINAL • Sama = tidak double dan dipromosikan FINAL • Konflik = putuskan per baris • Edit Manual = wajib alasan • Tanpa tanggal = BLOKIR</span>
+                  <span>Excel = final per tanggal • Paste Detail = final per periode • Tanggal bayar kosong = HOLD dan tetap dihitung • Selisih vs Closing = Koreksi Otomatis periode</span>
                 </div>
                 <div id="monthlyConflictSummary" class="monthly-conflict-summary">Belum ada hasil pemeriksaan.</div>
               </div>
@@ -563,7 +563,7 @@
                   <div>
                     <span class="subpanel-kicker">TANPA DOWNLOAD EXCEL</span>
                     <strong>Paste Detail Transaksi dari Sistem Internal</strong>
-                    <small>Copy seluruh tabel transaksi lalu paste di sini. Setiap baris kendaraan = 1 trip.</small>
+                    <small>Copy seluruh tabel transaksi lalu paste di sini. Setiap baris kendaraan = 1 trip. Tanggal bayar kosong dianggap HOLD dan tonase tetap masuk Total Final.</small>
                   </div>
                   <span class="paste-detail-final-badge">FINAL DETAIL</span>
                 </div>
@@ -582,7 +582,7 @@
                     </select>
                   </label>
                   <div class="paste-detail-meta-note">
-                    KP boleh terdeteksi otomatis. Supplier wajib dipastikan jika tidak tertulis jelas di laporan.
+                    KP boleh terdeteksi otomatis. Supplier wajib dipastikan. Paste Detail dibandingkan dengan total Closing periode, bukan dipaksa cocok per Tanggal Bayar.
                   </div>
                 </div>
 
@@ -608,7 +608,7 @@
               <div class="monthly-audit-title-row">
                 <div>
                   <span class="subpanel-kicker">PREVIEW AUDIT SEBELUM SIMPAN</span>
-                  <h4>Data Final — Pemeriksaan Double Input, Selisih & Integritas</h4>
+                  <h4>Data Final — Double Input, HOLD & Rekonsiliasi Periode</h4>
                 </div>
                 <span id="monthlyFinalStatus" class="monthly-final-status">BELUM DIPERIKSA</span>
               </div>
@@ -645,7 +645,7 @@
                   <span data-sub>-</span>
                 </article>
                 <article id="monthlyAuditUnassigned" class="monthly-audit-card">
-                  <small>TANPA TANGGAL</small>
+                  <small>HOLD / BELUM DIBAYAR</small>
                   <strong data-value>0</strong>
                   <span data-sub>-</span>
                 </article>
@@ -660,6 +660,8 @@
                 <small id="monthlyAuditBarLegend">BARU 0 • SAMA 0 • KONFLIK 0</small>
               </div>
             </section>
+
+            <div class="paste-reconciliation-note">Conflict Resolution per tanggal hanya digunakan untuk Excel Final. Paste Detail memakai Rekonsiliasi Total Periode karena Tanggal Bayar dapat berbeda dari tanggal Closing operasional.</div>
 
             <section id="monthlyConflictResolution" class="monthly-conflict-resolution">
               <div class="monthly-resolution-title-row">
@@ -975,6 +977,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.10.3"></script>
+  <script src="app.js?v=4.10.4"></script>
 </body>
 </html>
