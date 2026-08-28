@@ -3087,3 +3087,124 @@ table {
   .monthly-resolution-choice,
   .monthly-manual-fields{grid-template-columns:1fr}
 }
+
+
+/* =========================================================
+   WHATSAPP MONTH-TO-DATE AUDIT — v4.10.1
+   ========================================================= */
+.tonnage-mode-badge.mtd-mode{
+  color:#9bd9ff;
+  border-color:rgba(100,190,255,.40);
+  background:rgba(23,74,112,.25);
+}
+.daily-mtd-system-kpi{
+  border-color:rgba(111,240,130,.28) !important;
+}
+.daily-mtd-system-kpi strong{
+  color:#7ef48d;
+}
+.daily-mtd-wa-kpi{
+  border-color:rgba(108,190,255,.28) !important;
+}
+.daily-mtd-wa-kpi strong{
+  color:#a7ddff;
+}
+
+
+/* =========================================================
+   PASTE DETAIL TRANSACTION FINAL — v4.10.2
+   ========================================================= */
+.paste-detail-final-box{
+  margin-top:11px;
+  padding:11px;
+  border:1px solid rgba(105,207,255,.20);
+  border-radius:13px;
+  background:rgba(8,24,31,.24);
+}
+.paste-detail-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+.paste-detail-head strong{
+  display:block;
+  margin-top:2px;
+  color:#eef5f7;
+  font-size:12px;
+}
+.paste-detail-head small{
+  display:block;
+  margin-top:3px;
+  color:#b7c6ca;
+  font-size:9px;
+}
+.paste-detail-final-badge{
+  padding:5px 8px;
+  border:1px solid rgba(105,207,255,.35);
+  border-radius:999px;
+  background:rgba(32,98,126,.22);
+  color:#a9e0ff;
+  font-size:8px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.paste-detail-meta{
+  display:grid;
+  grid-template-columns:minmax(170px,.65fr) minmax(210px,.8fr) 1.55fr;
+  gap:8px;
+  align-items:end;
+  margin-top:9px;
+}
+.paste-detail-meta label{
+  margin:0;
+}
+.paste-detail-meta label span{
+  display:block;
+  margin-bottom:4px;
+  color:#c5d1d4;
+  font-size:8px;
+  font-weight:900;
+}
+.paste-detail-meta-note{
+  min-height:42px;
+  display:flex;
+  align-items:center;
+  padding:7px 9px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:9px;
+  color:#b9c2c1;
+  background:rgba(255,255,255,.025);
+  font-size:8px;
+  line-height:1.35;
+}
+#pasteDetailText{
+  width:100%;
+  min-height:155px;
+  margin-top:8px;
+  resize:vertical;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:10px;
+  line-height:1.4;
+}
+.paste-detail-actions{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:8px;
+}
+.paste-detail-actions small{
+  color:#abb8ba;
+  font-size:8px;
+  line-height:1.3;
+}
+@media(max-width:850px){
+  .paste-detail-meta{grid-template-columns:1fr 1fr}
+  .paste-detail-meta-note{grid-column:1/-1}
+}
+@media(max-width:560px){
+  .paste-detail-head,
+  .paste-detail-actions{flex-direction:column}
+  .paste-detail-meta{grid-template-columns:1fr}
+  .paste-detail-meta-note{grid-column:auto}
+}
