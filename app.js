@@ -3734,6 +3734,10 @@ async function savePastedDetailFinal(){
     return alert(e.message);
   }
 
+  const purchaseWarning=(p.integrityWarnings||[]).length
+    ? `\nPERINGATAN NILAI PEMBELIAN:\n${p.integrityWarnings.map(x=>"• "+x.message).join("\n")}\n`
+    : "";
+
   const ok=confirm(
     "KONFIRMASI SIMPAN PASTE FINAL\n\n"+
     `KP / Supplier      : ${parsed.kp} / ${parsed.supplier}\n`+
@@ -3742,7 +3746,9 @@ async function savePastedDetailFinal(){
     `PAID               : ${kg(parsed.paidKg)} / ${parsed.paidTransactions.length} trip\n`+
     `HOLD               : ${kg(parsed.holdKg)} / ${parsed.holdTransactions.length} trip\n`+
     `Akumulasi Closing  : ${kg(latestRec.closingTotal)}\n`+
-    `Koreksi Otomatis   : ${latestRec.correctionKg>=0?"+":""}${kg(latestRec.correctionKg)}\n\n`+
+    `Koreksi Otomatis   : ${latestRec.correctionKg>=0?"+":""}${kg(latestRec.correctionKg)}\n`+
+    purchaseWarning+"\n"+
+    "Tonase adalah data utama untuk penyimpanan Final.\n"+
     "Paste Final tidak akan mengganti tanggal Closing Harian.\n"+
     "Koreksi disimpan di level periode agar tidak membuat tanggal transaksi palsu.\n\n"+
     "Klik OK untuk menyimpan."
@@ -3874,18 +3880,22 @@ async function previewPastedDetail(){
       }
     });
 
-    const integrityBlocked=(!parsed.integrityOk || !parsed.purchaseIntegrityOk || !parsed.period)
+    const integrityBlocked=(!parsed.integrityOk || !parsed.period)
       ? [{
           fileName:"PASTE DETAIL",
           integrityIssues:[
             !parsed.period ? "Periode laporan tidak terdeteksi" : null,
             !parsed.integrityOk
               ? `Total transaksi ${kg(parsed.totalKg)} ≠ Total laporan ${kg(parsed.declaredTotal)} • kurang ${kg(Number(parsed.declaredTotal||0)-Number(parsed.totalKg||0))}`
-              : null,
-            !parsed.purchaseIntegrityOk
-              ? `Nilai pembelian transaksi ${rupiah(parsed.purchaseTotal)} ≠ Total laporan ${rupiah(parsed.purchaseDeclared)}`
               : null
           ].filter(Boolean)
+        }]
+      : [];
+
+    const integrityWarnings=(!parsed.purchaseIntegrityOk)
+      ? [{
+          type:"purchase_value",
+          message:`Nilai pembelian transaksi ${rupiah(parsed.purchaseTotal)} ≠ Total laporan ${rupiah(parsed.purchaseDeclared)}`
         }]
       : [];
 
@@ -3900,6 +3910,7 @@ async function previewPastedDetail(){
       fileResults:[],
       validation:[],
       integrityBlocked,
+      integrityWarnings,
       conflictCheck:{fresh:[],same:[],conflicts:[],checked:true},
       finalBlocked,
       conflictDecisions:{},
@@ -3937,7 +3948,8 @@ async function previewPastedDetail(){
       `Total tonase: ${kg(parsed.totalKg)}\n`+
       `TOTAL laporan: ${parsed.declaredTotal==null?"tidak ditemukan":kg(parsed.declaredTotal)} ${parsed.integrityOk?"✓":"✕"}\n`+
       `Nilai pembelian: ${rupiah(parsed.purchaseTotal)}\n`+
-      `TOTAL nilai laporan: ${parsed.purchaseDeclared==null?"tidak ditemukan":rupiah(parsed.purchaseDeclared)} ${parsed.purchaseIntegrityOk?"✓":"✕"}\n\n`+
+      `TOTAL nilai laporan: ${parsed.purchaseDeclared==null?"tidak ditemukan":rupiah(parsed.purchaseDeclared)} ${parsed.purchaseIntegrityOk?"✓":"⚠"}\n`+
+      `${parsed.purchaseIntegrityOk?"":"PERINGATAN: selisih nilai pembelian tidak memblokir penyimpanan tonase.\n"}\n`+
 
       `STATUS PEMBAYARAN\n`+
       `PAID / bertanggal: ${parsed.paidTransactions.length} trip • ${kg(parsed.paidKg)}\n`+
@@ -3965,12 +3977,14 @@ async function previewPastedDetail(){
 
     if($("monthlyConflictSummary")){
       $("monthlyConflictSummary").textContent=finalBlocked
-        ? `✕ FINAL DIBLOKIR • ${integrityBlocked.length} masalah integritas`
-        : corr===0
-          ? `✓ COCOK • Paste Final = Akumulasi Closing`
-          : corr>0
-            ? `✓ SIAP FINAL • Koreksi otomatis +${kg(corr)} karena Closing masih kurang`
-            : `⚠ SIAP FINAL • Closing melebihi Paste ${kg(Math.abs(corr))} — tersimpan sebagai rekonsiliasi negatif`;
+        ? `✕ FINAL DIBLOKIR • ${integrityBlocked.length} masalah tonase/periode`
+        : integrityWarnings.length
+          ? `⚠ SIAP FINAL • Tonase valid • ${integrityWarnings.length} peringatan nilai pembelian`
+          : corr===0
+            ? `✓ COCOK • Paste Final = Akumulasi Closing`
+            : corr>0
+              ? `✓ SIAP FINAL • Koreksi otomatis +${kg(corr)} karena Closing masih kurang`
+              : `⚠ SIAP FINAL • Closing melebihi Paste ${kg(Math.abs(corr))} — tersimpan sebagai rekonsiliasi negatif`;
       $("monthlyConflictSummary").className=
         "monthly-conflict-summary "+(finalBlocked?"has-error":corr===0?"is-safe":"has-conflict");
     }
@@ -3994,8 +4008,10 @@ async function previewPastedDetail(){
 
     if($("monthlyFinalStatus")){
       $("monthlyFinalStatus").textContent=finalBlocked
-        ? "FINAL DIBLOKIR — periksa integritas"
-        : "SIAP FINAL — rekonsiliasi periode";
+        ? "FINAL DIBLOKIR — periksa tonase/periode"
+        : integrityWarnings.length
+          ? "SIAP FINAL — ada peringatan nilai pembelian"
+          : "SIAP FINAL — rekonsiliasi periode";
       $("monthlyFinalStatus").className="monthly-final-status "+(finalBlocked?"blocked":"ready");
     }
 
