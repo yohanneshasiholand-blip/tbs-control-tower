@@ -3529,3 +3529,24 @@ table {
     flex-direction:column;
   }
 }
+
+
+/* =========================================================
+   ANALISA PRODUKSI — DEDICATED SIDEBAR MODE v4.12.1
+   ========================================================= */
+.classic-child-analysis{
+  margin-top:3px;
+  border-top:1px solid rgba(255,255,255,.055);
+}
+.classic-child-analysis.active{
+  background:rgba(33,116,49,.24) !important;
+}
+.classic-child-analysis.active b{
+  color:#8bf39a !important;
+}
+.monitor-production-analysis{
+  width:100%;
+}
+.monitor-production-analysis.hidden{
+  display:none !important;
+}
