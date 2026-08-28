@@ -5546,12 +5546,22 @@ async function fetchMonitorRangeExpenseRows(start,end,kp){
 }
 
 function setMonitorRangeLoading(){
-  if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent="...";
-  if($("monitorRangeTotalExpense")) $("monitorRangeTotalExpense").textContent="...";
-  if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent="...";
-  if($("monitorRangeCoverage")) $("monitorRangeCoverage").textContent="...";
+  [
+    "monitorRangeTotalTonnage","monitorRangeClosedTonnage","monitorRangeTotalExpense",
+    "monitorRangeTotalTrips","monitorRangeCoverage","prodAvgTrip"
+  ].forEach(id=>{ if($(id)) $(id).textContent="..."; });
+  if($("prodTopKp")) $("prodTopKp").textContent="...";
+  if($("prodBottomKp")) $("prodBottomKp").textContent="...";
+  if($("prodInsightBadge")) $("prodInsightBadge").textContent="MENGANALISA...";
+  if($("prodExecutiveInsight")) $("prodExecutiveInsight").textContent="Mengolah data produksi dan benchmark KP...";
+  ["prodRankingChart","prodProductivityChart","prodTrendChart"].forEach(id=>{
+    if($(id)){
+      try{ Plotly.purge(id); }catch(e){}
+      $(id).innerHTML='<div class="chart-empty-state">Menghitung analisa...</div>';
+    }
+  });
   if($("monitorRangeDetailTable")){
-    $("monitorRangeDetailTable").innerHTML='<div class="master-empty">Menghitung range tanggal...</div>';
+    $("monitorRangeDetailTable").innerHTML='<div class="master-empty">Menghitung analisa produksi...</div>';
   }
 }
 
@@ -5715,6 +5725,217 @@ function groupRangeReconciliationByKp(selectedClosing,reconciliation){
   return result;
 }
 
+
+function runningMonthBounds(referenceDate){
+  const ref=String(referenceDate||localTodayISO());
+  const ym=ref.slice(0,7);
+  const {start,end}=yearMonthBounds(ym);
+  const today=localTodayISO();
+
+  // "Bulan berjalan": for the current month, never project beyond today.
+  // For a historical month, use the full month.
+  const effectiveEnd=ym===today.slice(0,7) ? (today<end?today:end) : end;
+  return {month:ym,start,end:effectiveEnd};
+}
+
+async function getRunningMonthKpAverage(referenceDate){
+  const bounds=runningMonthBounds(referenceDate);
+
+  const [closingRows,recs]=await Promise.all([
+    fetchMonitorRangeClosingRows(bounds.start,bounds.end,"ALL"),
+    fetchRangeFinalReconciliations(bounds.start,bounds.end,"ALL")
+  ]);
+
+  const selected=summarizeClosingHistory(closingRows,{excludeCurrentMonthly:true}).selected||[];
+  const reconciliation=computeRangeFinalFromReconciliation(selected,recs);
+  const byKp=groupRangeReconciliationByKp(selected,reconciliation);
+
+  const activeRows=FALLBACK_KP_CODES
+    .map(code=>({code,...(byKp[code]||{})}))
+    .filter(r=>Number(r.final||0)>0);
+
+  const totalKg=activeRows.reduce((a,r)=>a+Number(r.final||0),0);
+  const kpCount=activeRows.length;
+  const averageKg=kpCount ? totalKg/kpCount : 0;
+
+  return {
+    ...bounds,
+    averageKg,
+    totalKg,
+    kpCount,
+    rows:activeRows,
+    reconciliationCount:recs.length
+  };
+}
+
+
+function productionBenchmarkStatus(value,average){
+  if(!average || !value) return {label:"BELUM ADA DATA",ratio:0,className:"no-data"};
+  const ratio=value/average;
+  if(ratio>1.10) return {label:"DI ATAS RATA-RATA",ratio,className:"above"};
+  if(ratio>=0.90) return {label:"NORMAL",ratio,className:"normal"};
+  return {label:"PERLU PERHATIAN",ratio,className:"attention"};
+}
+
+function buildProductionKpRows(finalByKp,expenseByKp){
+  return FALLBACK_KP_CODES.map(code=>{
+    const f=finalByKp[code]||{
+      closing:0,closingTrips:0,final:0,finalTrips:0,correction:0,
+      hold:0,holdTrips:0,recCount:0
+    };
+    const e=expenseByKp[code]||{amount:0,count:0};
+    return {
+      kp:code,
+      tonnage:Number(f.final||0),
+      trips:Number(f.finalTrips||0),
+      kgPerTrip:Number(f.finalTrips||0)>0 ? Number(f.final||0)/Number(f.finalTrips||0) : 0,
+      closing:Number(f.closing||0),
+      correction:Number(f.correction||0),
+      hold:Number(f.hold||0),
+      holdTrips:Number(f.holdTrips||0),
+      expense:Number(e.amount||0),
+      expenseCount:Number(e.count||0),
+      recCount:Number(f.recCount||0),
+      source:Number(f.recCount||0)>0 ? "FINAL PASTE" : Number(f.closing||0)>0 ? "CLOSING / SEMENTARA" : "BELUM ADA DATA"
+    };
+  });
+}
+
+function buildOperationalDailyTrend(rows){
+  const map={};
+  (rows||[]).forEach(r=>{
+    if(!map[r.report_date]) map[r.report_date]={tonnage:0,trips:0,kps:new Set()};
+    map[r.report_date].tonnage+=Number(r.tonnage_kg||0);
+    map[r.report_date].trips+=Number(r.trip_count||0);
+    map[r.report_date].kps.add(r.kp_code);
+  });
+  return Object.keys(map).sort().map(date=>({
+    date,
+    tonnage:map[date].tonnage,
+    trips:map[date].trips,
+    kpCount:map[date].kps.size
+  }));
+}
+
+function renderProductionAnalysisCharts(activeRows,dailyTrend,selectedKp){
+  const rankRows=[...activeRows].sort((a,b)=>b.tonnage-a.tonnage);
+  const productivityRows=[...activeRows].filter(r=>r.trips>0).sort((a,b)=>b.kgPerTrip-a.kgPerTrip);
+
+  resetPlotContainer("prodRankingChart");
+  if(rankRows.length){
+    Plotly.newPlot("prodRankingChart",[{
+      x:rankRows.map(r=>r.tonnage),
+      y:rankRows.map(r=>r.kp),
+      type:"bar",orientation:"h",
+      text:rankRows.map(r=>compactKg(r.tonnage)),
+      textposition:"auto",
+      marker:{color:rankRows.map(r=>r.kp===selectedKp?"#9ee8ff":"#49de5f")},
+      customdata:rankRows.map(r=>[r.trips,r.kgPerTrip,r.source]),
+      hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<br>%{customdata[0]} trip<br>%{customdata[1]:,.0f} kg/trip<br>%{customdata[2]}<extra></extra>"
+    }],{
+      ...darkLayout,
+      margin:{t:15,l:70,r:20,b:38},
+      xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
+      yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
+      showlegend:false
+    },plotConfig);
+  }else{
+    $("prodRankingChart").innerHTML='<div class="chart-empty-state">Belum ada produksi pada periode ini.</div>';
+  }
+
+  resetPlotContainer("prodProductivityChart");
+  if(productivityRows.length){
+    Plotly.newPlot("prodProductivityChart",[{
+      x:productivityRows.map(r=>r.kgPerTrip),
+      y:productivityRows.map(r=>r.kp),
+      type:"bar",orientation:"h",
+      text:productivityRows.map(r=>`${Math.round(r.kgPerTrip).toLocaleString("id-ID")} kg`),
+      textposition:"auto",
+      marker:{color:productivityRows.map(r=>r.kp===selectedKp?"#9ee8ff":"#49de5f")},
+      customdata:productivityRows.map(r=>[r.tonnage,r.trips]),
+      hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg/trip<br>%{customdata[0]:,.0f} kg<br>%{customdata[1]} trip<extra></extra>"
+    }],{
+      ...darkLayout,
+      margin:{t:15,l:70,r:20,b:38},
+      xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
+      yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
+      showlegend:false
+    },plotConfig);
+  }else{
+    $("prodProductivityChart").innerHTML='<div class="chart-empty-state">Belum ada data trip untuk analisa produktivitas.</div>';
+  }
+
+  resetPlotContainer("prodTrendChart");
+  if(dailyTrend.length){
+    const rolling=dailyTrend.map((r,i)=>{
+      const from=Math.max(0,i-2);
+      const arr=dailyTrend.slice(from,i+1);
+      return arr.reduce((a,x)=>a+x.tonnage,0)/arr.length;
+    });
+
+    Plotly.newPlot("prodTrendChart",[
+      {
+        x:dailyTrend.map(r=>r.date),
+        y:dailyTrend.map(r=>r.tonnage),
+        type:"scatter",mode:"lines+markers",
+        name:"Closing Harian",
+        line:{width:2},
+        customdata:dailyTrend.map(r=>[r.trips,r.kpCount]),
+        hovertemplate:"%{x}<br>%{y:,.0f} kg<br>%{customdata[0]} trip<br>%{customdata[1]} KP<extra></extra>"
+      },
+      {
+        x:dailyTrend.map(r=>r.date),
+        y:rolling,
+        type:"scatter",mode:"lines",
+        name:"Rata-rata 3 titik",
+        line:{width:2,dash:"dot"},
+        hovertemplate:"%{x}<br>Rata-rata %{y:,.0f} kg<extra></extra>"
+      }
+    ],{
+      ...darkLayout,
+      margin:{t:20,l:60,r:20,b:45},
+      xaxis:{...darkLayout.xaxis,fixedrange:true},
+      yaxis:{...darkLayout.yaxis,tickformat:"~s",rangemode:"tozero",fixedrange:true},
+      legend:{orientation:"h",x:0,y:1.12,font:{size:9,color:"#c8bdaf"}}
+    },plotConfig);
+  }else{
+    $("prodTrendChart").innerHTML='<div class="chart-empty-state">Belum ada Closing harian untuk grafik tren operasional.</div>';
+  }
+}
+
+function renderExecutiveProductionInsight({
+  start,end,scopeLabel,totalTonnage,totalTrips,avgKgPerTrip,
+  activeRows,averageKp,top,bottom,bestProductivity,belowCount,
+  holdKg,holdTrips,totalExpense,live
+}){
+  const contributionTop=totalTonnage>0 && top ? top.tonnage/activeRows.reduce((a,r)=>a+r.tonnage,0)*100 : 0;
+  const expensePerKg=totalTonnage>0 ? totalExpense/totalTonnage : 0;
+
+  const trendNote=belowCount
+    ? `${belowCount} KP berada lebih dari 10% di bawah benchmark rata-rata dan layak menjadi agenda evaluasi.`
+    : "Tidak ada KP aktif yang berada lebih dari 10% di bawah benchmark rata-rata.";
+
+  const items=[
+    `<b>Produksi ${scopeLabel}</b> untuk ${dateLabelId(start)} s.d. ${dateLabelId(end)} mencapai <b>${kg(totalTonnage)}</b> dari <b>${Number(totalTrips).toLocaleString("id-ID")} trip</b>, atau rata-rata <b>${Math.round(avgKgPerTrip||0).toLocaleString("id-ID")} kg/trip</b>.`,
+    top ? `<b>${top.kp}</b> menjadi KP dengan produksi tertinggi sebesar <b>${kg(top.tonnage)}</b>${contributionTop?` dan menyumbang sekitar <b>${contributionTop.toFixed(1)}%</b> dari total KP aktif.`:""}` : "Belum ada KP dengan produksi pada periode ini.",
+    bottom ? `<b>${bottom.kp}</b> memiliki produksi terendah di antara KP aktif sebesar <b>${kg(bottom.tonnage)}</b>. ${trendNote}` : trendNote,
+    bestProductivity ? `Produktivitas angkutan tertinggi tercatat di <b>${bestProductivity.kp}</b> dengan sekitar <b>${Math.round(bestProductivity.kgPerTrip).toLocaleString("id-ID")} kg/trip</b>.` : "Belum ada data trip yang cukup untuk membandingkan produktivitas.",
+    holdKg>0 ? `Terdapat <b>${kg(holdKg)}</b> / <b>${holdTrips.toLocaleString("id-ID")} trip HOLD</b>. Tonase tersebut sudah termasuk produksi final tetapi belum memiliki tanggal pembayaran.` : "Tidak ada HOLD pada data final yang tercakup periode.",
+    totalExpense>0 ? `Pengeluaran periode sebesar <b>${rupiah(totalExpense)}</b>, setara sekitar <b>Rp${Math.round(expensePerKg).toLocaleString("id-ID")}/kg</b> terhadap produksi dalam scope analisa.` : "Belum ada pengeluaran tercatat pada periode analisa.",
+    live ? `Snapshot LIVE terbaru <b>${live.time.slice(0,5)}</b> tetap dipisahkan dari angka evaluasi final agar bahan meeting tidak mencampur data sementara.` : "Analisa tidak mencampurkan snapshot LIVE ke angka produksi final."
+  ];
+
+  if($("prodExecutiveInsight")){
+    $("prodExecutiveInsight").innerHTML=
+      `<div class="production-insight-period">${scopeLabel} • ${dateLabelId(start)} — ${dateLabelId(end)}</div>`+
+      `<div class="production-insight-list">${items.map((x,i)=>`<div class="production-insight-item"><span>${i+1}</span><p>${x}</p></div>`).join("")}</div>`+
+      `<div class="production-insight-foot">Catatan evaluasi: status di bawah rata-rata adalah indikator untuk ditinjau bersama target, hari operasi, pasokan, jarak angkut, dan kondisi unit; bukan kesimpulan penyebab.</div>`;
+  }
+  if($("prodInsightBadge")){
+    $("prodInsightBadge").textContent=activeRows.length ? `${activeRows.length} KP AKTIF` : "BELUM ADA DATA";
+  }
+}
+
 async function loadMonitorRangeDetail(){
   if(!$("monitorRangeStart") || !$("monitorRangeEnd")) return;
 
@@ -5723,7 +5944,7 @@ async function loadMonitorRangeDetail(){
   const kp=$("monitorKp")?.value||"ALL";
 
   if(!start || !end){
-    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="Pilih tanggal mulai dan tanggal akhir, lalu klik Cari Tonase.";
+    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="Pilih tanggal mulai dan tanggal akhir, lalu klik Analisa Produksi.";
     return;
   }
   if(end<start){
@@ -5732,205 +5953,161 @@ async function loadMonitorRangeDetail(){
   }
 
   setMonitorRangeLoading();
-  if($("monitorRangeClosedTonnage")) $("monitorRangeClosedTonnage").textContent="...";
-  if($("monitorRangeLiveTonnage")) $("monitorRangeLiveTonnage").textContent="...";
 
   try{
-    const [closingRows,expenseRows,live,recs]=await Promise.all([
-      fetchMonitorRangeClosingRows(start,end,kp),
-      fetchMonitorRangeExpenseRows(start,end,kp),
-      fetchRangeLiveSnapshot(start,end,kp),
-      fetchRangeFinalReconciliations(start,end,kp)
+    // Always load company-wide data for benchmark/ranking.
+    // Selected KP only changes the main scope KPI and insight focus.
+    const [
+      allClosingRows,allExpenseRows,allRecs,
+      scopeClosingRows,scopeExpenseRows,scopeRecs,scopeLive
+    ]=await Promise.all([
+      fetchMonitorRangeClosingRows(start,end,"ALL"),
+      fetchMonitorRangeExpenseRows(start,end,"ALL"),
+      fetchRangeFinalReconciliations(start,end,"ALL"),
+      kp==="ALL" ? fetchMonitorRangeClosingRows(start,end,"ALL") : fetchMonitorRangeClosingRows(start,end,kp),
+      kp==="ALL" ? fetchMonitorRangeExpenseRows(start,end,"ALL") : fetchMonitorRangeExpenseRows(start,end,kp),
+      kp==="ALL" ? fetchRangeFinalReconciliations(start,end,"ALL") : fetchRangeFinalReconciliations(start,end,kp),
+      fetchRangeLiveSnapshot(start,end,kp)
     ]);
 
-    const summary=summarizeClosingHistory(closingRows,{excludeCurrentMonthly:true});
-    const selected=summary.selected||[];
-    const today=localTodayISO();
-    const reconciliation=computeRangeFinalFromReconciliation(selected,recs);
+    const allSelected=summarizeClosingHistory(allClosingRows,{excludeCurrentMonthly:true}).selected||[];
+    const allReconciliation=computeRangeFinalFromReconciliation(allSelected,allRecs);
+    const allFinalByKp=groupRangeReconciliationByKp(allSelected,allReconciliation);
+    const expenseByKp=groupExpenseRowsByKp(allExpenseRows);
+    const allRows=buildProductionKpRows(allFinalByKp,expenseByKp);
+    const activeRows=allRows.filter(r=>r.tonnage>0);
 
-    const finalTonnage=Number(reconciliation.finalKg||0);
-    const finalTrips=Number(reconciliation.finalTrips||0);
-    const closedTonnage=Number(reconciliation.closingKg||0);
-    const closedTrips=Number(reconciliation.closingTrips||0);
-    const totalExpense=expenseRows.reduce((a,r)=>a+Number(r.amount||0),0);
-    const closingDates=[...new Set(selected.map(r=>r.report_date))];
+    const totalCompanyKg=activeRows.reduce((a,r)=>a+r.tonnage,0);
+    const totalCompanyTrips=activeRows.reduce((a,r)=>a+r.trips,0);
+    const averageKp=activeRows.length ? totalCompanyKg/activeRows.length : 0;
 
-    // LIVE remains operational information and NEVER changes Total Final Database.
-    const hasFinalToday=selected.some(r=>r.report_date===today);
-    const liveTonnage=(!hasFinalToday && live) ? Number(live.total||0) : 0;
-    const liveTrips=(!hasFinalToday && live) ? Number(live.trips||0) : 0;
+    activeRows.forEach(r=>{
+      r.contribution=totalCompanyKg ? r.tonnage/totalCompanyKg : 0;
+      r.benchmark=productionBenchmarkStatus(r.tonnage,averageKp);
+    });
 
-    if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent=kg(finalTonnage);
-    if($("monitorRangeClosedTonnage")) $("monitorRangeClosedTonnage").textContent=kg(closedTonnage);
-    if($("monitorRangeLiveTonnage")) $("monitorRangeLiveTonnage").textContent=kg(liveTonnage);
+    const rankRows=[...activeRows].sort((a,b)=>b.tonnage-a.tonnage);
+    const top=rankRows[0]||null;
+    const bottom=rankRows.length>1 ? rankRows[rankRows.length-1] : rankRows[0]||null;
+    const bestProductivity=[...activeRows].filter(r=>r.trips>0).sort((a,b)=>b.kgPerTrip-a.kgPerTrip)[0]||null;
+    const belowRows=activeRows.filter(r=>r.benchmark.className==="attention");
+
+    const scopeSelected=kp==="ALL"
+      ? allSelected
+      : summarizeClosingHistory(scopeClosingRows,{excludeCurrentMonthly:true}).selected||[];
+    const scopeReconciliation=kp==="ALL"
+      ? allReconciliation
+      : computeRangeFinalFromReconciliation(scopeSelected,scopeRecs);
+
+    const totalTonnage=Number(scopeReconciliation.finalKg||0);
+    const totalTrips=Number(scopeReconciliation.finalTrips||0);
+    const avgKgPerTrip=totalTrips ? totalTonnage/totalTrips : 0;
+    const holdKg=Number(scopeReconciliation.holdKg||0);
+    const holdTrips=Number(scopeReconciliation.holdTrips||0);
+    const totalExpense=scopeExpenseRows.reduce((a,r)=>a+Number(r.amount||0),0);
+    const expensePerKg=totalTonnage ? totalExpense/totalTonnage : 0;
+    const scopeLabel=kp==="ALL"?"Semua KP":kp;
+
+    const selectedRow=kp==="ALL" ? null : activeRows.find(r=>r.kp===kp)||null;
+    const selectedBenchmark=selectedRow?.benchmark||null;
+
+    // Main KPI
+    if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent=kg(totalTonnage);
+    if($("monitorRangeClosedTonnage")) $("monitorRangeClosedTonnage").textContent=kg(averageKp);
+    if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent=Number(totalTrips).toLocaleString("id-ID");
+    if($("prodAvgTrip")) $("prodAvgTrip").textContent=`${Math.round(avgKgPerTrip||0).toLocaleString("id-ID")} kg`;
+    if($("monitorRangeCoverage")) $("monitorRangeCoverage").textContent=kg(holdKg);
     if($("monitorRangeTotalExpense")) $("monitorRangeTotalExpense").textContent=rupiah(totalExpense);
-    if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent=Number(finalTrips).toLocaleString("id-ID");
-    if($("monitorRangeCoverage")) $("monitorRangeCoverage").textContent=kg(reconciliation.holdKg);
 
-    const kpLabel=kp==="ALL"?"Semua KP":kp;
-    const latestFinalDate=recs.length
-      ? recs.map(r=>r.period_end).sort().slice(-1)[0]
-      : null;
-    const sourceLabel=selected.length?closingSourceLabelForRows(selected):"Belum ada Closing";
-
-    if($("monitorRangeStatus")){
-      $("monitorRangeStatus").textContent=
-        `HASIL PENCARIAN • ${kpLabel} • ${dateLabelId(start)} s.d. ${dateLabelId(end)} • `+
-        `${kg(finalTonnage)} • ${Number(finalTrips).toLocaleString("id-ID")} trip`+
-        `${recs.length?` • ${recs.length} Data Final Paste`:""}`+
-        `${liveTonnage&&live?` • LIVE ${live.time.slice(0,5)} ditampilkan terpisah`:""}`;
-    }
+    if($("prodTopKp")) $("prodTopKp").textContent=top?.kp||"—";
+    if($("prodTopKpSub")) $("prodTopKpSub").textContent=top?`${kg(top.tonnage)} • ${top.trips.toLocaleString("id-ID")} trip`:"Belum ada data";
+    if($("prodBottomKp")) $("prodBottomKp").textContent=bottom?.kp||"—";
+    if($("prodBottomKpSub")) $("prodBottomKpSub").textContent=bottom?`${kg(bottom.tonnage)} • ${bottom.benchmark.label}`:"Belum ada data";
 
     if($("monitorRangeTonnageSub")){
       $("monitorRangeTonnageSub").textContent=
-        recs.length
-          ? `Otomatis: Data Final Paste${latestFinalDate?` s.d. ${dateLabelId(latestFinalDate)}`:""} + Closing sesudah periode Final`
-          : `Otomatis dari ${sourceLabel} sesuai tanggal pencarian`;
+        kp==="ALL"
+          ? `${activeRows.length} KP aktif • sumber final terbaik`
+          : selectedBenchmark
+            ? `${kp} • ${selectedBenchmark.label} • ${(selectedBenchmark.ratio*100).toFixed(0)}% dari benchmark`
+            : `${kp} • belum ada produksi`;
     }
     if($("monitorRangeClosedSub")){
       $("monitorRangeClosedSub").textContent=
-        `${closingDates.length} hari Closing ditemukan dalam tanggal pencarian`;
-    }
-    if($("monitorRangeLiveSub")){
-      $("monitorRangeLiveSub").textContent=
-        liveTonnage && live
-          ? `${live.date} • snapshot ${live.time.slice(0,5)} • belum masuk Total Final`
-          : hasFinalToday
-            ? "Hari ini sudah memiliki Closing"
-            : "Tidak ada snapshot LIVE dalam range";
-    }
-    if($("monitorRangeExpenseSub")){
-      $("monitorRangeExpenseSub").textContent=
-        `${expenseRows.length.toLocaleString("id-ID")} transaksi biaya dalam range`;
+        `${activeRows.length} KP aktif • benchmark periode ${dateLabelId(start)}–${dateLabelId(end)}`;
     }
     if($("monitorRangeTripSub")){
       $("monitorRangeTripSub").textContent=
-        recs.length
-          ? `Trip hasil otomatis setelah rekonsiliasi • Closing terbaca ${closedTrips.toLocaleString("id-ID")}`
-          : `Trip otomatis dari Closing • ${closedTrips.toLocaleString("id-ID")}`;
+        `Produktivitas ${Math.round(avgKgPerTrip||0).toLocaleString("id-ID")} kg/trip`;
+    }
+    if($("prodAvgTripSub")){
+      $("prodAvgTripSub").textContent=
+        kp==="ALL"
+          ? `Company-wide • ${totalCompanyTrips.toLocaleString("id-ID")} trip`
+          : `${kp} • dibanding benchmark company`;
     }
     if($("monitorRangeCoverageSub")){
       $("monitorRangeCoverageSub").textContent=
-        `${Number(reconciliation.holdTrips||0).toLocaleString("id-ID")} trip HOLD • sudah termasuk Total Final`;
+        `${holdTrips.toLocaleString("id-ID")} trip HOLD • sudah termasuk produksi final`;
+    }
+    if($("monitorRangeExpenseSub")){
+      $("monitorRangeExpenseSub").textContent=
+        `${scopeExpenseRows.length.toLocaleString("id-ID")} transaksi • ± Rp${Math.round(expensePerKg).toLocaleString("id-ID")}/kg`;
     }
 
-    const expenseByKp=groupExpenseRowsByKp(expenseRows);
-    const liveByKp=(!hasFinalToday && live) ? groupLiveRowsByKp(live.rows) : {};
-
-    if(kp==="ALL"){
-      const finalByKp=groupRangeReconciliationByKp(selected,reconciliation);
-
-      const rows=FALLBACK_KP_CODES.map(code=>{
-        const f=finalByKp[code]||{
-          closing:0,closingTrips:0,final:0,finalTrips:0,correction:0,
-          hold:0,holdTrips:0,recCount:0
-        };
-        const l=liveByKp[code]||{tonnage:0,trips:0};
-        const e=expenseByKp[code]||{amount:0,count:0};
-
-        const status=f.recCount
-          ? "FINAL PASTE"
-          : f.closing
-            ? "SEMENTARA / CLOSING"
-            : "BELUM ADA DATA";
-
-        return [
-          code,
-          kg(f.final),
-          kg(f.closing),
-          `${f.correction>=0?"+":""}${kg(f.correction)}`,
-          `${kg(f.hold)}${f.holdTrips?` / ${f.holdTrips} trip`:""}`,
-          kg(l.tonnage),
-          Number(f.finalTrips||0).toLocaleString("id-ID"),
-          rupiah(e.amount),
-          status
-        ];
-      });
-
-      $("monitorRangeDetailTitle").textContent=`HASIL PENCARIAN TONASE PER KP — ${dateLabelId(start)} s.d. ${dateLabelId(end)}`;
-      $("monitorRangeDetailTable").innerHTML=table(
-        ["KP","Hasil Tonase","Closing Terbaca","Penyesuaian Otomatis","HOLD","Live Hari Ini","Trip","Pengeluaran","Sumber Hasil"],
-        rows
-      );
-    }else{
-      // Single-KP table intentionally remains a daily operational audit.
-      // The Total Final Database is shown in the KPI above; payment-date detail
-      // is not forced to become an operational Closing date.
-      const byDate={};
-      selected.forEach(r=>{
-        if(!byDate[r.report_date]){
-          byDate[r.report_date]={tonnage:0,trips:0,sources:new Set(),status:"CLOSING"};
-        }
-        byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
-        byDate[r.report_date].trips+=Number(r.trip_count||0);
-        byDate[r.report_date].sources.add(closingSourceType(r.source_file));
-      });
-
-      const expenseByDate={};
-      expenseRows.forEach(r=>{
-        if(!expenseByDate[r.expense_date]) expenseByDate[r.expense_date]={amount:0,count:0};
-        expenseByDate[r.expense_date].amount+=Number(r.amount||0);
-        expenseByDate[r.expense_date].count+=1;
-      });
-
-      if(liveTonnage && live){
-        byDate[live.date]={
-          tonnage:liveTonnage,
-          trips:liveTrips,
-          sources:new Set(["live"]),
-          status:`LIVE ${live.time.slice(0,5)}`
-        };
-      }
-
-      const dates=[...new Set([
-        ...Object.keys(byDate),
-        ...Object.keys(expenseByDate)
-      ])].sort();
-
-      const rows=dates.map(d=>{
-        const t=byDate[d]||{tonnage:0,trips:0,sources:new Set(),status:"-"};
-        const e=expenseByDate[d]||{amount:0,count:0};
-        let src="Belum ada tonase";
-        if(t.sources?.has("live")) src="WhatsApp Snapshot";
-        else if(t.sources?.has("audit")) src="Audit Resmi";
-        else if(t.sources?.has("paste_final")) src="Paste Detail Final";
-        else if(t.sources?.has("excel_final")) src="Excel Final";
-        else if(t.sources?.has("excel")) src="Closing Excel";
-        else if(t.sources?.has("whatsapp")) src="Closing WhatsApp (operasional)";
-        else if(t.sources?.has("monthly")) src="Excel Bulanan Lama";
-        else if(t.tonnage) src="Closing Harian";
-
-        return [
-          d,
-          t.status,
-          kg(t.tonnage),
-          Number(t.trips||0).toLocaleString("id-ID"),
-          rupiah(e.amount),
-          Number(e.count||0).toLocaleString("id-ID"),
-          src
-        ];
-      });
-
-      const kpRecs=reconciliation.rows||[];
-      const recSummary=kpRecs.length
-        ? `<div class="range-final-summary-box">
-             <strong>TOTAL FINAL ${kp}</strong>
-             <span>${kg(finalTonnage)} • ${finalTrips.toLocaleString("id-ID")} trip</span>
-             <small>Rekonsiliasi vs Closing: ${reconciliation.correctionKg>=0?"+":""}${kg(reconciliation.correctionKg)} • HOLD ${kg(reconciliation.holdKg)} / ${reconciliation.holdTrips} trip</small>
-           </div>`
-        : "";
-
-      $("monitorRangeDetailTitle").textContent=`HASIL PENCARIAN ${kp} — DETAIL PER TANGGAL`;
-      $("monitorRangeDetailTable").innerHTML=
-        recSummary+
-        (rows.length
-          ? table(["Tanggal","Status","Tonase Operasional","Trip","Pengeluaran","Transaksi Biaya","Sumber"],rows)
-          : '<div class="master-empty">Belum ada Closing, snapshot LIVE, atau Pengeluaran pada range tanggal ini.</div>');
+    const liveText=scopeLive
+      ? ` • LIVE ${scopeLive.time.slice(0,5)} ${kg(scopeLive.total)} tidak masuk final`
+      : "";
+    if($("monitorRangeStatus")){
+      $("monitorRangeStatus").textContent=
+        `ANALISA PRODUKSI • ${scopeLabel} • ${dateLabelId(start)} s.d. ${dateLabelId(end)} • `+
+        `${kg(totalTonnage)} • ${totalTrips.toLocaleString("id-ID")} trip${liveText}`;
     }
+
+    // Charts: ranking/productivity always company-wide for comparison.
+    // Operational trend follows selected scope.
+    const trendRows=buildOperationalDailyTrend(scopeSelected);
+    renderProductionAnalysisCharts(activeRows,trendRows,kp==="ALL"?null:kp);
+
+    renderExecutiveProductionInsight({
+      start,end,scopeLabel,totalTonnage,totalTrips,avgKgPerTrip,
+      activeRows,averageKp,top,bottom,bestProductivity,
+      belowCount:belowRows.length,
+      holdKg,holdTrips,totalExpense,live:scopeLive
+    });
+
+    // Ranking table for meeting.
+    const tableRows=rankRows.map((r,i)=>{
+      const vsAvg=averageKp ? (r.tonnage-averageKp)/averageKp : 0;
+      return [
+        i+1,
+        r.kp,
+        kg(r.tonnage),
+        r.trips.toLocaleString("id-ID"),
+        `${Math.round(r.kgPerTrip).toLocaleString("id-ID")} kg`,
+        `${(r.contribution*100).toFixed(1)}%`,
+        `${vsAvg>=0?"+":""}${(vsAvg*100).toFixed(1)}%`,
+        kg(r.hold),
+        rupiah(r.expense),
+        r.benchmark.label,
+        r.source
+      ];
+    });
+
+    $("monitorRangeDetailTitle").textContent=
+      `RANKING & EVALUASI KP — ${dateLabelId(start)} s.d. ${dateLabelId(end)}`;
+    $("monitorRangeDetailTable").innerHTML=tableRows.length
+      ? table(
+          ["Rank","KP","Produksi","Trip","Kg/Trip","Kontribusi","vs Rata-rata","HOLD","Pengeluaran","Evaluasi","Sumber"],
+          tableRows
+        )
+      : '<div class="master-empty">Belum ada produksi pada periode analisa.</div>';
 
   }catch(e){
     console.error(e);
-    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="ERROR: "+e.message;
+    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="ERROR ANALISA: "+e.message;
+    if($("prodInsightBadge")) $("prodInsightBadge").textContent="ERROR";
+    if($("prodExecutiveInsight")) $("prodExecutiveInsight").textContent=e.message;
     if($("monitorRangeDetailTable")){
       $("monitorRangeDetailTable").innerHTML=`<div class="master-empty">ERROR: ${e.message}</div>`;
     }
