@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.10.0">
+  <link rel="stylesheet" href="style.css?v=4.10.2">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -417,6 +417,16 @@
               <strong id="dailySnapshotDiff">—</strong>
               <span id="dailySnapshotDiffSub">Belum ada Closing 00.00</span>
             </article>
+            <article class="monitor-kpi glass daily-mtd-system-kpi">
+              <small>MTD SISTEM S/D TANGGAL</small>
+              <strong id="dailyMtdSystem">0 kg</strong>
+              <span id="dailyMtdSystemSub">Otomatis dari Closing Harian</span>
+            </article>
+            <article class="monitor-kpi glass daily-mtd-wa-kpi">
+              <small>WA MTD PEMBANDING</small>
+              <strong id="dailyMtdWa">Belum ada</strong>
+              <span id="dailyMtdWaSub">Laporan s/d tanggal tidak menambah tonase</span>
+            </article>
           </div>
 
           <div class="monitor-analytics-grid">
@@ -476,7 +486,7 @@
               <article class="panel glass">
                 <h3>Paste Tonase WhatsApp</h3>
                 <div class="input-mode-note">
-                  Mendukung <b>00.00 Closing/Total Harian</b>, <b>Snapshot 10/12/15/17</b>, <b>Closing per KP</b>, atau <b>banyak KP sekaligus</b> dalam satu paste.
+                  Mendukung <b>00.00 Closing/Total Harian</b>, <b>Snapshot 10/12/15/17</b>, <b>Closing per KP</b>, <b>banyak KP</b>, dan <b>Tonase KP ... s/d tanggal (Audit MTD)</b> dalam satu area paste.
                   <span id="tonnageModeBadge" class="tonnage-mode-badge">SNAPSHOT 10/12/15/17</span>
                 </div>
               <textarea id="tonnageText" oninput="detectTonnageModeLive()" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
@@ -499,6 +509,7 @@
                   <small>
                     Header WhatsApp tetap dideteksi otomatis. Pilihan manual dipakai jika tanggal/jam tidak tercopy.
                     Jika manual berbeda dengan header, Simpan diblokir. <b>00.00 = total final keseluruhan hari.</b>
+                    Format <b>"Tonase KP ... s/d tanggal"</b> otomatis dikenali sebagai Audit MTD dan tidak memerlukan jam.
                   </small>
                 </div>
                 <div class="actions">
@@ -520,8 +531,8 @@
           <div class="monitor-subpanel-head">
             <div>
               <span class="subpanel-kicker">MONITORING BULANAN</span>
-              <h3>Total Bulanan — Excel Final sebagai Sumber Utama</h3>
-              <p class="monthly-final-rule">WhatsApp Closing = sementara. Setelah Excel Bulanan lolos Preview Audit dan disimpan, Excel menjadi FINAL pada tanggal + KP + supplier yang tercakup.</p>
+              <h3>Total Bulanan — Data Final dari Excel atau Paste Detail</h3>
+              <p class="monthly-final-rule">WhatsApp Closing = sementara. Excel Bulanan atau Paste Detail yang lolos Preview Audit menjadi FINAL pada tanggal + KP + supplier yang tercakup.</p>
             </div>
             <span id="monthlySourceBadge" class="monitor-source-badge temporary-source">SEMENTARA</span>
           </div>
@@ -529,13 +540,13 @@
           <article class="panel glass period-upload-panel">
             <div class="period-upload-info">
               <div>
-                <strong>Upload Data Excel Bulanan</strong>
-                <span>Gunakan file detail harian per KP atau rekap bulanan. Preview Audit memeriksa overlap, double input, selisih, konflik, transaksi tanpa tanggal, dan integritas total.</span>
+                <strong>Input Data Final Bulanan</strong>
+                <span>Pilih Upload Excel atau Paste Detail langsung dari sistem internal. Keduanya memakai Preview Audit yang sama untuk double input, selisih, konflik, tanggal, dan integritas total.</span>
               </div>
               <div class="monthly-final-controls">
                 <div class="monthly-final-priority">
                   <strong>ATURAN FINAL</strong>
-                  <span>Excel Bulanan = FINAL • Sama = SKIP • Konflik = putuskan per baris • Edit Manual = wajib alasan • Tanpa tanggal = BLOKIR</span>
+                  <span>Excel / Paste Detail = FINAL • Sama = tidak double dan dipromosikan FINAL • Konflik = putuskan per baris • Edit Manual = wajib alasan • Tanpa tanggal = BLOKIR</span>
                 </div>
                 <div id="monthlyConflictSummary" class="monthly-conflict-summary">Belum ada hasil pemeriksaan.</div>
               </div>
@@ -544,7 +555,45 @@
                   Pilih Excel Bulanan
                   <input id="monthlyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewMonthlyExcels(this.files)">
                 </label>
-                <button class="btn btn-secondary monthly-final-save" onclick="saveMonthlyExcel()">Simpan sebagai FINAL Excel</button>
+                <button class="btn btn-secondary monthly-final-save" onclick="saveMonthlyExcel()">Simpan sebagai FINAL</button>
+              </div>
+
+              <div class="paste-detail-final-box">
+                <div class="paste-detail-head">
+                  <div>
+                    <span class="subpanel-kicker">TANPA DOWNLOAD EXCEL</span>
+                    <strong>Paste Detail Transaksi dari Sistem Internal</strong>
+                    <small>Copy seluruh tabel transaksi lalu paste di sini. Setiap baris kendaraan = 1 trip.</small>
+                  </div>
+                  <span class="paste-detail-final-badge">FINAL DETAIL</span>
+                </div>
+
+                <div class="paste-detail-meta">
+                  <label>
+                    <span>KP</span>
+                    <select id="pasteDetailKp" onchange="syncPasteDetailSuppliers()">
+                      <option value="">Deteksi otomatis / pilih KP</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Supplier / SPB</span>
+                    <select id="pasteDetailSupplier">
+                      <option value="">Pilih Supplier / SPB</option>
+                    </select>
+                  </label>
+                  <div class="paste-detail-meta-note">
+                    KP boleh terdeteksi otomatis. Supplier wajib dipastikan jika tidak tertulis jelas di laporan.
+                  </div>
+                </div>
+
+                <textarea id="pasteDetailText"
+                  oninput="detectPasteDetailMetadata()"
+                  placeholder="Copy tabel dari sistem internal lalu Paste di sini...&#10;&#10;Contoh kolom: No | No. Bukti | No. Polisi | Nama Petani/Agen | Tonase | Harga | Nilai Pembelian | Tanggal Bayar | Keterangan"></textarea>
+
+                <div class="paste-detail-actions">
+                  <button class="btn btn-primary" onclick="previewPastedDetail()">Preview Audit Paste Detail</button>
+                  <small>Preview tidak menyimpan data. Simpan hanya melalui tombol <b>Simpan sebagai FINAL</b> setelah audit selesai.</small>
+                </div>
               </div>
             </div>
 
@@ -552,14 +601,14 @@
               <div class="monthly-audit-title-row">
                 <div>
                   <span class="subpanel-kicker">PREVIEW AUDIT SEBELUM SIMPAN</span>
-                  <h4>Excel Final — Pemeriksaan Double Input, Selisih & Integritas</h4>
+                  <h4>Data Final — Pemeriksaan Double Input, Selisih & Integritas</h4>
                 </div>
                 <span id="monthlyFinalStatus" class="monthly-final-status">BELUM DIPERIKSA</span>
               </div>
 
               <div class="monthly-audit-cards">
                 <article id="monthlyAuditFinalTotal" class="monthly-audit-card">
-                  <small>TOTAL EXCEL FINAL</small>
+                  <small>TOTAL DATA FINAL</small>
                   <strong data-value>0 kg</strong>
                   <span data-sub>-</span>
                 </article>
@@ -609,14 +658,14 @@
               <div class="monthly-resolution-title-row">
                 <div>
                   <span class="subpanel-kicker">CONFLICT RESOLUTION PANEL</span>
-                  <h4>Putuskan setiap konflik sebelum Excel disimpan sebagai Final</h4>
+                  <h4>Putuskan setiap konflik sebelum data disimpan sebagai Final</h4>
                   <p>Setiap keputusan disimpan ke Audit Trail. Edit Manual wajib memiliki alasan.</p>
                 </div>
                 <span id="monthlyResolutionStatus" class="monthly-resolution-status">Belum ada konflik</span>
               </div>
 
               <div class="monthly-resolution-bulk">
-                <button class="btn btn-primary" onclick="applyMonthlyConflictBulk('use_excel_final')">Gunakan Excel untuk Semua Konflik</button>
+                <button class="btn btn-primary" onclick="applyMonthlyConflictBulk('use_excel_final')">Gunakan Data Final untuk Semua Konflik</button>
                 <button class="btn btn-secondary" onclick="applyMonthlyConflictBulk('keep_existing')">Pertahankan Semua Data Lama</button>
               </div>
 
@@ -919,6 +968,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.10.0"></script>
+  <script src="app.js?v=4.10.2"></script>
 </body>
 </html>
