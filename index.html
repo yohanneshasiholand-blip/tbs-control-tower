@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.10.7">
+  <link rel="stylesheet" href="style.css?v=4.10.9">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -313,8 +313,8 @@
             <div class="monitor-range-head">
               <div>
                 <span class="subpanel-kicker">DETAIL RANGE TANGGAL</span>
-                <h3>Total Tonase & Pengeluaran berdasarkan Tanggal Mulai–Tanggal Akhir</h3>
-                <p>Range audit memisahkan Closing final dengan snapshot LIVE hari ini. Total s/d saat ini = Closing final + LIVE terbaru hanya jika hari ini belum closing.</p>
+                <h3>Pencarian Tonase berdasarkan Tanggal</h3>
+                <p>Pilih tanggal mulai dan tanggal akhir. Sistem menghitung tonase periode secara otomatis tanpa penjumlahan manual.</p>
               </div>
             </div>
 
@@ -327,48 +327,52 @@
                 <span>Tanggal Akhir</span>
                 <input id="monitorRangeEnd" type="date">
               </label>
-              <button class="btn btn-primary" onclick="loadMonitorRangeDetail()">Tampilkan Range</button>
-              <button class="btn btn-secondary" onclick="syncMonitorRangeFromActivePeriod()">Gunakan Periode Aktif</button>
+              <button class="btn btn-primary tonnage-search-btn" onclick="loadMonitorRangeDetail()">🔍 Cari Tonase</button>
+              <button class="btn btn-secondary" onclick="syncMonitorRangeFromActivePeriod()">Gunakan Bulan Aktif</button>
             </div>
 
-            <div id="monitorRangeStatus" class="monitor-range-status">Pilih range tanggal untuk melihat total detail.</div>
+            <div class="tonnage-search-help">
+              Contoh: pilih <b>01/08/2026</b> sampai <b>27/08/2026</b> lalu klik <b>Cari Tonase</b>.
+              Sistem otomatis memilih data Final yang tersedia dan menghitung hasilnya.
+            </div>
+            <div id="monitorRangeStatus" class="monitor-range-status">Pilih tanggal mulai dan tanggal akhir, lalu klik Cari Tonase.</div>
 
             <div class="monitor-range-kpi-grid monitor-range-audit-grid">
               <article class="monitor-kpi glass monitor-business-tonnage monitor-running-total">
-                <small>TOTAL S/D SAAT INI</small>
+                <small>HASIL TONASE PERIODE</small>
                 <strong id="monitorRangeTotalTonnage">0 kg</strong>
-                <span id="monitorRangeTonnageSub">Closing final + LIVE jika hari ini belum closing</span>
+                <span id="monitorRangeTonnageSub">Dihitung otomatis sesuai tanggal yang dicari</span>
               </article>
               <article class="monitor-kpi glass">
-                <small>CLOSING FINAL RANGE</small>
+                <small>TONASE DARI CLOSING</small>
                 <strong id="monitorRangeClosedTonnage">0 kg</strong>
-                <span id="monitorRangeClosedSub">Akumulasi data final</span>
+                <span id="monitorRangeClosedSub">Akumulasi Closing pada periode pencarian</span>
               </article>
               <article class="monitor-kpi glass monitor-live-kpi">
-                <small>LIVE HARI INI</small>
+                <small>LIVE HARI INI — JIKA TERCAKUP</small>
                 <strong id="monitorRangeLiveTonnage">0 kg</strong>
-                <span id="monitorRangeLiveSub">Snapshot terbaru jika belum Closing</span>
+                <span id="monitorRangeLiveSub">Ditampilkan terpisah agar hasil final tidak rancu</span>
               </article>
               <article class="monitor-kpi glass monitor-business-expense">
-                <small>TOTAL PENGELUARAN RANGE</small>
+                <small>PENGELUARAN PERIODE</small>
                 <strong id="monitorRangeTotalExpense">Rp0</strong>
                 <span id="monitorRangeExpenseSub">Transaksi biaya pada range</span>
               </article>
               <article class="monitor-kpi glass">
-                <small>TOTAL TRIP S/D SAAT INI</small>
+                <small>TRIP PERIODE</small>
                 <strong id="monitorRangeTotalTrips">0</strong>
-                <span id="monitorRangeTripSub">Closing + LIVE tanpa double count</span>
+                <span id="monitorRangeTripSub">Dihitung otomatis dari sumber yang berlaku</span>
               </article>
               <article class="monitor-kpi glass">
-                <small>COVERAGE FINAL</small>
+                <small>HOLD DALAM PERIODE</small>
                 <strong id="monitorRangeCoverage">0 / 0</strong>
-                <span id="monitorRangeCoverageSub">Hari final tersedia</span>
+                <span id="monitorRangeCoverageSub">Sudah termasuk tonase final bila tercakup</span>
               </article>
             </div>
 
             <div class="panel-head row-space monitor-range-detail-head">
               <h3 id="monitorRangeDetailTitle">DETAIL TOTAL PER KP — RANGE TANGGAL</h3>
-              <span class="monitor-rule-note">Prioritas sumber: Audit Resmi → Closing Excel → Closing WhatsApp → Excel Bulanan (derived)</span>
+              <span class="monitor-rule-note">Sistem memilih sumber terbaik otomatis • tidak perlu hitung manual</span>
             </div>
             <div id="monitorRangeDetailTable" class="table-wrap monitor-range-detail-table">
               <div class="master-empty">Belum ada range tanggal dipilih.</div>
@@ -977,6 +981,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.10.7"></script>
+  <script src="app.js?v=4.10.9"></script>
 </body>
 </html>
