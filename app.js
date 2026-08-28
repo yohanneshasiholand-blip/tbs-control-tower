@@ -103,14 +103,31 @@ function toggleSidebarGroup(id){
   el.classList.toggle("open",willOpen);
 }
 function setSidebarMonitoringActive(mode){
-  ["daily","monthly","yearly"].forEach(m=>{
-    const id=m==="daily"?"sideDaily":m==="monthly"?"sideMonthly":"sideYearly";
+  const ids={
+    daily:"sideDaily",
+    monthly:"sideMonthly",
+    yearly:"sideYearly",
+    analysis:"sideAnalysis"
+  };
+  Object.entries(ids).forEach(([m,id])=>{
     $(id)?.classList.toggle("active",m===mode);
   });
   $("monitoringGroup")?.classList.add("open");
 }
+function ensureProductionAnalysisRange(){
+  const today=localTodayISO();
+  if($("monitorRangeStart") && !$("monitorRangeStart").value){
+    $("monitorRangeStart").value=`${today.slice(0,7)}-01`;
+  }
+  if($("monitorRangeEnd") && !$("monitorRangeEnd").value){
+    $("monitorRangeEnd").value=today;
+  }
+}
+
 async function openMonitoringSub(mode){
+  MONITOR_MODE=mode;
   setSidebarMonitoringActive(mode);
+  if(mode==="analysis") ensureProductionAnalysisRange();
   await goToPage("monitoring");
   setMonitorMode(mode);
 }
@@ -5206,6 +5223,7 @@ async function initKPMonitoringFilters(){
   if(years.includes(currentYear)) $("monitorYear").value=String(currentYear);
 }
 function setMonitorMode(mode){
+  if(!["daily","monthly","yearly","analysis"].includes(mode)) mode="daily";
   MONITOR_MODE=mode;
   setSidebarMonitoringActive(mode);
 
@@ -5214,24 +5232,52 @@ function setMonitorMode(mode){
     $(panelId)?.classList.toggle("active",m===mode);
   });
 
-  $("monitorDateWrap").classList.toggle("hidden",mode!=="daily");
-  $("monitorMonthWrap").classList.toggle("hidden",mode!=="monthly");
-  $("monitorYearWrap").classList.toggle("hidden",mode!=="yearly");
+  const isAnalysis=mode==="analysis";
+
+  // Standard Monitoring summary belongs to Harian/Bulanan/Tahunan only.
+  $("monitorBusinessKpiGrid")?.classList.toggle("hidden",isAnalysis);
+  $("monitorBusinessSummaryHead")?.classList.toggle("hidden",isAnalysis);
+  $("monitorKpPeriodSummaryTable")?.classList.toggle("hidden",isAnalysis);
+
+  // Dedicated meeting-analysis dashboard.
+  $("monitorProductionAnalysisPanel")?.classList.toggle("hidden",!isAnalysis);
+
+  $("monitorDateWrap")?.classList.toggle("hidden",mode!=="daily");
+  $("monitorMonthWrap")?.classList.toggle("hidden",mode!=="monthly");
+  $("monitorYearWrap")?.classList.toggle("hidden",mode!=="yearly");
 
   const titleMap={
-    daily:["Monitoring • Harian","Snapshot WhatsApp 10.00 / 12.00 / 15.00 / 17.00 dibandingkan dengan Closing Tonase final pukul 00.00."],
-    monthly:["Monitoring • Bulanan","Analisis tonase bulanan per KP dan upload Excel data bulanan."],
-    yearly:["Monitoring • Tahunan","Analisis tonase tahunan per KP dan upload Excel data tahunan."]
+    daily:[
+      "Monitoring • Harian",
+      "Snapshot WhatsApp 10.00 / 12.00 / 15.00 / 17.00 dibandingkan dengan Closing Tonase final pukul 00.00."
+    ],
+    monthly:[
+      "Monitoring • Bulanan",
+      "Analisis tonase bulanan per KP dan upload Excel data bulanan."
+    ],
+    yearly:[
+      "Monitoring • Tahunan",
+      "Analisis tonase tahunan per KP dan upload Excel data tahunan."
+    ],
+    analysis:[
+      "Monitoring • Analisa Produksi",
+      "Evaluasi produksi untuk meeting: ranking KP, benchmark, kg/trip, HOLD, biaya, tren operasional, dan executive insight."
+    ]
   };
   if($("monitorPageTitle")) $("monitorPageTitle").textContent=titleMap[mode][0];
   if($("monitorPageSubtitle")) $("monitorPageSubtitle").textContent=titleMap[mode][1];
 
+  if(isAnalysis) ensureProductionAnalysisRange();
   loadKPMonitoring();
 }
-
 function monitorPeriodLabel(mode){
   if(mode==="daily") return $("monitorDate")?.value || "-";
   if(mode==="monthly") return $("monitorMonth")?.value || "-";
+  if(mode==="analysis"){
+    const a=$("monitorRangeStart")?.value||"-";
+    const b=$("monitorRangeEnd")?.value||"-";
+    return `${a} s.d. ${b}`;
+  }
   return $("monitorYear")?.value || "-";
 }
 
@@ -5467,7 +5513,14 @@ function inclusiveDateCount(start,end){
 function syncMonitorRangeFromActivePeriod(){
   let start=null,end=null;
 
-  if(MONITOR_MODE==="daily"){
+  if(MONITOR_MODE==="analysis"){
+    const today=localTodayISO();
+    const reference=$("monitorRangeEnd")?.value || today;
+    const ym=reference.slice(0,7);
+    const bounds=yearMonthBounds(ym);
+    start=bounds.start;
+    end=ym===today.slice(0,7) ? today : bounds.end;
+  }else if(MONITOR_MODE==="daily"){
     const d=$("monitorDate")?.value||null;
     start=d; end=d;
   }else if(MONITOR_MODE==="monthly"){
@@ -5488,7 +5541,6 @@ function syncMonitorRangeFromActivePeriod(){
   if(end && $("monitorRangeEnd")) $("monitorRangeEnd").value=end;
   return loadMonitorRangeDetail();
 }
-
 async function fetchMonitorRangeClosingRows(start,end,kp){
   const pageSize=1000;
   let offset=0;
@@ -6222,16 +6274,18 @@ async function loadKPMonitoring(){
   if(!$("monitorKp")) return;
   const kp=$("monitorKp").value || "ALL";
 
+  if(MONITOR_MODE==="analysis"){
+    ensureProductionAnalysisRange();
+    if($("monitorRangeStart")?.value && $("monitorRangeEnd")?.value){
+      await loadMonitorRangeDetail();
+    }
+    return;
+  }
+
   if(MONITOR_MODE==="daily") await loadKPDaily(kp);
   else if(MONITOR_MODE==="monthly") await loadKPMonthlyPanel(kp);
   else await loadKPYearlyPanel(kp);
-
-  // Keep the independent Detail Range in sync with the selected KP.
-  if($("monitorRangeStart")?.value && $("monitorRangeEnd")?.value){
-    await loadMonitorRangeDetail();
-  }
 }
-
 function setMonthlyPanelSummary({kp,period,tonnage,trips,coverage,tonnageSub,tripsSub,coverageSub}){
   $("monthlyKpiKp").textContent=kp==="ALL"?"Semua KP":kp;
   $("monthlyKpiPeriod").textContent=period;
