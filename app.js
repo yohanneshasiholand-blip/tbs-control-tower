@@ -67,6 +67,7 @@ async function showApp(user){
   $("loginView").classList.add("hidden");
   $("appView").classList.remove("hidden");
   $("userLabel").textContent = user.email;
+  ensureAnalysisSidebarEntry();
   bindNav();
   startClock();
   await loadMaster();
@@ -83,7 +84,33 @@ function startClock(){
   };
   tick(); setInterval(tick, 1000);
 }
+function ensureAnalysisSidebarEntry(){
+  const submenu=document.querySelector("#monitoringGroup .classic-submenu");
+  if(submenu && !$("sideAnalysis")){
+    const btn=document.createElement("button");
+    btn.className="classic-child classic-child-analysis";
+    btn.id="sideAnalysis";
+    btn.type="button";
+    btn.innerHTML='<span class="classic-list-icon">◈</span><b>Analisa Produksi</b>';
+    btn.addEventListener("click",()=>openMonitoringSub("analysis"));
+    submenu.appendChild(btn);
+  }
+
+  const sidebar=document.querySelector(".sidebar");
+  if(sidebar){
+    let badge=$("buildVersionBadge");
+    if(!badge){
+      badge=document.createElement("div");
+      badge.id="buildVersionBadge";
+      badge.className="build-version-badge";
+      sidebar.appendChild(badge);
+    }
+    badge.textContent="BUILD v4.12.2";
+  }
+}
+
 function bindNav(){
+  ensureAnalysisSidebarEntry();
   document.querySelectorAll(".nav").forEach(btn => btn.addEventListener("click", () => goToPage(btn.dataset.page)));
 }
 
@@ -154,6 +181,7 @@ async function openExpenseMonitoring(){
 }
 
 function goToPage(page){
+  ensureAnalysisSidebarEntry();
   document.querySelectorAll(".nav").forEach(x => x.classList.toggle("active", x.dataset.page===page));
   document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
   $("page-" + page).classList.add("active");
