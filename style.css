@@ -3325,3 +3325,207 @@ table {
 .tonnage-search-help b{
   color:#80f591;
 }
+
+
+/* =========================================================
+   AVERAGE KP MONTH KPI — v4.11.0
+   ========================================================= */
+.monitor-avg-kp-kpi{
+  border-color:rgba(103,207,255,.24) !important;
+}
+.monitor-avg-kp-kpi strong{
+  color:#a9e0ff;
+}
+
+
+/* =========================================================
+   PRODUCTION ANALYSIS FOR MEETING — v4.12.0
+   ========================================================= */
+.production-analysis-head{
+  align-items:center;
+}
+.production-analysis-badge{
+  padding:6px 10px;
+  border:1px solid rgba(126,244,141,.30);
+  border-radius:999px;
+  background:rgba(25,92,39,.20);
+  color:#8df39a;
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:.08em;
+  white-space:nowrap;
+}
+.production-analysis-btn{
+  min-width:165px;
+  font-weight:900;
+}
+.production-analysis-help{
+  margin-top:8px;
+  padding:8px 10px;
+  border:1px solid rgba(108,201,255,.18);
+  border-radius:10px;
+  background:rgba(21,64,87,.14);
+  color:#c5d8df;
+  font-size:9px;
+  line-height:1.45;
+}
+.production-analysis-help b{
+  color:#a9e0ff;
+}
+.production-kpi-grid{
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}
+.production-primary-kpi{
+  border-color:rgba(96,244,118,.34) !important;
+}
+.production-primary-kpi strong{
+  color:#80f590;
+}
+.production-efficiency-kpi{
+  border-color:rgba(108,201,255,.24) !important;
+}
+.production-efficiency-kpi strong{
+  color:#a9e0ff;
+}
+.production-top-kpi{
+  border-color:rgba(125,244,141,.25) !important;
+}
+.production-top-kpi strong{
+  color:#7ff58e;
+}
+.production-bottom-kpi{
+  border-color:rgba(242,198,100,.25) !important;
+}
+.production-bottom-kpi strong{
+  color:#f2d37a;
+}
+.production-analysis-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:11px;
+}
+.production-analysis-card{
+  padding:11px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:13px;
+  background:rgba(6,15,9,.28);
+}
+.production-analysis-chart{
+  min-height:330px;
+}
+.production-trend-card{
+  margin-top:10px;
+}
+.production-trend-chart{
+  min-height:280px;
+}
+.production-insight-card{
+  margin-top:10px;
+  padding:12px;
+  border:1px solid rgba(126,244,141,.20);
+  border-radius:13px;
+  background:linear-gradient(135deg,rgba(19,70,30,.22),rgba(11,32,39,.20));
+}
+.production-insight-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+.production-insight-head h3{
+  margin:3px 0 0;
+  color:#f3f1eb;
+  font-size:13px;
+}
+.production-insight-badge{
+  padding:5px 8px;
+  border:1px solid rgba(125,244,141,.26);
+  border-radius:999px;
+  color:#83f393;
+  background:rgba(21,78,32,.20);
+  font-size:8px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.production-insight-body{
+  margin-top:10px;
+}
+.production-insight-period{
+  color:#9fdcff;
+  font-size:9px;
+  font-weight:900;
+  margin-bottom:8px;
+}
+.production-insight-list{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:7px;
+}
+.production-insight-item{
+  display:grid;
+  grid-template-columns:22px 1fr;
+  gap:7px;
+  padding:8px;
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:9px;
+  background:rgba(255,255,255,.025);
+}
+.production-insight-item>span{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  background:rgba(69,207,91,.15);
+  color:#7df18d;
+  font-size:8px;
+  font-weight:900;
+}
+.production-insight-item p{
+  margin:0;
+  color:#cbd3cc;
+  font-size:9px;
+  line-height:1.45;
+}
+.production-insight-item b{
+  color:#f0eee8;
+}
+.production-insight-foot{
+  margin-top:8px;
+  padding-top:7px;
+  border-top:1px dashed rgba(255,255,255,.08);
+  color:#9eaaa0;
+  font-size:8px;
+  line-height:1.4;
+}
+.production-ranking-head{
+  margin-top:12px;
+}
+.production-analysis-table table{
+  min-width:1350px;
+}
+@media(max-width:1100px){
+  .production-kpi-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+@media(max-width:820px){
+  .production-analysis-grid{
+    grid-template-columns:1fr;
+  }
+  .production-insight-list{
+    grid-template-columns:1fr;
+  }
+}
+@media(max-width:560px){
+  .production-kpi-grid{
+    grid-template-columns:1fr;
+  }
+  .production-analysis-head,
+  .production-insight-head{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+}
