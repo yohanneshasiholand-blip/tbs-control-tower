@@ -3267,3 +3267,7 @@ table {
   font-weight:900;
   letter-spacing:.07em;
 }
+
+
+/* v4.10.7 — tonnage is the hard-integrity gate for Paste Detail.
+   Purchase-value mismatch is audit warning only. */
