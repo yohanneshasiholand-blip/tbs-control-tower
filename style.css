@@ -3550,3 +3550,34 @@ table {
 .monitor-production-analysis.hidden{
   display:none !important;
 }
+
+
+/* =========================================================
+   SIDEBAR NAV SELF-CHECK — v4.12.2
+   ========================================================= */
+#monitoringGroup.open .classic-submenu{
+  display:block !important;
+  overflow:visible !important;
+  max-height:none !important;
+  height:auto !important;
+}
+#sideAnalysis{
+  display:flex !important;
+  visibility:visible !important;
+  opacity:1 !important;
+}
+#sideAnalysis .classic-list-icon{
+  color:#7cf08b;
+}
+.build-version-badge{
+  margin:12px 10px 8px;
+  padding:5px 7px;
+  border:1px solid rgba(130,244,145,.18);
+  border-radius:7px;
+  background:rgba(12,42,19,.18);
+  color:#93c89a;
+  text-align:center;
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.08em;
+}
