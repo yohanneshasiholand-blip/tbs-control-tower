@@ -3419,7 +3419,12 @@ function splitDetailPasteLine(raw){
   }
 
   if(line.includes("\t")){
-    return line.split(/\t+/).map(cleanDetailPasteCell);
+    // IMPORTANT: preserve empty cells.
+    // Browser/table clipboard data may contain consecutive TABs when
+    // No. Bukti, Tanggal Bayar or Keterangan is blank.
+    // Splitting with /\t+/ collapses those blank columns and shifts
+    // No Polisi / Tonase / Date into the wrong indexes.
+    return line.split("\t").map(cleanDetailPasteCell);
   }
 
   // Fallback for plain-text table copied without tabs.
@@ -3512,7 +3517,7 @@ function parsePastedDetailTable(text,kp,supplier){
   let ignored=0;
 
   for(const rawLine of String(text||"").split(/\r?\n/)){
-    const cells=splitDetailPasteLine(rawLine).filter((v,i,a)=>!(i===a.length-1 && !v));
+    const cells=splitDetailPasteLine(rawLine);
     if(!cells.length) continue;
 
     const first=cleanDetailPasteCell(cells[0]);
@@ -3929,7 +3934,8 @@ async function previewPastedDetail(){
       `STATUS PEMBAYARAN\n`+
       `PAID / bertanggal: ${parsed.paidTransactions.length} trip • ${kg(parsed.paidKg)}\n`+
       `HOLD / tanggal kosong: ${parsed.holdTransactions.length} trip • ${kg(parsed.holdKg)}\n`+
-      `Catatan: HOLD tetap dihitung dalam Total Final, tetapi tidak dialokasikan ke tanggal Closing.\n\n`+
+      `Catatan: HOLD tetap dihitung dalam Total Final, tetapi tidak dialokasikan ke tanggal Closing.\n`+
+      `Validasi struktur: ${parsed.ignored===0?"Semua baris transaksi terbaca ✓":`${parsed.ignored} baris non-transaksi/header diabaikan`}\n\n`+
 
       `ANTI-DOUBLE DETAIL\n`+
       `Sudah sama: ${exactDuplicateCount}\n`+
