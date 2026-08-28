@@ -3407,9 +3407,19 @@ function cleanDetailPasteCell(v){
 }
 
 function splitDetailPasteLine(raw){
-  const line=String(raw||"").trim();
-  if(!line) return [];
+  // Keep the original line intact. Trailing TABs are meaningful because they
+  // represent blank Tanggal Bayar / Keterangan cells on HOLD transactions.
+  const original=String(raw??"").replace(/\r$/,"");
+  if(!original.trim()) return [];
 
+  // Clipboard from browser/internal system: preserve EVERY empty column.
+  if(original.includes("\t")){
+    return original.split("\t").map(cleanDetailPasteCell);
+  }
+
+  const line=original.trim();
+
+  // Markdown table.
   if(line.includes("|")){
     return line
       .replace(/^\s*\|/,"")
@@ -3418,18 +3428,9 @@ function splitDetailPasteLine(raw){
       .map(cleanDetailPasteCell);
   }
 
-  if(line.includes("\t")){
-    // IMPORTANT: preserve empty cells.
-    // Browser/table clipboard data may contain consecutive TABs when
-    // No. Bukti, Tanggal Bayar or Keterangan is blank.
-    // Splitting with /\t+/ collapses those blank columns and shifts
-    // No Polisi / Tonase / Date into the wrong indexes.
-    return line.split("\t").map(cleanDetailPasteCell);
-  }
-
   // Fallback for plain-text table copied without tabs.
   const m=line.match(
-    /^\s*(\d+)\s+([A-Z0-9\/\-]+)\s+([A-Z]{1,2}\s*\d{1,4}\s*[A-Z]{1,3})\s+(.+?)\s+([\d.]+)\s+(Rp\.?\s*[\d.]+)\s+(Rp\.?\s*[\d.]+)\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})\s+(.+?)\s*$/i
+    /^\s*(\d+)\s+([A-Z0-9\/\-]*)\s+([A-Z]{1,2}\s*\d{1,4}\s*[A-Z]{1,3})\s+(.+?)\s+([\d.]+)\s+(Rp\.?\s*[\d.]+)\s+(Rp\.?\s*[\d.]+)(?:\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4}))?(?:\s+(.+?))?\s*$/i
   );
   return m ? m.slice(1).map(cleanDetailPasteCell) : [];
 }
@@ -3515,6 +3516,7 @@ function parsePastedDetailTable(text,kp,supplier){
   let declaredTotal=null;
   let purchaseDeclared=null;
   let ignored=0;
+  let paddedHoldRows=0;
 
   for(const rawLine of String(text||"").split(/\r?\n/)){
     const cells=splitDetailPasteLine(rawLine);
@@ -3537,10 +3539,16 @@ function parsePastedDetailTable(text,kp,supplier){
       ignored++;
       continue;
     }
-    if(cells.length<8){
+    if(cells.length<7){
       ignored++;
       continue;
     }
+
+    // Some clipboard implementations omit trailing empty cells entirely.
+    // Pad them so index 7 remains Tanggal Bayar and index 8 remains Keterangan.
+    const originalCellCount=cells.length;
+    while(cells.length<9) cells.push("");
+    if(originalCellCount>=7 && originalCellCount<9) paddedHoldRows++;
 
     const sequence=Number(first);
     const proof=cleanDetailPasteCell(cells[1]);
@@ -3599,7 +3607,7 @@ function parsePastedDetailTable(text,kp,supplier){
     totalKg,paidKg,holdKg,purchaseTotal,declaredTotal,purchaseDeclared,
     integrityOk:declaredTotal==null || declaredTotal===totalKg,
     purchaseIntegrityOk:purchaseDeclared==null || purchaseDeclared===purchaseTotal,
-    ignored,
+    ignored,paddedHoldRows,
     startDate:period?.start || dates[0] || null,
     endDate:period?.end || dates[dates.length-1] || null
   };
@@ -3872,7 +3880,7 @@ async function previewPastedDetail(){
           integrityIssues:[
             !parsed.period ? "Periode laporan tidak terdeteksi" : null,
             !parsed.integrityOk
-              ? `Total tonase transaksi ${kg(parsed.totalKg)} ≠ Total laporan ${kg(parsed.declaredTotal)}`
+              ? `Total transaksi ${kg(parsed.totalKg)} ≠ Total laporan ${kg(parsed.declaredTotal)} • kurang ${kg(Number(parsed.declaredTotal||0)-Number(parsed.totalKg||0))}`
               : null,
             !parsed.purchaseIntegrityOk
               ? `Nilai pembelian transaksi ${rupiah(parsed.purchaseTotal)} ≠ Total laporan ${rupiah(parsed.purchaseDeclared)}`
@@ -3935,7 +3943,8 @@ async function previewPastedDetail(){
       `PAID / bertanggal: ${parsed.paidTransactions.length} trip • ${kg(parsed.paidKg)}\n`+
       `HOLD / tanggal kosong: ${parsed.holdTransactions.length} trip • ${kg(parsed.holdKg)}\n`+
       `Catatan: HOLD tetap dihitung dalam Total Final, tetapi tidak dialokasikan ke tanggal Closing.\n`+
-      `Validasi struktur: ${parsed.ignored===0?"Semua baris transaksi terbaca ✓":`${parsed.ignored} baris non-transaksi/header diabaikan`}\n\n`+
+      `Validasi struktur: ${parsed.ignored===0?"Semua baris transaksi terbaca ✓":`${parsed.ignored} baris non-transaksi/header diabaikan`}\n`+
+      `Baris trailing-kosong dipulihkan: ${parsed.paddedHoldRows||0}\n\n`+
 
       `ANTI-DOUBLE DETAIL\n`+
       `Sudah sama: ${exactDuplicateCount}\n`+
