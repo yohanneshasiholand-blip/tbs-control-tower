@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.12.0">
+  <link rel="stylesheet" href="style.css?v=4.12.1">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -60,6 +60,9 @@
             </button>
             <button class="classic-child" id="sideYearly" onclick="openMonitoringSub('yearly')">
               <span class="classic-list-icon">☷</span><b>Tahunan</b>
+            </button>
+            <button class="classic-child classic-child-analysis" id="sideAnalysis" onclick="openMonitoringSub('analysis')">
+              <span class="classic-list-icon">◈</span><b>Analisa Produksi</b>
             </button>
           </div>
         </div>
@@ -278,7 +281,7 @@
 
         <!-- KP BUSINESS SUMMARY: follows Harian / Bulanan / Tahunan filter -->
         <section class="monitor-business-summary">
-          <div class="monitor-business-kpi-grid">
+          <div id="monitorBusinessKpiGrid" class="monitor-business-kpi-grid">
             <article class="monitor-kpi glass monitor-business-tonnage">
               <small>TOTAL TONASE PERIODE</small>
               <strong id="monitorPeriodTonnage">0 kg</strong>
@@ -302,12 +305,13 @@
           </div>
 
           <article class="panel glass monitor-kp-business-table-panel">
-            <div class="panel-head row-space">
+            <div id="monitorBusinessSummaryHead" class="panel-head row-space">
               <h3 id="monitorKpPeriodSummaryTitle">RINGKASAN TONASE & PENGELUARAN SELURUH KP</h3>
               <span id="monitorKpPeriodSummaryNote" class="monitor-rule-note">-</span>
             </div>
             <div id="monitorKpPeriodSummaryTable" class="table-wrap monitor-kp-business-table"></div>
 
+            <div id="monitorProductionAnalysisPanel" class="monitor-production-analysis hidden">
             <div class="monitor-range-divider"></div>
 
             <div class="monitor-range-head production-analysis-head">
@@ -434,6 +438,7 @@
             <div id="monitorRangeDetailTable" class="table-wrap monitor-range-detail-table production-analysis-table">
               <div class="master-empty">Belum ada analisa produksi.</div>
             </div>
+            </div><!-- /monitorProductionAnalysisPanel -->
           </article>
         </section>
 
@@ -1038,6 +1043,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.12.0"></script>
+  <script src="app.js?v=4.12.1"></script>
 </body>
 </html>
