@@ -333,6 +333,247 @@ function isClosingKpTonnageReport(text){
   return true;
 }
 
+
+function monthlyCumulativeKpFromText(text){
+  const source=String(text||"")
+    .replace(/\u00a0/g," ")
+    .replace(/[＊*_`~]/g,"")
+    .replace(/\s+/g," ")
+    .trim();
+
+  // Examples:
+  // "Tonase KP. MSB s/d 26 Agustus 2026"
+  // "Tonase ASMJ 2 s/d 26 Agustus 2026"
+  const m=source.match(/\bTonase\s+(?:KP\s*[.:\-]?\s*)?(.+?)\s+s\s*\/?\s*d\s+\d{1,2}\s+(?:Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+\d{4}\b/i);
+  if(!m) return null;
+  return normalizeClosingKpAlias(m[1]) || canonKP(m[1]);
+}
+
+function isMonthlyCumulativeReport(text){
+  const source=String(text||"")
+    .replace(/\u00a0/g," ")
+    .replace(/[＊*_`~]/g,"");
+  return /\bTonase\b[\s\S]*\bs\s*\/?\s*d\b/i.test(source) &&
+         !!monthlyCumulativeKpFromText(source) &&
+         !!parseHeader(source)?.date;
+}
+
+function parseMonthlyCumulativeWhatsApp(text){
+  const parsed=parseHeader(text)||{};
+  const kp=monthlyCumulativeKpFromText(text);
+  const manualDate=$("tonnageInputDate")?.value || null;
+  const reportDate=parsed.date || manualDate || null;
+
+  if(!kp) throw Error("KP pada laporan tonase s/d tanggal tidak ditemukan.");
+  if(!reportDate) throw Error("Tanggal akhir laporan tonase s/d tanggal tidak ditemukan.");
+
+  const periodStart=`${reportDate.slice(0,7)}-01`;
+  const dateMismatch=!!(parsed.date && manualDate && parsed.date!==manualDate);
+
+  const rows=[];
+  let declared=null;
+
+  for(const raw of String(text||"").split(/\r?\n/)){
+    const line=cleanTonnageLine(raw);
+    if(!line) continue;
+
+    // Ignore heading / greeting.
+    if(/\bTonase\b/i.test(line) && /\bs\s*\/?\s*d\b/i.test(line)) continue;
+    if(/^(?:Selamat|Berikut)\b/i.test(line)) continue;
+
+    const colon=line.indexOf(":");
+    if(colon<0) continue;
+
+    const label=line.slice(0,colon).trim();
+    const valueText=line.slice(colon+1).trim();
+    const parsedValue=parseClosingValuePart(valueText);
+
+    if(/^TOTAL\b/i.test(label)){
+      declared=parsedValue.amount;
+      continue;
+    }
+
+    if(!label) continue;
+    const supplier=canonSupplierForKP(kp,label) || label;
+    rows.push({
+      kp_code:kp,
+      supplier_name:supplier,
+      tonnage_kg:Number(parsedValue.amount||0)
+    });
+  }
+
+  if(!rows.length) throw Error("Supplier/tonase cumulative tidak terbaca.");
+
+  // Last explicit supplier line wins.
+  const map=new Map();
+  rows.forEach(r=>{
+    const key=String(r.supplier_name||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    map.set(key,r);
+  });
+  const finalRows=[...map.values()];
+  const total=finalRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+
+  return {
+    mode:"mtd_audit",
+    kp,
+    date:reportDate,
+    report_date:reportDate,
+    period_start:periodStart,
+    rows:finalRows,
+    total,
+    declared,
+    validTotal:declared==null || declared===total,
+    dateMismatch,
+    timeMismatch:false,
+    dateSource:parsed.date?"header WhatsApp":"pilihan tanggal"
+  };
+}
+
+async function compareMonthlyCumulativeToSystem(p){
+  let q=db.from("kp_daily_history")
+    .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count,source_file")
+    .gte("report_date",p.period_start)
+    .lte("report_date",p.report_date)
+    .eq("kp_code",p.kp);
+
+  const {data,error}=await q;
+  if(error) throw Error("Gagal menghitung MTD sistem: "+error.message);
+
+  const canonical=summarizeClosingHistory(data||[]).selected;
+  const systemBySupplier={};
+  canonical.forEach(r=>{
+    const supplier=canonSupplierForKP(p.kp,r.supplier_name) || r.supplier_name || "ALL";
+    const key=String(supplier).toUpperCase().replace(/[^A-Z0-9]/g,"");
+    if(!systemBySupplier[key]){
+      systemBySupplier[key]={supplier_name:supplier,tonnage_kg:0,trips:0};
+    }
+    systemBySupplier[key].tonnage_kg+=Number(r.tonnage_kg||0);
+    systemBySupplier[key].trips+=Number(r.trip_count||0);
+  });
+
+  const waBySupplier={};
+  p.rows.forEach(r=>{
+    const key=String(r.supplier_name||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+    waBySupplier[key]=r;
+  });
+
+  const keys=[...new Set([...Object.keys(systemBySupplier),...Object.keys(waBySupplier)])];
+  const supplierCompare=keys.map(key=>{
+    const sys=systemBySupplier[key]||{supplier_name:waBySupplier[key]?.supplier_name||key,tonnage_kg:0,trips:0};
+    const wa=waBySupplier[key]||{supplier_name:sys.supplier_name,tonnage_kg:0};
+    const diff=Number(wa.tonnage_kg||0)-Number(sys.tonnage_kg||0);
+    return {
+      supplier_name:wa.supplier_name||sys.supplier_name,
+      whatsapp_kg:Number(wa.tonnage_kg||0),
+      system_kg:Number(sys.tonnage_kg||0),
+      trips:Number(sys.trips||0),
+      diff_kg:diff,
+      match:diff===0
+    };
+  });
+
+  const systemTotal=canonical.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const systemTrips=canonical.reduce((a,r)=>a+Number(r.trip_count||0),0);
+  const whatsappTotal=p.declared==null ? p.total : p.declared;
+  const diff=Number(whatsappTotal||0)-systemTotal;
+  const days=[...new Set(canonical.map(r=>r.report_date))].length;
+
+  return {
+    systemTotal,
+    systemTrips,
+    whatsappTotal:Number(whatsappTotal||0),
+    diff,
+    match:diff===0,
+    days,
+    supplierCompare,
+    sourceLabel:closingSourceLabelForRows(canonical)
+  };
+}
+
+async function getSystemMtdForDate(kp,date){
+  if(!date) return {total:0,trips:0,days:0,rows:[],sourceLabel:"-"};
+  const start=`${date.slice(0,7)}-01`;
+
+  let q=db.from("kp_daily_history")
+    .select("report_date,kp_code,supplier_name,tonnage_kg,trip_count,source_file")
+    .gte("report_date",start)
+    .lte("report_date",date);
+  if(kp!=="ALL") q=q.eq("kp_code",kp);
+
+  const {data,error}=await q;
+  if(error) throw Error("Gagal menghitung MTD: "+error.message);
+
+  const rows=summarizeClosingHistory(data||[]).selected;
+  return {
+    total:rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0),
+    trips:rows.reduce((a,r)=>a+Number(r.trip_count||0),0),
+    days:new Set(rows.map(r=>r.report_date)).size,
+    rows,
+    sourceLabel:rows.length?closingSourceLabelForRows(rows):"Belum ada Closing"
+  };
+}
+
+async function getLatestStoredMtdAudit(kp,date){
+  if(!date || kp==="ALL") return null;
+  const monthStart=`${date.slice(0,7)}-01`;
+
+  const {data,error}=await db.from("monthly_cumulative_snapshots")
+    .select("period_start,report_date,kp_code,supplier_name,tonnage_kg,declared_total_kg,created_at")
+    .eq("kp_code",kp)
+    .gte("report_date",monthStart)
+    .lte("report_date",date)
+    .order("report_date",{ascending:false})
+    .order("created_at",{ascending:false})
+    .limit(100);
+
+  if(error) throw Error("Gagal membaca audit MTD WhatsApp: "+error.message);
+  if(!data?.length) return null;
+
+  const latestDate=data[0].report_date;
+  const rows=data.filter(r=>r.report_date===latestDate);
+  const total=rows[0]?.declared_total_kg!=null
+    ? Number(rows[0].declared_total_kg)
+    : rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+
+  return {report_date:latestDate,total,rows};
+}
+
+async function loadDailyMtdKpis(kp,date){
+  if(!$("dailyMtdSystem")) return;
+
+  try{
+    const system=await getSystemMtdForDate(kp,date);
+    $("dailyMtdSystem").textContent=kg(system.total);
+    $("dailyMtdSystemSub").textContent=
+      `${date?.slice(0,7)} • ${system.days} hari data • ${kp==="ALL"?"Semua KP":kp}`;
+
+    if(kp==="ALL"){
+      $("dailyMtdWa").textContent="—";
+      $("dailyMtdWaSub").textContent="Pilih 1 KP untuk membandingkan laporan WA s/d tanggal";
+      return;
+    }
+
+    const wa=await getLatestStoredMtdAudit(kp,date);
+    if(!wa){
+      $("dailyMtdWa").textContent="Belum ada";
+      $("dailyMtdWaSub").textContent="Paste laporan 'Tonase KP ... s/d tanggal' untuk audit";
+      return;
+    }
+
+    const sysAtWa=await getSystemMtdForDate(kp,wa.report_date);
+    const diff=Number(wa.total||0)-Number(sysAtWa.total||0);
+    $("dailyMtdWa").textContent=kg(wa.total);
+    $("dailyMtdWaSub").textContent=
+      `${wa.report_date} • ${diff===0?"COCOK ✓":`SELISIH ${diff>=0?"+":""}${kg(diff)}`}`;
+  }catch(e){
+    console.error(e);
+    $("dailyMtdSystem").textContent="—";
+    $("dailyMtdSystemSub").textContent="Gagal menghitung MTD";
+    $("dailyMtdWa").textContent="—";
+    $("dailyMtdWaSub").textContent=e.message;
+  }
+}
+
 function parseClosingValuePart(valueText){
   const s=String(valueText||"")
     .replace(/\u00a0/g," ")
@@ -585,6 +826,7 @@ function parseTonnage(text){
   };
 }
 function setTonnageInputMode(mode){
+  const isMtd=mode==="mtd_audit";
   const isClosing=mode==="closing_kp" || mode==="closing_batch";
   const isBatch=mode==="closing_batch";
   const badge=$("tonnageModeBadge");
@@ -592,17 +834,22 @@ function setTonnageInputMode(mode){
   const timeSelect=$("tonnageSnapshotTime");
 
   if(badge){
-    badge.textContent=isBatch
-      ? "CLOSING BANYAK KP"
-      : isClosing ? "CLOSING HARIAN PER KP" : "SNAPSHOT 10/12/15/17";
+    badge.textContent=isMtd
+      ? "AUDIT MTD / S.D. TANGGAL"
+      : isBatch
+        ? "CLOSING BANYAK KP"
+        : isClosing ? "CLOSING HARIAN PER KP" : "SNAPSHOT 10/12/15/17";
     badge.classList.toggle("closing-mode",isClosing);
+    badge.classList.toggle("mtd-mode",isMtd);
   }
   if(saveBtn){
-    saveBtn.textContent=isBatch
-      ? "Simpan / Update Semua Closing"
-      : isClosing ? "Simpan / Update Closing Harian" : "Simpan Snapshot";
+    saveBtn.textContent=isMtd
+      ? "Simpan Audit MTD"
+      : isBatch
+        ? "Simpan / Update Semua Closing"
+        : isClosing ? "Simpan / Update Closing Harian" : "Simpan Snapshot";
   }
-  if(timeSelect) timeSelect.disabled=false;
+  if(timeSelect) timeSelect.disabled=isMtd;
 }
 function detectTonnageModeLive(){
   const raw=$("tonnageText")?.value||"";
@@ -610,6 +857,12 @@ function detectTonnageModeLive(){
     setTonnageInputMode("snapshot");
     return;
   }
+
+  if(isMonthlyCumulativeReport(raw)){
+    setTonnageInputMode("mtd_audit");
+    return;
+  }
+
   if(isClosingKpTonnageReport(raw)){
     const count=String(raw).split(/\r?\n/)
       .map(closingKpFromHeading)
@@ -619,10 +872,43 @@ function detectTonnageModeLive(){
     setTonnageInputMode("snapshot");
   }
 }
-
-function previewTonnage(){
+async function previewTonnage(){
   try{
     const raw=$("tonnageText").value;
+
+    if(isMonthlyCumulativeReport(raw)){
+      TONNAGE_PREVIEW=parseMonthlyCumulativeWhatsApp(raw);
+      const p=TONNAGE_PREVIEW;
+      p.comparison=await compareMonthlyCumulativeToSystem(p);
+      setTonnageInputMode("mtd_audit");
+
+      const c=p.comparison;
+      const supplierText=c.supplierCompare.map(x=>
+        `${x.supplier_name}\n`+
+        `  WhatsApp : ${kg(x.whatsapp_kg)}\n`+
+        `  Sistem   : ${kg(x.system_kg)}\n`+
+        `  Selisih  : ${x.diff_kg>=0?"+":""}${kg(x.diff_kg)} ${x.match?"✓":"⚠"}`
+      ).join("\n\n");
+
+      $("tonnagePreview").textContent=
+        `MODE: AUDIT MTD / TONASE S.D. TANGGAL\n`+
+        `KP: ${p.kp}\n`+
+        `Periode: ${p.period_start} s.d. ${p.report_date}\n`+
+        `Tanggal sumber: ${p.dateSource}\n`+
+        `${p.dateMismatch?"⚠ Tanggal pilihan manual berbeda dengan laporan — SIMPAN DIBLOKIR\n":""}`+
+        `WhatsApp MTD: ${kg(c.whatsappTotal)}\n`+
+        `MTD Sistem: ${kg(c.systemTotal)}\n`+
+        `Trip Sistem: ${c.systemTrips.toLocaleString("id-ID")}\n`+
+        `Hari Closing tersedia: ${c.days}\n`+
+        `Sumber sistem: ${c.sourceLabel}\n`+
+        `SELISIH: ${c.diff>=0?"+":""}${kg(c.diff)}\n`+
+        `STATUS: ${c.match?"COCOK ✓":"SELISIH — PERLU AUDIT ⚠"}\n`+
+        `Validasi TOTAL WhatsApp: ${p.validTotal?"COCOK ✓":"TIDAK COCOK ✕"}\n\n`+
+        `CATATAN: laporan ini TIDAK menambah tonase. Hanya disimpan sebagai pembanding/audit MTD.\n\n`+
+        supplierText;
+      return;
+    }
+
     TONNAGE_PREVIEW=isClosingKpTonnageReport(raw)
       ? parseClosingBatchTonnage(raw)
       : parseTonnage(raw);
@@ -686,6 +972,66 @@ function previewTonnage(){
 async function saveTonnage(){
   if(!TONNAGE_PREVIEW) return alert("Preview dahulu.");
   const p=TONNAGE_PREVIEW;
+
+  if(p.mode==="mtd_audit"){
+    if(p.dateMismatch){
+      return alert(
+        "SIMPAN AUDIT DIBLOKIR.\n\nTanggal pilihan manual berbeda dengan tanggal laporan WhatsApp."
+      );
+    }
+    if(!p.validTotal){
+      return alert(
+        "SIMPAN AUDIT DIBLOKIR.\n\n"+
+        `Total supplier: ${kg(p.total)}\n`+
+        `TOTAL laporan: ${kg(p.declared)}\n\n`+
+        "Jumlah supplier harus sama dengan TOTAL."
+      );
+    }
+
+    const payload=p.rows.map(r=>({
+      period_start:p.period_start,
+      report_date:p.report_date,
+      kp_code:p.kp,
+      supplier_name:r.supplier_name,
+      tonnage_kg:Number(r.tonnage_kg||0),
+      declared_total_kg:p.declared==null?p.total:p.declared,
+      source_type:"whatsapp_mtd",
+      raw_text:$("tonnageText").value
+    }));
+
+    const {data:saved,error}=await db.from("monthly_cumulative_snapshots")
+      .upsert(payload,{onConflict:"report_date,kp_code,supplier_name"})
+      .select("report_date,kp_code,supplier_name,tonnage_kg,declared_total_kg");
+
+    if(error) return alert("Gagal menyimpan Audit MTD: "+error.message);
+
+    const c=p.comparison || await compareMonthlyCumulativeToSystem(p);
+
+    alert(
+      `AUDIT MTD BERHASIL DISIMPAN ✓\n\n`+
+      `KP: ${p.kp}\n`+
+      `Periode: ${p.period_start} s.d. ${p.report_date}\n`+
+      `WhatsApp MTD: ${kg(c.whatsappTotal)}\n`+
+      `MTD Sistem: ${kg(c.systemTotal)}\n`+
+      `Selisih: ${c.diff>=0?"+":""}${kg(c.diff)}\n`+
+      `Status: ${c.match?"COCOK":"SELISIH"}\n\n`+
+      `Audit ini TIDAK menambah tonase harian/bulanan.`
+    );
+
+    if($("monitorDate")) $("monitorDate").value=p.report_date;
+    if($("monitorKp")){
+      const hasOption=[...$("monitorKp").options].some(o=>o.value===p.kp);
+      if(hasOption) $("monitorKp").value=p.kp;
+    }
+
+    TONNAGE_PREVIEW=null;
+    $("tonnageText").value="";
+    $("tonnagePreview").textContent="Belum ada preview.";
+    setTonnageInputMode("snapshot");
+    await loadKPDaily(p.kp);
+    await loadDashboard();
+    return;
+  }
 
   if(p.dateMismatch || p.timeMismatch){
     return alert(
@@ -1621,6 +1967,10 @@ async function loadMaster(){
   if($("expenseMonitorKp")) $("expenseMonitorKp").innerHTML=optionsAll;
   if($("historyKp")) $("historyKp").innerHTML=optionsAll;
   if($("monitorKp")) $("monitorKp").innerHTML=optionsAll;
+  if($("pasteDetailKp")){
+    $("pasteDetailKp").innerHTML='<option value="">Deteksi otomatis / pilih KP</option>'+
+      codes.map(code=>`<option value="${code}">${code}</option>`).join("");
+  }
 
   if(kpError){
     console.warn("Master KP Supabase gagal dimuat; memakai fallback dropdown.",kpError);
@@ -1636,6 +1986,7 @@ async function loadMaster(){
     .order("name");
 
   MASTER_SUPPLIER_DATA=supplierError?[]:(s||[]);
+  syncPasteDetailSuppliers();
   renderMasterDirectory();
 }
 
@@ -3030,6 +3381,368 @@ async function saveDailyExcel(){
   await loadDashboard();
 }
 
+
+function detailPasteNumber(value){
+  const s=String(value??"")
+    .replace(/[＊*_`]/g,"")
+    .replace(/Rp\.?/gi,"")
+    .replace(/[^\d,.\-]/g,"")
+    .trim();
+  if(!s) return 0;
+
+  // Operational report uses Indonesian thousand separators:
+  // 5.214 => 5,214 kg; 1.319.451 => 1,319,451 kg.
+  if(/^-?\d{1,3}(?:\.\d{3})+$/.test(s)) return Number(s.replace(/\./g,""));
+  if(/^-?\d{1,3}(?:,\d{3})+$/.test(s)) return Number(s.replace(/,/g,""));
+  if(/^-?\d+$/.test(s)) return Number(s);
+  return Number(s.replace(/\./g,"").replace(",", ".")) || 0;
+}
+
+function cleanDetailPasteCell(v){
+  return String(v??"")
+    .replace(/\u00a0/g," ")
+    .replace(/[＊*_`]/g,"")
+    .replace(/\s+/g," ")
+    .trim();
+}
+
+function splitDetailPasteLine(raw){
+  const line=String(raw||"").trim();
+  if(!line) return [];
+
+  if(line.includes("|")){
+    return line
+      .replace(/^\s*\|/,"")
+      .replace(/\|\s*$/,"")
+      .split("|")
+      .map(cleanDetailPasteCell);
+  }
+
+  if(line.includes("\t")){
+    return line.split(/\t+/).map(cleanDetailPasteCell);
+  }
+
+  // Fallback for plain-text table copied without tabs.
+  const m=line.match(
+    /^\s*(\d+)\s+([A-Z0-9\/\-]+)\s+([A-Z]{1,2}\s*\d{1,4}\s*[A-Z]{1,3})\s+(.+?)\s+([\d.]+)\s+(Rp\.?\s*[\d.]+)\s+(Rp\.?\s*[\d.]+)\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})\s+(.+?)\s*$/i
+  );
+  return m ? m.slice(1).map(cleanDetailPasteCell) : [];
+}
+
+function detailTransactionKey(row){
+  return [
+    canonKP(row.kp_code||""),
+    supplierToken(row.supplier_name||""),
+    row.report_date||"",
+    String(row.proof_no||"").toUpperCase().replace(/\s+/g,""),
+    String(row.vehicle_plate||"").toUpperCase().replace(/\s+/g,""),
+    Number(row.tonnage_kg||0),
+    supplierToken(row.agent_name||"")
+  ].join("|");
+}
+
+function detectPasteDetailKp(text){
+  const explicit=String(text||"").match(/\b(?:KP|KANTOR)\s*[.:\-]?\s*(ASMJ[\s-]*[12]|TKWL[\s-]*[12]|MSB[\s-]*2|KS[\s-]*2|[A-Z]{2,12}(?:-[A-Z0-9]+)?)\b/i);
+  if(explicit) return canonKP(explicit[1]);
+
+  // Fallback to known master token present in the copied report.
+  const found=[];
+  for(const code of FALLBACK_KP_CODES){
+    const rx=new RegExp(`(?:^|[^A-Z0-9])${String(code).replace(/-/g,"[\\s-]*")}(?:[^A-Z0-9]|$)`,"i");
+    if(rx.test(String(text||""))) found.push(code);
+  }
+  return found.length===1 ? found[0] : null;
+}
+
+function syncPasteDetailSuppliers(){
+  const kp=$("pasteDetailKp")?.value||"";
+  const select=$("pasteDetailSupplier");
+  if(!select) return;
+
+  const suppliers=(MASTER_SUPPLIER_DATA||[])
+    .filter(s=>s.active && (s.master_kp?.code||"")===kp)
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+
+  select.innerHTML='<option value="">Pilih Supplier / SPB</option>'+
+    suppliers.map(s=>`<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}${s.full_name&&s.full_name!==s.name?` — ${escapeHtml(s.full_name)}`:""}</option>`).join("");
+
+  if(suppliers.length===1) select.value=suppliers[0].name;
+}
+
+function detectPasteDetailMetadata(){
+  const raw=$("pasteDetailText")?.value||"";
+  if(!$("pasteDetailKp")) return;
+  if(!$("pasteDetailKp").value){
+    const detected=detectPasteDetailKp(raw);
+    if(detected && [...$("pasteDetailKp").options].some(o=>o.value===detected)){
+      $("pasteDetailKp").value=detected;
+      syncPasteDetailSuppliers();
+    }
+  }
+}
+
+function parsePastedDetailTable(text,kp,supplier){
+  if(!kp) throw Error("Pilih KP terlebih dahulu.");
+  if(!supplier) throw Error("Pilih Supplier / SPB terlebih dahulu.");
+
+  const transactions=[];
+  const unassignedRows=[];
+  let declaredTotal=null;
+  let purchaseDeclared=null;
+  let ignored=0;
+
+  for(const rawLine of String(text||"").split(/\r?\n/)){
+    const cells=splitDetailPasteLine(rawLine).filter((v,i,a)=>!(i===a.length-1 && !v));
+    if(!cells.length) continue;
+
+    const first=cleanDetailPasteCell(cells[0]);
+    if(/^[-:]+$/.test(first) || /NO\.?\s*BUKTI|NO\.?\s*POLISI|TONASEHARGA|NAMA PETANI/i.test(cells.join(" "))){
+      continue;
+    }
+
+    if(/^TOTAL\b/i.test(first)){
+      // In copied Markdown generated from the internal system,
+      // the first numeric cell after TOTAL is tonnage, next large Rp value is purchase total.
+      const nums=cells.slice(1).map(detailPasteNumber).filter(n=>n>0);
+      if(nums.length) declaredTotal=nums[0];
+      const rpCell=cells.slice(1).find(v=>/Rp/i.test(v));
+      if(rpCell) purchaseDeclared=detailPasteNumber(rpCell);
+      continue;
+    }
+
+    if(!/^\d+$/.test(first)){
+      ignored++;
+      continue;
+    }
+
+    if(cells.length<8){
+      ignored++;
+      continue;
+    }
+
+    const sequence=Number(first);
+    const proof=cleanDetailPasteCell(cells[1]);
+    const plate=cleanDetailPasteCell(cells[2]).toUpperCase();
+    const agent=cleanDetailPasteCell(cells[3]);
+    const tonnage=detailPasteNumber(cells[4]);
+    const price=detailPasteNumber(cells[5]);
+    const purchase=detailPasteNumber(cells[6]);
+    const date=parseOperationalDate(cells[7]);
+    const payment=cleanDetailPasteCell(cells.slice(8).join(" ")) || null;
+
+    if(!plate || !tonnage){
+      ignored++;
+      continue;
+    }
+
+    const base={
+      kp_code:kp,
+      supplier_name:supplier,
+      sequence_no:sequence,
+      proof_no:proof||null,
+      vehicle_plate:plate,
+      agent_name:agent||null,
+      tonnage_kg:Math.round(tonnage),
+      price_per_kg:price||null,
+      purchase_value:purchase||null,
+      payment_method:payment,
+      raw_line:String(rawLine||"").trim(),
+      source_type:"paste_detail"
+    };
+
+    if(!date){
+      unassignedRows.push({...base,report_date:null,trip_count:1});
+      continue;
+    }
+
+    const row={...base,report_date:date,trip_count:1};
+    row.transaction_key=detailTransactionKey(row);
+    transactions.push(row);
+  }
+
+  if(!transactions.length && !unassignedRows.length){
+    throw Error("Tidak ada baris transaksi detail yang berhasil dibaca.");
+  }
+
+  const totalKg=transactions.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const purchaseTotal=transactions.reduce((a,r)=>a+Number(r.purchase_value||0),0);
+  const dates=transactions.map(r=>r.report_date).sort();
+
+  return {
+    kp,supplier,transactions,unassignedRows,
+    totalKg,purchaseTotal,declaredTotal,purchaseDeclared,
+    integrityOk:declaredTotal==null || declaredTotal===totalKg,
+    purchaseIntegrityOk:purchaseDeclared==null || purchaseDeclared===purchaseTotal,
+    ignored,
+    startDate:dates[0]||null,
+    endDate:dates[dates.length-1]||null
+  };
+}
+
+async function fetchExistingDetailTransactions(transactions){
+  const keys=[...new Set((transactions||[]).map(r=>r.transaction_key).filter(Boolean))];
+  if(!keys.length) return new Set();
+
+  const found=new Set();
+  const chunkSize=150;
+  for(let i=0;i<keys.length;i+=chunkSize){
+    const chunk=keys.slice(i,i+chunkSize);
+    const {data,error}=await db.from("tonnage_detail_transactions")
+      .select("transaction_key")
+      .in("transaction_key",chunk);
+    if(error) throw Error("Gagal memeriksa double transaksi detail: "+error.message);
+    (data||[]).forEach(r=>found.add(r.transaction_key));
+  }
+  return found;
+}
+
+function pastedDetailToDaily(parsed){
+  const map=new Map();
+  (parsed.transactions||[]).forEach(r=>{
+    const key=`${r.report_date}|${parsed.kp}|${parsed.supplier}`;
+    const prev=map.get(key)||{
+      report_date:r.report_date,
+      kp_code:parsed.kp,
+      supplier_name:parsed.supplier,
+      tonnage_kg:0,
+      trip_count:0,
+      source_file:`PASTE:FINAL:DETAIL:${parsed.kp}:${parsed.supplier}`
+    };
+    prev.tonnage_kg+=Number(r.tonnage_kg||0);
+    prev.trip_count+=1;
+    map.set(key,prev);
+  });
+  return [...map.values()].sort((a,b)=>a.report_date.localeCompare(b.report_date));
+}
+
+function monthlyFinalSourceLabel(p=MONTHLY_EXCEL_PREVIEW){
+  return p?.sourceMode==="paste_detail" ? "Paste Detail Final" : "Excel Final";
+}
+
+function ensureFinalSourceFile(row,p=MONTHLY_EXCEL_PREVIEW){
+  const s=String(row?.source_file||"");
+  if(s.startsWith("PASTE:FINAL:") || s.startsWith("MONTHLY:FINAL:")) return s;
+  return p?.sourceMode==="paste_detail"
+    ? `PASTE:FINAL:DETAIL:${row.kp_code}:${row.supplier_name}`
+    : `MONTHLY:FINAL:${s||"UPLOAD"}`;
+}
+
+async function previewPastedDetail(){
+  try{
+    const raw=$("pasteDetailText")?.value||"";
+    if(!raw.trim()) throw Error("Paste tabel transaksi dari sistem internal dahulu.");
+
+    detectPasteDetailMetadata();
+
+    const kp=$("pasteDetailKp")?.value||"";
+    const supplier=$("pasteDetailSupplier")?.value||"";
+    const parsed=parsePastedDetailTable(raw,kp,supplier);
+    const daily=pastedDetailToDaily(parsed);
+
+    $("monthlyExcelPreview").textContent="Membaca Paste Detail dan menjalankan Preview Audit...";
+
+    const [existingDetailKeys,validation,conflictCheck]=await Promise.all([
+      fetchExistingDetailTransactions(parsed.transactions),
+      validateMonthlyAgainstAnnual(daily),
+      checkMonthlyConflicts(daily)
+    ]);
+
+    const exactDuplicateCount=parsed.transactions.filter(r=>existingDetailKeys.has(r.transaction_key)).length;
+    const exactNewCount=parsed.transactions.length-exactDuplicateCount;
+    const integrityBlocked=(!parsed.integrityOk || !parsed.purchaseIntegrityOk)
+      ? [{
+          fileName:"PASTE DETAIL",
+          integrityIssues:[
+            !parsed.integrityOk
+              ? `Total tonase transaksi ${kg(parsed.totalKg)} ≠ Total laporan ${kg(parsed.declaredTotal)}`
+              : null,
+            !parsed.purchaseIntegrityOk
+              ? `Nilai pembelian transaksi ${rupiah(parsed.purchaseTotal)} ≠ Total laporan ${rupiah(parsed.purchaseDeclared)}`
+              : null
+          ].filter(Boolean)
+        }]
+      : [];
+
+    const finalBlocked=integrityBlocked.length>0 || parsed.unassignedRows.length>0;
+
+    MONTHLY_EXCEL_PREVIEW={
+      files:["PASTE DETAIL SISTEM INTERNAL"],
+      daily,
+      unassignedRows:parsed.unassignedRows,
+      unassignedTonnage:parsed.unassignedRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0),
+      declaredTotalKg:parsed.declaredTotal ?? parsed.totalKg,
+      fileResults:[],
+      validation,
+      integrityBlocked,
+      conflictCheck,
+      finalBlocked,
+      conflictDecisions:{},
+      conflictSignature:monthlyConflictSignature(conflictCheck),
+      sourceMode:"paste_detail",
+      detailTransactions:parsed.transactions,
+      detailDuplicateKeys:existingDetailKeys,
+      detailDuplicateCount:exactDuplicateCount,
+      detailNewCount:exactNewCount,
+      detailPurchaseTotal:parsed.purchaseTotal,
+      detailPurchaseDeclared:parsed.purchaseDeclared,
+      rawPaste:raw
+    };
+    initMonthlyConflictDecisions(MONTHLY_EXCEL_PREVIEW,{reset:true});
+
+    const totals=monthlyConflictTotals(conflictCheck);
+    const status=finalBlocked
+      ? "FINAL DIBLOKIR"
+      : conflictCheck.conflicts.length
+        ? "REVIEW KONFLIK"
+        : "SIAP FINAL";
+
+    $("monthlyExcelPreview").textContent=
+      `SUMBER: PASTE DETAIL SISTEM INTERNAL\n`+
+      `STATUS: ${status}\n`+
+      `KP / Supplier: ${kp} / ${supplier}\n`+
+      `Periode: ${parsed.startDate||"-"} s.d. ${parsed.endDate||"-"}\n`+
+      `Transaksi terbaca: ${parsed.transactions.length}\n`+
+      `Trip: ${parsed.transactions.length}\n`+
+      `Total tonase: ${kg(parsed.totalKg)}\n`+
+      `TOTAL laporan: ${parsed.declaredTotal==null?"tidak ditemukan":kg(parsed.declaredTotal)} ${parsed.integrityOk?"✓":"✕"}\n`+
+      `Nilai pembelian: ${rupiah(parsed.purchaseTotal)}\n`+
+      `TOTAL nilai laporan: ${parsed.purchaseDeclared==null?"tidak ditemukan":rupiah(parsed.purchaseDeclared)} ${parsed.purchaseIntegrityOk?"✓":"✕"}\n`+
+      `Double transaksi persis: ${exactDuplicateCount}\n`+
+      `Transaksi baru: ${exactNewCount}\n`+
+      `Tanpa tanggal: ${parsed.unassignedRows.length}\n`+
+      `Baris diabaikan: ${parsed.ignored}\n\n`+
+      `AUDIT AGREGAT HARIAN\n`+
+      `Data baru: ${conflictCheck.fresh.length}\n`+
+      `Sama: ${conflictCheck.same.length}\n`+
+      `Konflik: ${conflictCheck.conflicts.length}\n`+
+      `Nilai overlap sistem: ${kg(totals.sameKg+totals.conflictExistingKg)}\n`+
+      `Selisih konflik: ${totals.conflictDiffKg>=0?"+":""}${kg(totals.conflictDiffKg)}\n\n`+
+      formatMonthlyConflictPreview(conflictCheck);
+
+    if(parsed.unassignedRows.length){
+      $("monthlyExcelPreview").textContent+=
+        `\n\n✕ ${parsed.unassignedRows.length} transaksi tanpa tanggal — Simpan Final diblokir.`;
+    }
+
+    if($("monthlyConflictSummary")){
+      $("monthlyConflictSummary").textContent=finalBlocked
+        ? `✕ FINAL DIBLOKIR • ${parsed.unassignedRows.length} tanpa tanggal • ${integrityBlocked.length} gagal integritas`
+        : conflictCheck.conflicts.length
+          ? `⚠ ${conflictCheck.conflicts.length} konflik • putuskan di Conflict Resolution Panel`
+          : `✓ Siap FINAL • ${exactDuplicateCount} transaksi double persis terdeteksi`;
+      $("monthlyConflictSummary").className=
+        "monthly-conflict-summary "+(finalBlocked?"has-error":conflictCheck.conflicts.length?"has-conflict":"is-safe");
+    }
+
+    renderMonthlyFinalAuditBar(MONTHLY_EXCEL_PREVIEW);
+  }catch(e){
+    MONTHLY_EXCEL_PREVIEW=null;
+    $("monthlyExcelPreview").textContent="ERROR PASTE DETAIL: "+e.message;
+    if($("monthlyFinalAuditBar")) $("monthlyFinalAuditBar").classList.remove("visible");
+    if($("monthlyConflictResolution")) $("monthlyConflictResolution").classList.remove("visible");
+  }
+}
+
 function monthlyRowKey(r){
   return `${r.report_date}|${String(r.kp_code||"").toUpperCase()}|${String(r.supplier_name||"ALL").toUpperCase()}`;
 }
@@ -3304,6 +4017,7 @@ function renderMonthlyConflictResolution(p){
     const d=p.conflictDecisions[key]||{};
     const manual=d.decision==="manual_edit";
     const source=e.source_file||"-";
+    const finalLabel=monthlyFinalSourceLabel(p);
 
     return `
       <article class="monthly-resolution-card" data-resolution-key="${escapeHtml(key)}">
@@ -3326,7 +4040,7 @@ function renderMonthlyConflictResolution(p){
           </div>
           <div class="resolution-arrow">→</div>
           <div class="resolution-new">
-            <small>EXCEL FINAL</small>
+            <small>${escapeHtml(finalLabel.toUpperCase())}</small>
             <strong>${kg(n.tonnage_kg)}</strong>
             <span>${Number(n.trip_count||0)} trip</span>
             <em>Selisih trip ${x.trip_diff>=0?"+":""}${x.trip_diff}</em>
@@ -3338,7 +4052,7 @@ function renderMonthlyConflictResolution(p){
             <span>Keputusan</span>
             <select onchange="setMonthlyConflictDecision('${enc}',this.value)">
               <option value="" ${!d.decision?"selected":""}>Pilih keputusan...</option>
-              <option value="use_excel_final" ${d.decision==="use_excel_final"?"selected":""}>Gunakan Excel Final</option>
+              <option value="use_excel_final" ${d.decision==="use_excel_final"?"selected":""}>Gunakan Data Final</option>
               <option value="keep_existing" ${d.decision==="keep_existing"?"selected":""}>Pertahankan Data Lama</option>
               <option value="manual_edit" ${d.decision==="manual_edit"?"selected":""}>Edit Manual</option>
             </select>
@@ -3389,11 +4103,11 @@ function setMonthlyConflictDecision(encodedKey,value){
   d.decision=value;
 
   if(value==="use_excel_final" && !d.reason){
-    d.reason="Menggunakan Excel Final";
+    d.reason=`Menggunakan ${monthlyFinalSourceLabel(p)}`;
   }else if(value==="keep_existing" && !d.reason){
     d.reason="Data lama dipertahankan setelah review konflik";
   }else if(value==="manual_edit"){
-    if(d.reason==="Menggunakan Excel Final" || d.reason==="Data lama dipertahankan setelah review konflik"){
+    if(String(d.reason||"").startsWith("Menggunakan ") || d.reason==="Data lama dipertahankan setelah review konflik"){
       d.reason="";
     }
   }
@@ -3431,7 +4145,7 @@ function applyMonthlyConflictBulk(decision){
     p.conflictDecisions[key].decision=decision;
     p.conflictDecisions[key].reason=
       decision==="use_excel_final"
-        ? "Menggunakan Excel Final"
+        ? `Menggunakan ${monthlyFinalSourceLabel(p)}`
         : "Data lama dipertahankan setelah review konflik";
   });
 
@@ -3462,9 +4176,7 @@ function buildMonthlyConflictResolution(p){
       decisions.useExcel++;
       finalTonnage=Number(n.tonnage_kg||0);
       finalTrips=Number(n.trip_count||0);
-      newSource=String(n.source_file||"").startsWith("MONTHLY:FINAL:")
-        ? n.source_file
-        : `MONTHLY:FINAL:${n.source_file||"UPLOAD"}`;
+      newSource=ensureFinalSourceFile(n,p);
       finalRow={...n,tonnage_kg:finalTonnage,trip_count:finalTrips,source_file:newSource};
     }else if(d.decision==="keep_existing"){
       decisions.keep++;
@@ -3509,7 +4221,7 @@ function buildMonthlyConflictResolution(p){
       new_source:newSource,
       reason:String(d.reason||"").trim() || (
         d.decision==="use_excel_final"
-          ? "Menggunakan Excel Final"
+          ? `Menggunakan ${monthlyFinalSourceLabel(p)}`
           : "Data lama dipertahankan setelah review konflik"
       ),
       apply_status:"pending"
@@ -3560,8 +4272,10 @@ function renderMonthlyFinalAuditBar(p){
 
   setMonthlyAuditCard(
     "monthlyAuditDuplicate",
-    `${c.same.length}`,
-    "Baris identik • otomatis SKIP",
+    p?.sourceMode==="paste_detail" ? `${p.detailDuplicateCount||0}` : `${c.same.length}`,
+    p?.sourceMode==="paste_detail"
+      ? `${p.detailNewCount||0} transaksi baru • ${c.same.length} agregat harian sama`
+      : "Baris identik • tidak double",
     "audit-safe"
   );
 
@@ -3863,18 +4577,23 @@ async function saveMonthlyExcel(){
 
   const freshRows=fresh.map(x=>({
     ...x.incoming,
-    source_file:String(x.incoming.source_file||"").startsWith("MONTHLY:FINAL:")
-      ? x.incoming.source_file
-      : `MONTHLY:FINAL:${x.incoming.source_file||"UPLOAD"}`
+    source_file:ensureFinalSourceFile(x.incoming,p)
   }));
 
-  const rowsToSave=[...freshRows,...resolution.rowsToWrite];
+  // Same numeric values are not duplicated, but if the old source was temporary
+  // promote the source marker to FINAL so Monthly insight becomes unambiguous.
+  const sameRows=same.map(x=>({
+    ...x.incoming,
+    source_file:ensureFinalSourceFile(x.incoming,p)
+  }));
+
+  const rowsToSave=[...freshRows,...sameRows,...resolution.rowsToWrite];
 
   const finalConfirmation=confirm(
     "KONFIRMASI SIMPAN FINAL\n\n"+
     `Data baru             : ${fresh.length}\n`+
     `Sudah sama / skip     : ${same.length}\n`+
-    `Konflik pakai Excel   : ${resolution.decisions.useExcel}\n`+
+    `Konflik pakai Final   : ${resolution.decisions.useExcel}\n`+
     `Konflik dipertahankan : ${resolution.decisions.keep}\n`+
     `Konflik edit manual   : ${resolution.decisions.manual}\n\n`+
     "Semua keputusan konflik akan disimpan ke Audit Trail.\n\n"+
@@ -3913,7 +4632,49 @@ async function saveMonthlyExcel(){
     }
   }
 
-  // 3) Mark audit records applied.
+  // 3) If source is Paste Detail, store each transaction with a stable fingerprint.
+  // Re-pasting the same transaction uses upsert and does not duplicate it.
+  let detailWritten=0;
+  if(p.sourceMode==="paste_detail" && (p.detailTransactions||[]).length){
+    const detailRows=(p.detailTransactions||[]).map(r=>({
+      report_date:r.report_date,
+      kp_code:r.kp_code,
+      supplier_name:r.supplier_name,
+      sequence_no:r.sequence_no,
+      proof_no:r.proof_no,
+      vehicle_plate:r.vehicle_plate,
+      agent_name:r.agent_name,
+      tonnage_kg:r.tonnage_kg,
+      price_per_kg:r.price_per_kg,
+      purchase_value:r.purchase_value,
+      payment_method:r.payment_method,
+      transaction_key:r.transaction_key,
+      raw_line:r.raw_line,
+      source_type:"paste_detail"
+    }));
+
+    for(let i=0;i<detailRows.length;i+=chunkSize){
+      const chunk=detailRows.slice(i,i+chunkSize);
+      const {data:detailSaved,error:detailError}=await db.from("tonnage_detail_transactions")
+        .upsert(chunk,{onConflict:"transaction_key"})
+        .select("id");
+      if(detailError){
+        if(auditIds.length){
+          await db.from("tonnage_revision_audit")
+            .update({apply_status:"failed",error_message:"Detail transaction: "+detailError.message})
+            .in("id",auditIds);
+        }
+        return alert(
+          "Total harian sudah diterapkan, tetapi penyimpanan detail transaksi gagal.\n\n"+
+          detailError.message+
+          "\n\nJangan paste ulang sebelum memeriksa Monitoring."
+        );
+      }
+      detailWritten+=detailSaved?.length||chunk.length;
+    }
+  }
+
+  // 4) Mark audit records applied.
   if(auditIds.length){
     const {error:auditUpdateError}=await db.from("tonnage_revision_audit")
       .update({apply_status:"applied",error_message:null})
@@ -3928,18 +4689,20 @@ async function saveMonthlyExcel(){
   }
 
   alert(
-    `EXCEL BULANAN FINAL BERHASIL DIPROSES ✓\n\n`+
+    `DATA FINAL BERHASIL DIPROSES ✓\n\n`+
     `DATA BARU             : ${fresh.length}\n`+
-    `SUDAH SAMA / SKIP    : ${same.length}\n`+
-    `PAKAI EXCEL FINAL    : ${resolution.decisions.useExcel}\n`+
+    `SUDAH SAMA / FINAL   : ${same.length}\n`+
+    `PAKAI DATA FINAL    : ${resolution.decisions.useExcel}\n`+
     `PERTAHANKAN DATA LAMA: ${resolution.decisions.keep}\n`+
     `EDIT MANUAL          : ${resolution.decisions.manual}\n`+
+    `${p.sourceMode==="paste_detail"?`DETAIL TRANSAKSI     : ${detailWritten}\n`:""}`+
     `AUDIT TRAIL          : ${resolution.audits.length} keputusan\n\n`+
     `Setiap konflik sudah diproses sesuai keputusan Anda.`
   );
 
   MONTHLY_EXCEL_PREVIEW=null;
   if($("monthlyExcelFile")) $("monthlyExcelFile").value="";
+  if($("pasteDetailText")) $("pasteDetailText").value="";
   if($("monthlyConflictSummary")){
     $("monthlyConflictSummary").textContent="Belum ada hasil pemeriksaan.";
     $("monthlyConflictSummary").className="monthly-conflict-summary";
@@ -4718,6 +5481,7 @@ async function loadMonitorRangeDetail(){
         let src="Belum ada tonase";
         if(t.sources?.has("live")) src="WhatsApp Snapshot";
         else if(t.sources?.has("audit")) src="Audit Resmi";
+        else if(t.sources?.has("paste_final")) src="Paste Detail Final";
         else if(t.sources?.has("excel_final")) src="Excel Final";
         else if(t.sources?.has("excel")) src="Closing Excel";
         else if(t.sources?.has("whatsapp")) src="Closing WhatsApp (sementara)";
@@ -4768,6 +5532,7 @@ function renderMonitorEmpty(message){
 function closingSourceType(sourceFile){
   const s=String(sourceFile||"");
   if(s.startsWith("AUDIT:")) return "audit";
+  if(s.startsWith("PASTE:FINAL:")) return "paste_final";
   if(s.startsWith("MONTHLY:FINAL:")) return "excel_final";
   if(s.startsWith("DAILY:")) return "excel";
   if(s.startsWith("WHATSAPP:CLOSING:")) return "whatsapp";
@@ -4779,6 +5544,7 @@ function closingSourceType(sourceFile){
 
 function closingSourceDisplay(type){
   if(type==="audit") return "Audit Resmi";
+  if(type==="paste_final") return "Paste Detail Final";
   if(type==="excel_final") return "Excel Final";
   if(type==="excel") return "Closing Excel";
   if(type==="whatsapp") return "Closing WhatsApp (sementara)";
@@ -4794,7 +5560,7 @@ function summarizeClosingHistory(rows,{excludeCurrentMonthly=true}={}){
     const supplier=String(r.supplier_name||"ALL").toUpperCase();
     const key=`${r.report_date}|${r.kp_code}|${supplier}`;
     if(!grouped.has(key)) grouped.set(key,{
-      audit:[],excel_final:[],excel:[],whatsapp:[],monthly:[],other:[]
+      audit:[],paste_final:[],excel_final:[],excel:[],whatsapp:[],monthly:[],other:[]
     });
     grouped.get(key)[closingSourceType(r.source_file)].push(r);
   });
@@ -4805,6 +5571,7 @@ function summarizeClosingHistory(rows,{excludeCurrentMonthly=true}={}){
   grouped.forEach(g=>{
     let chosen=
       g.audit.length ? g.audit :
+      g.paste_final.length ? g.paste_final :
       g.excel_final.length ? g.excel_final :
       g.excel.length ? g.excel :
       g.whatsapp.length ? g.whatsapp :
@@ -4915,7 +5682,7 @@ async function loadKPMonthlyPanel(kp){
 
     const finalDates=dates.filter(d=>{
       const s=byDate[d].sourceLabel||"";
-      return s.includes("Excel Final") || s.includes("Audit Resmi") || s.includes("Closing Excel");
+      return s.includes("Paste Detail Final") || s.includes("Excel Final") || s.includes("Audit Resmi") || s.includes("Closing Excel");
     });
     const temporaryDates=dates.filter(d=>!finalDates.includes(d));
     const monthlyStatus=
@@ -5183,6 +5950,7 @@ async function loadKPDaily(kp){
     expense:dailyExpense
   });
   await loadMonitorKpPeriodTable("daily",kp);
+  await loadDailyMtdKpis(kp,date);
 
   // Main KPI continues to represent latest operational snapshot.
   setMonitorSummary({
