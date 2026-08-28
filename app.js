@@ -5603,6 +5603,118 @@ function groupLiveRowsByKp(rows){
   return map;
 }
 
+
+async function fetchRangeFinalReconciliations(start,end,kp){
+  let q=db.from("tonnage_period_reconciliation")
+    .select("period_start,period_end,kp_code,supplier_name,paste_total_kg,paste_trip_count,hold_tonnage_kg,hold_trip_count,source_type,updated_at")
+    .gte("period_start",start)
+    .lte("period_end",end)
+    .order("period_start",{ascending:true})
+    .order("kp_code",{ascending:true})
+    .order("supplier_name",{ascending:true});
+  if(kp!=="ALL") q=q.eq("kp_code",kp);
+
+  const {data,error}=await q;
+  if(error) throw Error("Gagal membaca Data Final Paste untuk range: "+error.message);
+  return data||[];
+}
+
+function rangeSupplierKey(kp,supplier){
+  return `${String(kp||"").toUpperCase()}|${String(supplier||"ALL").toUpperCase()}`;
+}
+
+function computeRangeFinalFromReconciliation(selectedClosing,recs){
+  const closing=selectedClosing||[];
+  const reconciliationRows=[];
+  let correctionKg=0;
+  let correctionTrips=0;
+  let holdKg=0;
+  let holdTrips=0;
+
+  (recs||[]).forEach(rec=>{
+    const rows=closing.filter(r=>
+      r.kp_code===rec.kp_code &&
+      String(r.supplier_name||"ALL").toUpperCase()===String(rec.supplier_name||"ALL").toUpperCase() &&
+      r.report_date>=rec.period_start &&
+      r.report_date<=rec.period_end
+    );
+
+    const operationalKg=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const operationalTrips=rows.reduce((a,r)=>a+Number(r.trip_count||0),0);
+    const corrKg=Number(rec.paste_total_kg||0)-operationalKg;
+    const corrTrips=Number(rec.paste_trip_count||0)-operationalTrips;
+
+    correctionKg+=corrKg;
+    correctionTrips+=corrTrips;
+    holdKg+=Number(rec.hold_tonnage_kg||0);
+    holdTrips+=Number(rec.hold_trip_count||0);
+
+    reconciliationRows.push({
+      ...rec,
+      operational_kg:operationalKg,
+      operational_trips:operationalTrips,
+      correction_kg:corrKg,
+      correction_trips:corrTrips
+    });
+  });
+
+  const closingKg=closing.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const closingTrips=closing.reduce((a,r)=>a+Number(r.trip_count||0),0);
+
+  return {
+    finalKg:closingKg+correctionKg,
+    finalTrips:closingTrips+correctionTrips,
+    closingKg,
+    closingTrips,
+    correctionKg,
+    correctionTrips,
+    holdKg,
+    holdTrips,
+    rows:reconciliationRows
+  };
+}
+
+function groupRangeReconciliationByKp(selectedClosing,reconciliation){
+  const closingByKp=groupTonnageRowsByKp(selectedClosing||[]);
+  const recByKp={};
+
+  (reconciliation.rows||[]).forEach(r=>{
+    if(!recByKp[r.kp_code]){
+      recByKp[r.kp_code]={
+        correction:0,correctionTrips:0,hold:0,holdTrips:0,
+        recCount:0,suppliers:new Set()
+      };
+    }
+    const x=recByKp[r.kp_code];
+    x.correction+=Number(r.correction_kg||0);
+    x.correctionTrips+=Number(r.correction_trips||0);
+    x.hold+=Number(r.hold_tonnage_kg||0);
+    x.holdTrips+=Number(r.hold_trip_count||0);
+    x.recCount+=1;
+    x.suppliers.add(String(r.supplier_name||"ALL").toUpperCase());
+  });
+
+  const result={};
+  FALLBACK_KP_CODES.forEach(code=>{
+    const c=closingByKp[code]||{tonnage:0,trips:0};
+    const r=recByKp[code]||{
+      correction:0,correctionTrips:0,hold:0,holdTrips:0,recCount:0,suppliers:new Set()
+    };
+    result[code]={
+      closing:Number(c.tonnage||0),
+      closingTrips:Number(c.trips||0),
+      final:Number(c.tonnage||0)+Number(r.correction||0),
+      finalTrips:Number(c.trips||0)+Number(r.correctionTrips||0),
+      correction:Number(r.correction||0),
+      hold:Number(r.hold||0),
+      holdTrips:Number(r.holdTrips||0),
+      recCount:Number(r.recCount||0),
+      suppliers:r.suppliers
+    };
+  });
+  return result;
+}
+
 async function loadMonitorRangeDetail(){
   if(!$("monitorRangeStart") || !$("monitorRangeEnd")) return;
 
@@ -5611,7 +5723,7 @@ async function loadMonitorRangeDetail(){
   const kp=$("monitorKp")?.value||"ALL";
 
   if(!start || !end){
-    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="Pilih Tanggal Mulai dan Tanggal Akhir.";
+    if($("monitorRangeStatus")) $("monitorRangeStatus").textContent="Pilih tanggal mulai dan tanggal akhir, lalu klik Cari Tonase.";
     return;
   }
   if(end<start){
@@ -5624,61 +5736,67 @@ async function loadMonitorRangeDetail(){
   if($("monitorRangeLiveTonnage")) $("monitorRangeLiveTonnage").textContent="...";
 
   try{
-    const [closingRows,expenseRows,live]=await Promise.all([
+    const [closingRows,expenseRows,live,recs]=await Promise.all([
       fetchMonitorRangeClosingRows(start,end,kp),
       fetchMonitorRangeExpenseRows(start,end,kp),
-      fetchRangeLiveSnapshot(start,end,kp)
+      fetchRangeLiveSnapshot(start,end,kp),
+      fetchRangeFinalReconciliations(start,end,kp)
     ]);
 
     const summary=summarizeClosingHistory(closingRows,{excludeCurrentMonthly:true});
     const selected=summary.selected||[];
     const today=localTodayISO();
+    const reconciliation=computeRangeFinalFromReconciliation(selected,recs);
 
-    const closedTonnage=selected.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
-    const closedTrips=selected.reduce((a,r)=>a+Number(r.trip_count||0),0);
+    const finalTonnage=Number(reconciliation.finalKg||0);
+    const finalTrips=Number(reconciliation.finalTrips||0);
+    const closedTonnage=Number(reconciliation.closingKg||0);
+    const closedTrips=Number(reconciliation.closingTrips||0);
     const totalExpense=expenseRows.reduce((a,r)=>a+Number(r.amount||0),0);
     const closingDates=[...new Set(selected.map(r=>r.report_date))];
-    const requestedDays=inclusiveDateCount(start,end);
 
-    // LIVE is added only when the selected current day has no final closing.
+    // LIVE remains operational information and NEVER changes Total Final Database.
     const hasFinalToday=selected.some(r=>r.report_date===today);
     const liveTonnage=(!hasFinalToday && live) ? Number(live.total||0) : 0;
     const liveTrips=(!hasFinalToday && live) ? Number(live.trips||0) : 0;
-    const runningTonnage=closedTonnage+liveTonnage;
-    const runningTrips=closedTrips+liveTrips;
 
-    if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent=kg(runningTonnage);
+    if($("monitorRangeTotalTonnage")) $("monitorRangeTotalTonnage").textContent=kg(finalTonnage);
     if($("monitorRangeClosedTonnage")) $("monitorRangeClosedTonnage").textContent=kg(closedTonnage);
     if($("monitorRangeLiveTonnage")) $("monitorRangeLiveTonnage").textContent=kg(liveTonnage);
     if($("monitorRangeTotalExpense")) $("monitorRangeTotalExpense").textContent=rupiah(totalExpense);
-    if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent=Number(runningTrips).toLocaleString("id-ID");
-    if($("monitorRangeCoverage")) $("monitorRangeCoverage").textContent=`${closingDates.length} / ${requestedDays}`;
+    if($("monitorRangeTotalTrips")) $("monitorRangeTotalTrips").textContent=Number(finalTrips).toLocaleString("id-ID");
+    if($("monitorRangeCoverage")) $("monitorRangeCoverage").textContent=kg(reconciliation.holdKg);
 
     const kpLabel=kp==="ALL"?"Semua KP":kp;
+    const latestFinalDate=recs.length
+      ? recs.map(r=>r.period_end).sort().slice(-1)[0]
+      : null;
     const sourceLabel=selected.length?closingSourceLabelForRows(selected):"Belum ada Closing";
-    const liveLabel=liveTonnage && live
-      ? ` + LIVE ${live.time.slice(0,5)}`
-      : "";
 
     if($("monitorRangeStatus")){
       $("monitorRangeStatus").textContent=
-        `${kpLabel} • ${dateLabelId(start)} s.d. ${dateLabelId(end)} • ${sourceLabel}${liveLabel}`;
+        `HASIL PENCARIAN • ${kpLabel} • ${dateLabelId(start)} s.d. ${dateLabelId(end)} • `+
+        `${kg(finalTonnage)} • ${Number(finalTrips).toLocaleString("id-ID")} trip`+
+        `${recs.length?` • ${recs.length} Data Final Paste`:""}`+
+        `${liveTonnage&&live?` • LIVE ${live.time.slice(0,5)} ditampilkan terpisah`:""}`;
     }
 
     if($("monitorRangeTonnageSub")){
       $("monitorRangeTonnageSub").textContent=
-        `${kpLabel} • Closing final${liveTonnage?" + snapshot LIVE hari ini":""}`;
+        recs.length
+          ? `Otomatis: Data Final Paste${latestFinalDate?` s.d. ${dateLabelId(latestFinalDate)}`:""} + Closing sesudah periode Final`
+          : `Otomatis dari ${sourceLabel} sesuai tanggal pencarian`;
     }
     if($("monitorRangeClosedSub")){
       $("monitorRangeClosedSub").textContent=
-        `${closingDates.length} hari dengan data final / derived historis`;
+        `${closingDates.length} hari Closing ditemukan dalam tanggal pencarian`;
     }
     if($("monitorRangeLiveSub")){
       $("monitorRangeLiveSub").textContent=
         liveTonnage && live
-          ? `${live.date} • snapshot ${live.time.slice(0,5)} • belum Closing`
+          ? `${live.date} • snapshot ${live.time.slice(0,5)} • belum masuk Total Final`
           : hasFinalToday
-            ? "Hari ini sudah memiliki Closing final"
+            ? "Hari ini sudah memiliki Closing"
             : "Tidak ada snapshot LIVE dalam range";
     }
     if($("monitorRangeExpenseSub")){
@@ -5687,50 +5805,61 @@ async function loadMonitorRangeDetail(){
     }
     if($("monitorRangeTripSub")){
       $("monitorRangeTripSub").textContent=
-        `Closing ${closedTrips.toLocaleString("id-ID")}${liveTrips?` + LIVE ${liveTrips.toLocaleString("id-ID")}`:""}`;
+        recs.length
+          ? `Trip hasil otomatis setelah rekonsiliasi • Closing terbaca ${closedTrips.toLocaleString("id-ID")}`
+          : `Trip otomatis dari Closing • ${closedTrips.toLocaleString("id-ID")}`;
     }
     if($("monitorRangeCoverageSub")){
       $("monitorRangeCoverageSub").textContent=
-        `Hari final tersedia / ${requestedDays} hari kalender`;
+        `${Number(reconciliation.holdTrips||0).toLocaleString("id-ID")} trip HOLD • sudah termasuk Total Final`;
     }
 
     const expenseByKp=groupExpenseRowsByKp(expenseRows);
     const liveByKp=(!hasFinalToday && live) ? groupLiveRowsByKp(live.rows) : {};
 
     if(kp==="ALL"){
-      const tonByKp=groupTonnageRowsByKp(selected);
-      const closingDaysByKp={};
-      selected.forEach(r=>{
-        if(!closingDaysByKp[r.kp_code]) closingDaysByKp[r.kp_code]=new Set();
-        closingDaysByKp[r.kp_code].add(r.report_date);
-      });
+      const finalByKp=groupRangeReconciliationByKp(selected,reconciliation);
 
       const rows=FALLBACK_KP_CODES.map(code=>{
-        const t=tonByKp[code]||{tonnage:0,trips:0};
+        const f=finalByKp[code]||{
+          closing:0,closingTrips:0,final:0,finalTrips:0,correction:0,
+          hold:0,holdTrips:0,recCount:0
+        };
         const l=liveByKp[code]||{tonnage:0,trips:0};
         const e=expenseByKp[code]||{amount:0,count:0};
+
+        const status=f.recCount
+          ? "FINAL PASTE"
+          : f.closing
+            ? "SEMENTARA / CLOSING"
+            : "BELUM ADA DATA";
+
         return [
           code,
-          kg(t.tonnage),
+          kg(f.final),
+          kg(f.closing),
+          `${f.correction>=0?"+":""}${kg(f.correction)}`,
+          `${kg(f.hold)}${f.holdTrips?` / ${f.holdTrips} trip`:""}`,
           kg(l.tonnage),
-          kg(Number(t.tonnage||0)+Number(l.tonnage||0)),
-          (Number(t.trips||0)+Number(l.trips||0)).toLocaleString("id-ID"),
+          Number(f.finalTrips||0).toLocaleString("id-ID"),
           rupiah(e.amount),
-          Number(e.count||0).toLocaleString("id-ID"),
-          Number(closingDaysByKp[code]?.size||0).toLocaleString("id-ID")
+          status
         ];
       });
 
-      $("monitorRangeDetailTitle").textContent="DETAIL TOTAL PER KP — CLOSING + LIVE";
+      $("monitorRangeDetailTitle").textContent=`HASIL PENCARIAN TONASE PER KP — ${dateLabelId(start)} s.d. ${dateLabelId(end)}`;
       $("monitorRangeDetailTable").innerHTML=table(
-        ["KP","Closing Final","Live Hari Ini","Total s/d Saat Ini","Trip","Pengeluaran","Transaksi Biaya","Hari Final"],
+        ["KP","Hasil Tonase","Closing Terbaca","Penyesuaian Otomatis","HOLD","Live Hari Ini","Trip","Pengeluaran","Sumber Hasil"],
         rows
       );
     }else{
+      // Single-KP table intentionally remains a daily operational audit.
+      // The Total Final Database is shown in the KPI above; payment-date detail
+      // is not forced to become an operational Closing date.
       const byDate={};
       selected.forEach(r=>{
         if(!byDate[r.report_date]){
-          byDate[r.report_date]={tonnage:0,trips:0,sources:new Set(),status:"FINAL"};
+          byDate[r.report_date]={tonnage:0,trips:0,sources:new Set(),status:"CLOSING"};
         }
         byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
         byDate[r.report_date].trips+=Number(r.trip_count||0);
@@ -5744,7 +5873,6 @@ async function loadMonitorRangeDetail(){
         expenseByDate[r.expense_date].count+=1;
       });
 
-      // Add current LIVE row only when current day has no final closing.
       if(liveTonnage && live){
         byDate[live.date]={
           tonnage:liveTonnage,
@@ -5768,13 +5896,13 @@ async function loadMonitorRangeDetail(){
         else if(t.sources?.has("paste_final")) src="Paste Detail Final";
         else if(t.sources?.has("excel_final")) src="Excel Final";
         else if(t.sources?.has("excel")) src="Closing Excel";
-        else if(t.sources?.has("whatsapp")) src="Closing WhatsApp (sementara)";
+        else if(t.sources?.has("whatsapp")) src="Closing WhatsApp (operasional)";
         else if(t.sources?.has("monthly")) src="Excel Bulanan Lama";
         else if(t.tonnage) src="Closing Harian";
 
         return [
           d,
-          t.status||"FINAL",
+          t.status,
           kg(t.tonnage),
           Number(t.trips||0).toLocaleString("id-ID"),
           rupiah(e.amount),
@@ -5783,10 +5911,21 @@ async function loadMonitorRangeDetail(){
         ];
       });
 
-      $("monitorRangeDetailTitle").textContent=`AUDIT HARIAN ${kp} — RANGE TANGGAL`;
-      $("monitorRangeDetailTable").innerHTML=rows.length
-        ? table(["Tanggal","Status","Tonase","Trip","Pengeluaran","Transaksi Biaya","Sumber"],rows)
-        : '<div class="master-empty">Belum ada Closing, snapshot LIVE, atau Pengeluaran pada range tanggal ini.</div>';
+      const kpRecs=reconciliation.rows||[];
+      const recSummary=kpRecs.length
+        ? `<div class="range-final-summary-box">
+             <strong>TOTAL FINAL ${kp}</strong>
+             <span>${kg(finalTonnage)} • ${finalTrips.toLocaleString("id-ID")} trip</span>
+             <small>Rekonsiliasi vs Closing: ${reconciliation.correctionKg>=0?"+":""}${kg(reconciliation.correctionKg)} • HOLD ${kg(reconciliation.holdKg)} / ${reconciliation.holdTrips} trip</small>
+           </div>`
+        : "";
+
+      $("monitorRangeDetailTitle").textContent=`HASIL PENCARIAN ${kp} — DETAIL PER TANGGAL`;
+      $("monitorRangeDetailTable").innerHTML=
+        recSummary+
+        (rows.length
+          ? table(["Tanggal","Status","Tonase Operasional","Trip","Pengeluaran","Transaksi Biaya","Sumber"],rows)
+          : '<div class="master-empty">Belum ada Closing, snapshot LIVE, atau Pengeluaran pada range tanggal ini.</div>');
     }
 
   }catch(e){
