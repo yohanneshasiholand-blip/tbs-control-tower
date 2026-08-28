@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.10.2">
+  <link rel="stylesheet" href="style.css?v=4.10.3">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -555,7 +555,7 @@
                   Pilih Excel Bulanan
                   <input id="monthlyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewMonthlyExcels(this.files)">
                 </label>
-                <button class="btn btn-secondary monthly-final-save" onclick="saveMonthlyExcel()">Simpan sebagai FINAL</button>
+                <button class="btn btn-secondary monthly-final-save" onclick="saveMonthlyExcel()">Simpan Excel sebagai FINAL</button>
               </div>
 
               <div class="paste-detail-final-box">
@@ -571,13 +571,13 @@
                 <div class="paste-detail-meta">
                   <label>
                     <span>KP</span>
-                    <select id="pasteDetailKp" onchange="syncPasteDetailSuppliers()">
+                    <select id="pasteDetailKp" onchange="syncPasteDetailSuppliers(); setPasteDetailSaveState(false)">
                       <option value="">Deteksi otomatis / pilih KP</option>
                     </select>
                   </label>
                   <label>
                     <span>Supplier / SPB</span>
-                    <select id="pasteDetailSupplier">
+                    <select id="pasteDetailSupplier" onchange="setPasteDetailSaveState(false)">
                       <option value="">Pilih Supplier / SPB</option>
                     </select>
                   </label>
@@ -587,12 +587,19 @@
                 </div>
 
                 <textarea id="pasteDetailText"
-                  oninput="detectPasteDetailMetadata()"
+                  oninput="detectPasteDetailMetadata(); setPasteDetailSaveState(false)"
                   placeholder="Copy tabel dari sistem internal lalu Paste di sini...&#10;&#10;Contoh kolom: No | No. Bukti | No. Polisi | Nama Petani/Agen | Tonase | Harga | Nilai Pembelian | Tanggal Bayar | Keterangan"></textarea>
 
-                <div class="paste-detail-actions">
-                  <button class="btn btn-primary" onclick="previewPastedDetail()">Preview Audit Paste Detail</button>
-                  <small>Preview tidak menyimpan data. Simpan hanya melalui tombol <b>Simpan sebagai FINAL</b> setelah audit selesai.</small>
+                <div class="paste-detail-actions paste-detail-action-stack">
+                  <div class="paste-detail-action-buttons">
+                    <button class="btn btn-primary" onclick="previewPastedDetail()">Preview Audit Paste Detail</button>
+                    <button id="pasteDetailSaveBtn" class="btn btn-secondary paste-detail-save-btn"
+                      onclick="savePastedDetailFinal()" disabled>Preview dahulu untuk menyimpan</button>
+                  </div>
+                  <small>
+                    Urutan: <b>Paste → Preview Audit → Resolve Konflik jika ada → Simpan Paste sebagai FINAL</b>.
+                    Tombol Simpan aktif hanya setelah preview berhasil.
+                  </small>
                 </div>
               </div>
             </div>
@@ -968,6 +975,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.10.2"></script>
+  <script src="app.js?v=4.10.3"></script>
 </body>
 </html>
