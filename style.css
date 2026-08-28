@@ -3271,3 +3271,57 @@ table {
 
 /* v4.10.7 — tonnage is the hard-integrity gate for Paste Detail.
    Purchase-value mismatch is audit warning only. */
+
+
+/* =========================================================
+   RANGE FINAL DATABASE PRIORITY — v4.10.8
+   ========================================================= */
+.range-final-summary-box{
+  display:grid;
+  grid-template-columns:auto auto 1fr;
+  align-items:center;
+  gap:10px;
+  margin:0 0 10px;
+  padding:9px 11px;
+  border:1px solid rgba(101,235,123,.26);
+  border-radius:10px;
+  background:rgba(16,73,29,.18);
+}
+.range-final-summary-box strong{
+  color:#76f489;
+  font-size:9px;
+}
+.range-final-summary-box span{
+  color:#f4f2eb;
+  font-size:12px;
+  font-weight:900;
+}
+.range-final-summary-box small{
+  color:#b8c4b8;
+  font-size:8px;
+}
+@media(max-width:760px){
+  .range-final-summary-box{grid-template-columns:1fr}
+}
+
+
+/* =========================================================
+   SEARCH TONNAGE — v4.10.9
+   ========================================================= */
+.tonnage-search-btn{
+  min-width:145px;
+  font-weight:900;
+}
+.tonnage-search-help{
+  margin-top:7px;
+  padding:7px 10px;
+  border:1px solid rgba(114,239,132,.18);
+  border-radius:9px;
+  background:rgba(17,70,27,.14);
+  color:#c9d8c9;
+  font-size:9px;
+  line-height:1.4;
+}
+.tonnage-search-help b{
+  color:#80f591;
+}
