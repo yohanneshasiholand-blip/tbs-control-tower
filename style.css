@@ -3245,3 +3245,25 @@ table {
     width:100%;
   }
 }
+
+
+/* =========================================================
+   HOLD + PERIOD RECONCILIATION — v4.10.4
+   ========================================================= */
+.paste-reconciliation-note{
+  margin-top:10px;
+  padding:8px 10px;
+  border:1px solid rgba(105,207,255,.20);
+  border-radius:10px;
+  background:rgba(23,74,98,.16);
+  color:#b9d9e7;
+  font-size:9px;
+  line-height:1.4;
+}
+.monthly-reconciliation-table-title{
+  margin:12px 0 6px;
+  color:#89dbff;
+  font-size:9px;
+  font-weight:900;
+  letter-spacing:.07em;
+}
