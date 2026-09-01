@@ -3581,3 +3581,224 @@ table {
   font-weight:800;
   letter-spacing:.08em;
 }
+
+
+/* =========================================================
+   DAILY EXCEL PASTE — v4.13.0
+   ========================================================= */
+.daily-excel-paste-details{
+  margin-top:10px;
+}
+.daily-excel-paste-shell{
+  padding:11px;
+}
+.daily-excel-paste-info{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.daily-excel-paste-info h3{
+  margin:0 0 4px;
+  color:#f2f0e8;
+  font-size:13px;
+}
+.daily-excel-paste-info p{
+  margin:0;
+  max-width:900px;
+  color:#bfc8bf;
+  font-size:9px;
+  line-height:1.45;
+}
+.daily-excel-paste-badge{
+  flex:0 0 auto;
+  padding:5px 8px;
+  border:1px solid rgba(126,244,141,.25);
+  border-radius:999px;
+  background:rgba(26,91,38,.18);
+  color:#82f391;
+  font-size:8px;
+  font-weight:900;
+}
+.daily-paste-defaults{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-top:10px;
+}
+.daily-paste-defaults label{
+  display:grid;
+  gap:4px;
+}
+.daily-paste-defaults span{
+  color:#c6cec6;
+  font-size:8px;
+  font-weight:700;
+}
+.daily-paste-defaults em{
+  color:#8f9d91;
+  font-style:normal;
+  font-weight:500;
+}
+.daily-excel-paste-textarea{
+  width:100%;
+  min-height:175px;
+  margin-top:9px;
+  resize:vertical;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:10px;
+  line-height:1.45;
+}
+.daily-excel-paste-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:8px;
+}
+#dailyPasteSaveBtn:disabled{
+  opacity:.42;
+  cursor:not-allowed;
+}
+#dailyPasteSaveBtn.is-ready{
+  opacity:1;
+  border-color:rgba(112,244,132,.40);
+}
+.daily-excel-paste-rule{
+  margin-top:8px;
+  padding:7px 9px;
+  border:1px solid rgba(103,207,255,.15);
+  border-radius:8px;
+  background:rgba(17,57,76,.12);
+  color:#b9cbd2;
+  font-size:8px;
+  line-height:1.4;
+}
+@media(max-width:720px){
+  .daily-paste-defaults{grid-template-columns:1fr}
+  .daily-excel-paste-info{flex-direction:column}
+  .daily-excel-paste-actions .btn{width:100%}
+}
+
+
+/* =========================================================
+   DATA QUALITY GUARD — v4.14.0
+   ========================================================= */
+.paste-quality-guard{
+  margin:10px 0 9px;
+  padding:10px;
+  border:1px solid rgba(126,244,141,.14);
+  border-radius:11px;
+  background:rgba(8,26,13,.22);
+}
+.paste-quality-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+}
+.paste-quality-head strong{
+  display:block;
+  margin-top:2px;
+  color:#f2f0e9;
+  font-size:11px;
+}
+.paste-quality-badge{
+  padding:5px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  font-size:7px;
+  font-weight:900;
+  letter-spacing:.06em;
+  white-space:nowrap;
+}
+.paste-quality-badge.idle{
+  color:#a7b0a8;
+  background:rgba(255,255,255,.04);
+}
+.paste-quality-badge.safe{
+  color:#83f192;
+  border-color:rgba(126,244,141,.28);
+  background:rgba(24,91,36,.18);
+}
+.paste-quality-badge.warning{
+  color:#f4d977;
+  border-color:rgba(242,204,98,.30);
+  background:rgba(103,80,18,.17);
+}
+.paste-quality-badge.danger{
+  color:#ff9b91;
+  border-color:rgba(255,119,105,.30);
+  background:rgba(105,30,24,.18);
+}
+.paste-quality-list{
+  display:grid;
+  gap:5px;
+  margin-top:8px;
+  color:#b8c2b9;
+  font-size:8px;
+}
+.paste-quality-item{
+  display:grid;
+  grid-template-columns:70px 1fr;
+  gap:8px;
+  align-items:start;
+  padding:7px 8px;
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:8px;
+  background:rgba(255,255,255,.025);
+}
+.paste-quality-item b{
+  font-size:7px;
+  letter-spacing:.04em;
+}
+.paste-quality-item.safe b{color:#80ef90}
+.paste-quality-item.note b{color:#a9dff8}
+.paste-quality-item.warning{
+  border-color:rgba(242,204,98,.18);
+  background:rgba(98,76,17,.10);
+}
+.paste-quality-item.warning b{color:#f0d577}
+.paste-quality-item.danger{
+  border-color:rgba(255,114,101,.24);
+  background:rgba(104,29,24,.12);
+}
+.paste-quality-item.danger b{color:#ff9a90}
+.paste-quality-override{
+  margin-top:9px;
+  padding:8px;
+  border:1px solid rgba(242,204,98,.20);
+  border-radius:8px;
+  background:rgba(93,69,14,.10);
+}
+.paste-quality-override.hidden{display:none!important}
+.paste-quality-confirm{
+  display:flex!important;
+  flex-direction:row!important;
+  align-items:flex-start;
+  gap:7px!important;
+  color:#e1d49e!important;
+  font-size:8px!important;
+  line-height:1.4;
+}
+.paste-quality-confirm input{
+  width:auto!important;
+  margin-top:2px;
+}
+.paste-quality-override>label:last-child{
+  display:grid;
+  gap:4px;
+  margin-top:7px;
+}
+.paste-quality-override>label:last-child span{
+  color:#c7b979;
+  font-size:7px;
+  font-weight:800;
+}
+.paste-quality-override input[type="text"]{
+  width:100%;
+  min-height:32px;
+}
+@media(max-width:640px){
+  .paste-quality-head{flex-direction:column}
+  .paste-quality-item{grid-template-columns:1fr}
+}
