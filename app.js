@@ -105,7 +105,7 @@ function ensureAnalysisSidebarEntry(){
       badge.className="build-version-badge";
       sidebar.appendChild(badge);
     }
-    badge.textContent="BUILD v4.12.2";
+    badge.textContent="BUILD v4.14.0";
   }
 }
 
@@ -2016,6 +2016,10 @@ async function loadMaster(){
     $("pasteDetailKp").innerHTML='<option value="">Deteksi otomatis / pilih KP</option>'+
       codes.map(code=>`<option value="${code}">${code}</option>`).join("");
   }
+  if($("dailyPasteKp")){
+    $("dailyPasteKp").innerHTML='<option value="">Dari tabel / pilih KP default</option>'+
+      codes.map(code=>`<option value="${code}">${code}</option>`).join("");
+  }
 
   if(kpError){
     console.warn("Master KP Supabase gagal dimuat; memakai fallback dropdown.",kpError);
@@ -2032,6 +2036,7 @@ async function loadMaster(){
 
   MASTER_SUPPLIER_DATA=supplierError?[]:(s||[]);
   syncPasteDetailSuppliers();
+  syncDailyPasteSuppliers();
   renderMasterDirectory();
 }
 
@@ -3261,6 +3266,321 @@ async function validateMonthlyAgainstAnnual(dailyRows){
   return result;
 }
 
+
+function syncDailyPasteSuppliers(){
+  const kp=$("dailyPasteKp")?.value||"";
+  const select=$("dailyPasteSupplier");
+  if(!select) return;
+
+  const suppliers=(MASTER_SUPPLIER_DATA||[])
+    .filter(s=>s.active && (s.master_kp?.code||"")===kp)
+    .sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+
+  select.innerHTML='<option value="">Dari tabel / pilih Supplier</option>'+
+    suppliers.map(s=>`<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}${s.full_name&&s.full_name!==s.name?` — ${escapeHtml(s.full_name)}`:""}</option>`).join("");
+
+  if(suppliers.length===1) select.value=suppliers[0].name;
+}
+
+function setDailyPasteSaveState(enabled=false){
+  const btn=$("dailyPasteSaveBtn");
+  if(!btn) return;
+  btn.disabled=!enabled;
+  btn.classList.toggle("is-ready",!!enabled);
+  btn.textContent=enabled ? "Simpan Paste sebagai Data Harian" : "Preview dahulu untuk menyimpan";
+}
+
+function invalidateDailyPastePreview(){
+  if(DAILY_EXCEL_PREVIEW?.sourceMode==="paste_excel") DAILY_EXCEL_PREVIEW=null;
+  setDailyPasteSaveState(false);
+  if($("dailyPastePreview")){
+    $("dailyPastePreview").textContent="Isi paste berubah. Klik Preview Paste Excel lagi.";
+  }
+}
+
+function normalizeDailyPasteHeader(v){
+  return String(v??"")
+    .toLowerCase()
+    .replace(/\u00a0/g," ")
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+
+function splitDailyExcelPasteLine(raw){
+  const original=String(raw??"").replace(/\r$/,"");
+  if(!original.trim()) return [];
+  if(original.includes("\t")) return original.split("\t").map(cleanDetailPasteCell);
+  if(original.includes("|")){
+    return original.replace(/^\s*\|/,"").replace(/\|\s*$/,"").split("|").map(cleanDetailPasteCell);
+  }
+  if(original.includes(";")) return original.split(";").map(cleanDetailPasteCell);
+  return original.trim().split(/\s{2,}/).map(cleanDetailPasteCell);
+}
+
+function dailyPasteHeaderIndex(headers,patterns){
+  const normalized=headers.map(normalizeDailyPasteHeader);
+  for(let i=0;i<normalized.length;i++){
+    if(patterns.some(rx=>rx.test(normalized[i]))) return i;
+  }
+  return -1;
+}
+
+function parseDailyExcelPaste(text,{manualDate,defaultKp,defaultSupplier}={}){
+  const rawLines=String(text||"").split(/\r?\n/).filter(x=>x.trim());
+  if(!rawLines.length) throw Error("Paste tabel dari Excel terlebih dahulu.");
+
+  const matrix=rawLines.map(splitDailyExcelPasteLine).filter(r=>r.length);
+  if(!matrix.length) throw Error("Tidak ada baris Excel yang dapat dibaca.");
+
+  let headerRow=-1;
+  let headerMeta=null;
+
+  for(let i=0;i<Math.min(matrix.length,20);i++){
+    const h=matrix[i];
+    const tonnageIdx=dailyPasteHeaderIndex(h,[
+      /^tonase$/,/^tonnage$/,/^tonase kg$/,/^berat$/,/^berat kg$/,/^pembelian tonase$/,/^netto$/,/^net weight$/,/^kg$/
+    ]);
+    const kpIdx=dailyPasteHeaderIndex(h,[/^kp$/,/^kode kp$/,/^kantor$/,/^unit$/,/^kode unit$/]);
+    const supplierIdx=dailyPasteHeaderIndex(h,[
+      /^supplier$/,/^supplier spb$/,/^spb$/,/^vendor$/,/^do$/,/^nama supplier$/,/^nama spb$/,/^jenis spb$/
+    ]);
+    const tripIdx=dailyPasteHeaderIndex(h,[
+      /^trip$/,/^jumlah trip$/,/^mobil$/,/^jumlah mobil$/,/^kendaraan$/,/^jumlah kendaraan$/,/^trip count$/
+    ]);
+    const dateIdx=dailyPasteHeaderIndex(h,[/^tanggal$/,/^tanggal data$/,/^date$/,/^tgl$/]);
+    const plateIdx=dailyPasteHeaderIndex(h,[/^no polisi$/,/^nomor polisi$/,/^nopol$/,/^plat$/,/^plate$/,/^vehicle plate$/]);
+
+    if(tonnageIdx>=0 && (kpIdx>=0 || supplierIdx>=0 || tripIdx>=0 || plateIdx>=0)){
+      headerRow=i;
+      headerMeta={tonnageIdx,kpIdx,supplierIdx,tripIdx,dateIdx,plateIdx,headers:h};
+      break;
+    }
+  }
+
+  let rows=[];
+  let declaredTotal=null;
+  let declaredTrips=null;
+  let ignored=0;
+  let missingTrip=0;
+  let missingSupplier=0;
+  let missingKp=0;
+  let invalidDate=0;
+  const detectedDates=new Set();
+
+  function addRow({date,kp,supplier,tonnage,trips,rawLine}){
+    const finalDate=date||manualDate||null;
+    const finalKp=canonKP(kp||defaultKp||"");
+    const finalSupplier=cleanDetailPasteCell(supplier||defaultSupplier||"");
+
+    if(!finalDate){ invalidDate++; return; }
+    if(!finalKp || !FALLBACK_KP_CODES.includes(finalKp)){ missingKp++; return; }
+    if(!finalSupplier){ missingSupplier++; return; }
+    if(!Number(tonnage||0)){ ignored++; return; }
+    if(trips==null || Number.isNaN(Number(trips))){ missingTrip++; return; }
+
+    detectedDates.add(finalDate);
+    rows.push({
+      report_date:finalDate,
+      kp_code:finalKp,
+      supplier_name:finalSupplier,
+      tonnage_kg:Math.round(Number(tonnage||0)),
+      trip_count:Math.max(0,Math.round(Number(trips||0))),
+      source_file:"DAILY:PASTE_EXCEL"
+    });
+  }
+
+  if(headerRow>=0){
+    const m=headerMeta;
+    for(let i=headerRow+1;i<matrix.length;i++){
+      const cells=matrix[i];
+      const first=cleanDetailPasteCell(cells[0]||"");
+      const joined=cells.join(" ");
+
+      if(/^total\b/i.test(first) || /^\s*grand\s+total\b/i.test(joined)){
+        if(m.tonnageIdx>=0 && cells[m.tonnageIdx]!=null){
+          const n=detailPasteNumber(cells[m.tonnageIdx]);
+          if(n) declaredTotal=n;
+        }
+        if(m.tripIdx>=0 && cells[m.tripIdx]!=null){
+          const n=detailPasteNumber(cells[m.tripIdx]);
+          if(n || String(cells[m.tripIdx]||"").trim()==="0") declaredTrips=n;
+        }
+        continue;
+      }
+
+      const tonnage=detailPasteNumber(cells[m.tonnageIdx]);
+      if(!tonnage){ ignored++; continue; }
+
+      let date=null;
+      if(m.dateIdx>=0 && cells[m.dateIdx]){
+        date=parseOperationalDate(cells[m.dateIdx]);
+      }
+
+      const kp=m.kpIdx>=0 ? cells[m.kpIdx] : defaultKp;
+      const supplier=m.supplierIdx>=0 ? cells[m.supplierIdx] : defaultSupplier;
+
+      let trips=null;
+      if(m.tripIdx>=0){
+        trips=detailPasteNumber(cells[m.tripIdx]);
+      }else if(m.plateIdx>=0 && cleanDetailPasteCell(cells[m.plateIdx]||"")){
+        // Detailed transaction row: every vehicle row = 1 trip.
+        trips=1;
+      }
+
+      addRow({
+        date,kp,supplier,tonnage,trips,
+        rawLine:rawLines[i]||cells.join("\t")
+      });
+    }
+  }else{
+    // Compact Excel summary fallback:
+    // KP | Supplier | Tonase | Trip
+    for(let i=0;i<matrix.length;i++){
+      const cells=matrix[i];
+      if(cells.length<4){ ignored++; continue; }
+
+      const possibleKp=canonKP(cells[0]||"");
+      if(!FALLBACK_KP_CODES.includes(possibleKp)){ ignored++; continue; }
+
+      const supplier=cells[1];
+      const tonnage=detailPasteNumber(cells[2]);
+      const trips=detailPasteNumber(cells[3]);
+      if(!tonnage){ ignored++; continue; }
+
+      addRow({
+        date:manualDate,
+        kp:possibleKp,
+        supplier,
+        tonnage,
+        trips,
+        rawLine:rawLines[i]||cells.join("\t")
+      });
+    }
+  }
+
+  rows=combineDailyRows(rows);
+  const total=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const trips=rows.reduce((a,r)=>a+Number(r.trip_count||0),0);
+
+  return {
+    rows,total,trips,declaredTotal,declaredTrips,
+    integrityOk:declaredTotal==null || Number(declaredTotal)===Number(total),
+    tripIntegrityOk:declaredTrips==null || Number(declaredTrips)===Number(trips),
+    headerDetected:headerRow>=0,
+    headers:headerMeta?.headers||[],
+    detectedDates:[...detectedDates].sort(),
+    ignored,missingTrip,missingSupplier,missingKp,invalidDate
+  };
+}
+
+async function previewDailyExcelPaste(){
+  try{
+    const raw=$("dailyPasteText")?.value||"";
+    if(!raw.trim()) throw Error("Paste data dari Excel terlebih dahulu.");
+
+    const manualDate=$("dailyExcelDate")?.value || $("monitorDate")?.value || null;
+    const selectedTime=$("dailyExcelTime")?.value || "00:00:00";
+    const defaultKp=$("dailyPasteKp")?.value || (($("monitorKp")?.value||"ALL")!=="ALL"?$("monitorKp").value:"");
+    const defaultSupplier=$("dailyPasteSupplier")?.value || "";
+
+    const parsed=parseDailyExcelPaste(raw,{
+      manualDate,
+      defaultKp,
+      defaultSupplier
+    });
+
+    if(!manualDate && parsed.detectedDates.length===1 && $("dailyExcelDate")){
+      $("dailyExcelDate").value=parsed.detectedDates[0];
+    }
+
+    const selectedDate=$("dailyExcelDate")?.value || manualDate || (parsed.detectedDates.length===1?parsed.detectedDates[0]:null);
+    if(!selectedDate){
+      throw Error("Tanggal Data belum ditentukan. Pilih Tanggal Data di kotak Upload Data Tonase Harian.");
+    }
+
+    let extracted=parsed.rows.filter(r=>r.report_date===selectedDate);
+    extracted=combineDailyRows(extracted);
+
+    const mode=selectedTime==="00:00:00" ? "closing" : "snapshot";
+    const kpSet=new Set(extracted.map(r=>r.kp_code));
+    const supplierSet=new Set(extracted.map(r=>`${r.kp_code}/${r.supplier_name}`));
+    const tonTotal=extracted.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+    const tripTotal=extracted.reduce((a,r)=>a+Number(r.trip_count||0),0);
+
+    const blocking=[];
+    if(!extracted.length) blocking.push(`Tidak ada data valid untuk tanggal ${selectedDate}.`);
+    if(parsed.missingKp) blocking.push(`${parsed.missingKp} baris tidak memiliki KP yang valid.`);
+    if(parsed.missingSupplier) blocking.push(`${parsed.missingSupplier} baris tidak memiliki Supplier/SPB.`);
+    if(parsed.missingTrip) blocking.push(`${parsed.missingTrip} baris tidak memiliki Trip atau No Polisi.`);
+    if(parsed.invalidDate) blocking.push(`${parsed.invalidDate} baris tidak memiliki tanggal; pilih Tanggal Data manual.`);
+    if(!parsed.integrityOk){
+      blocking.push(`Total hasil parser ${kg(parsed.total)} ≠ TOTAL Excel ${kg(parsed.declaredTotal)}.`);
+    }
+    if(!parsed.tripIntegrityOk){
+      blocking.push(`Trip hasil parser ${parsed.trips} ≠ TOTAL Trip Excel ${parsed.declaredTrips}.`);
+    }
+
+    DAILY_EXCEL_PREVIEW={
+      date:selectedDate,
+      time:selectedTime,
+      mode,
+      files:["PASTE EXCEL"],
+      daily:extracted,
+      fileResults:[],
+      integrityBlocked:blocking.length?[{fileName:"PASTE EXCEL",integrityIssues:blocking}]:[],
+      availableDates:parsed.detectedDates,
+      total:tonTotal,
+      trips:tripTotal,
+      sourceMode:"paste_excel",
+      sourceType:"excel_paste",
+      rawText:raw,
+      parsedMeta:parsed
+    };
+
+    if($("monitorDate")) $("monitorDate").value=selectedDate;
+
+    const status=blocking.length?"DIBLOKIR — PERIKSA PREVIEW":"SIAP DISIMPAN";
+    $("dailyPastePreview").textContent=
+      `SUMBER: PASTE DARI EXCEL\n`+
+      `STATUS: ${status}\n`+
+      `MODE: ${mode==="closing"?"00.00 — CLOSING / TOTAL HARIAN FINAL":selectedTime.slice(0,5)+" — SNAPSHOT"}\n`+
+      `Tanggal Data: ${selectedDate}\n`+
+      `Header Excel: ${parsed.headerDetected?"terdeteksi otomatis":"format ringkas KP | Supplier | Tonase | Trip"}\n`+
+      `KP terbaca: ${kpSet.size}\n`+
+      `Supplier/SPB terbaca: ${supplierSet.size}\n`+
+      `Baris agregat: ${extracted.length}\n`+
+      `Total Trip: ${tripTotal.toLocaleString("id-ID")}\n`+
+      `Total Tonase: ${kg(tonTotal)}\n`+
+      (parsed.declaredTotal!=null
+        ? `TOTAL Excel: ${kg(parsed.declaredTotal)} ${parsed.integrityOk?"✓":"✕"}\n`
+        : `TOTAL Excel: tidak ditemukan — memakai jumlah baris terbaca\n`)+
+      (parsed.declaredTrips!=null
+        ? `TOTAL Trip Excel: ${parsed.declaredTrips.toLocaleString("id-ID")} ${parsed.tripIntegrityOk?"✓":"✕"}\n`
+        : "")+
+      `Tanggal terdeteksi di paste: ${parsed.detectedDates.length?parsed.detectedDates.join(", "):"tidak ada / memakai tanggal manual"}\n`+
+      `Baris non-data diabaikan: ${parsed.ignored}\n\n`+
+      (mode==="closing"
+        ? `Data akan di-upsert sebagai Closing Harian Final. Baris tanggal+KP+Supplier yang sama akan diperbarui, bukan didouble.`
+        : `Data akan mengganti snapshot ${selectedTime.slice(0,5)} pada tanggal yang sama jika snapshot tersebut sudah ada.`)+
+      (blocking.length
+        ? `\n\nSIMPAN DIBLOKIR:\n${blocking.map(x=>"• "+x).join("\n")}`
+        : `\n\n✓ Preview valid. Klik Simpan Paste sebagai Data Harian.`);
+
+    setDailyPasteSaveState(!blocking.length);
+  }catch(e){
+    if(DAILY_EXCEL_PREVIEW?.sourceMode==="paste_excel") DAILY_EXCEL_PREVIEW=null;
+    setDailyPasteSaveState(false);
+    if($("dailyPastePreview")) $("dailyPastePreview").textContent="ERROR: "+e.message;
+  }
+}
+
+async function saveDailyExcelPaste(){
+  if(!DAILY_EXCEL_PREVIEW || DAILY_EXCEL_PREVIEW.sourceMode!=="paste_excel"){
+    return alert("Klik Preview Paste Excel terlebih dahulu.");
+  }
+  await saveDailyExcel();
+}
+
 async function previewDailyExcels(fileList){
   try{
     const files=[...(fileList||[])];
@@ -3320,7 +3640,10 @@ async function previewDailyExcels(fileList){
       integrityBlocked:badFiles,
       availableDates,
       total:tonTotal,
-      trips:tripTotal
+      trips:tripTotal,
+      sourceMode:"file_upload",
+      sourceType:"excel_upload",
+      rawText:`EXCEL HARIAN: ${files.map(f=>f.name).join(", ")}`
     };
 
     if($("monitorDate")) $("monitorDate").value=selectedDate;
@@ -3351,7 +3674,7 @@ async function previewDailyExcels(fileList){
   }
 }
 async function saveDailyExcel(){
-  if(!DAILY_EXCEL_PREVIEW) return alert("Pilih dan Preview Excel Harian dahulu.");
+  if(!DAILY_EXCEL_PREVIEW) return alert("Preview data Excel Harian terlebih dahulu.");
   const p=DAILY_EXCEL_PREVIEW;
 
   if(!p.daily.length){
@@ -3361,7 +3684,7 @@ async function saveDailyExcel(){
   if((p.integrityBlocked||[]).length){
     return alert(
       "SIMPAN DIBLOKIR.\n\n"+
-      p.integrityBlocked.map(f=>`${f.fileName}: total parser belum cocok dengan Total Excel.`).join("\n")
+      p.integrityBlocked.map(f=>`${f.fileName}: ${(f.integrityIssues||["data belum valid"]).join("; ")}`).join("\n")
     );
   }
 
@@ -3377,7 +3700,7 @@ async function saveDailyExcel(){
     }
 
     alert(
-      `CLOSING EXCEL 00.00 BERHASIL DISIMPAN ✓\n\n`+
+      `${p.sourceMode==="paste_excel"?"CLOSING PASTE EXCEL":"CLOSING EXCEL"} 00.00 BERHASIL DISIMPAN ✓\n\n`+
       `Tanggal: ${p.date}\n`+
       `Total: ${kg(p.total)}\n`+
       `Trip: ${p.trips.toLocaleString("id-ID")}\n`+
@@ -3391,8 +3714,8 @@ async function saveDailyExcel(){
       snapshot_time:p.time,
       total_tonnage_kg:p.total,
       total_trips:p.trips,
-      source_type:"excel_upload",
-      raw_text:`EXCEL HARIAN: ${p.files.join(", ")}`,
+      source_type:p.sourceType || "excel_upload",
+      raw_text:p.rawText || `EXCEL HARIAN: ${p.files.join(", ")}`,
       status:"validated"
     },{onConflict:"report_date,snapshot_time"}).select().single();
 
@@ -3410,7 +3733,7 @@ async function saveDailyExcel(){
     if(e2) return alert("Snapshot tersimpan, tetapi detail gagal: "+e2.message);
 
     alert(
-      `SNAPSHOT EXCEL BERHASIL DISIMPAN ✓\n\n`+
+      `${p.sourceMode==="paste_excel"?"SNAPSHOT PASTE EXCEL":"SNAPSHOT EXCEL"} BERHASIL DISIMPAN ✓\n\n`+
       `Tanggal: ${p.date}\n`+
       `Jam: ${p.time.slice(0,5)}\n`+
       `Total: ${kg(p.total)}\n`+
@@ -3419,9 +3742,18 @@ async function saveDailyExcel(){
   }
 
   if($("monitorDate")) $("monitorDate").value=p.date;
+  const wasPaste=p.sourceMode==="paste_excel";
   DAILY_EXCEL_PREVIEW=null;
-  if($("dailyExcelFile")) $("dailyExcelFile").value="";
-  $("dailyExcelPreview").textContent="Belum ada file harian dipilih.";
+
+  if(wasPaste){
+    if($("dailyPasteText")) $("dailyPasteText").value="";
+    if($("dailyPastePreview")) $("dailyPastePreview").textContent="Belum ada data Excel yang dipaste.";
+    setDailyPasteSaveState(false);
+  }else{
+    if($("dailyExcelFile")) $("dailyExcelFile").value="";
+    if($("dailyExcelPreview")) $("dailyExcelPreview").textContent="Belum ada file harian dipilih.";
+  }
+
   await loadKPDaily($("monitorKp").value||"ALL");
   await loadDashboard();
 }
@@ -3512,6 +3844,378 @@ function detailTransactionKey(row){
 }
 
 
+
+function detectPasteDetailHeaderKp(text){
+  const source=String(text||"").replace(/\u00a0/g," ");
+  const lines=source.split(/\r?\n/).slice(0,35);
+
+  for(const line of lines){
+    const s=String(line||"").trim().toUpperCase();
+    if(!s) continue;
+
+    const office=s.match(/KANTOR\s+PENCAIRAN\s+PT\.?\s*([A-Z0-9][A-Z0-9\s-]{1,24})/i);
+    if(office){
+      const raw=office[1].trim();
+      if(/TKWL.*KANDIS/.test(raw)) return "TKWL-2";
+      if(/TKWL.*SIAK/.test(raw)) return "TKWL-1";
+      if(/MSB\s*-?\s*2/.test(raw)) return "MSB-2";
+      if(/KS\s*-?\s*2/.test(raw)) return "KS2";
+      if(/ASMJ\s*-?\s*1/.test(raw)) return "ASMJ-1";
+      if(/ASMJ\s*-?\s*2/.test(raw)) return "ASMJ-2";
+
+      const first=raw.split(/\s{2,}|,|DESA|KEC\.?|KAB\.?/)[0].trim();
+      const canonical=canonKP(first);
+      if(FALLBACK_KP_CODES.includes(canonical)) return canonical;
+
+      const tokens=raw.split(/\s+/);
+      for(let n=Math.min(3,tokens.length);n>=1;n--){
+        const candidate=canonKP(tokens.slice(0,n).join(" "));
+        if(FALLBACK_KP_CODES.includes(candidate)) return candidate;
+      }
+    }
+  }
+
+  return detectPasteDetailKp(source);
+}
+
+function detectPasteDetailHeaderSupplierRaw(text){
+  const lines=String(text||"").replace(/\u00a0/g," ").split(/\r?\n/).slice(0,45);
+
+  for(const rawLine of lines){
+    const line=String(rawLine||"").trim();
+    if(!line) continue;
+
+    if(line.includes("\t")){
+      const cells=line.split("\t").map(cleanDetailPasteCell);
+      const key=String(cells[0]||"").toUpperCase().replace(/[^A-Z0-9]+/g," ").trim();
+      if((key==="SPB" || key==="JENIS SPB" || key==="DO" || key==="SUPPLIER") && cells[1]){
+        return cleanDetailPasteCell(cells[1]);
+      }
+    }
+
+    const m=line.match(/^\s*(?:JENIS\s+SPB|SPB|SUPPLIER|DO)\s*(?::|-|\s{2,}|\s+)\s*([A-Z0-9][A-Z0-9 ._\/-]{0,80})\s*$/i);
+    if(m){
+      const value=cleanDetailPasteCell(m[1]);
+      if(value && !/^(TONASE|HARGA|NILAI|TANGGAL|NO\b)/i.test(value)) return value;
+    }
+  }
+  return null;
+}
+
+function detectPasteDetailHeaderSupplier(text,kp){
+  const raw=detectPasteDetailHeaderSupplierRaw(text);
+  if(!raw || !kp) return {raw:null,canonical:null};
+  return {raw,canonical:canonSupplierForKP(kp,raw)};
+}
+
+function detailBusinessFingerprint(row){
+  const proof=supplierToken(row?.proof_no||"");
+  if(!proof) return null;
+  return [
+    canonKP(row?.kp_code||""),
+    supplierToken(row?.supplier_name||""),
+    proof,
+    String(row?.vehicle_plate||"").toUpperCase().replace(/[^A-Z0-9]/g,""),
+    Number(row?.tonnage_kg||0)
+  ].join("|");
+}
+
+function analyzePasteBusinessDuplicates(transactions){
+  const by=new Map();
+  (transactions||[]).forEach(r=>{
+    const fp=detailBusinessFingerprint(r);
+    if(!fp) return;
+    if(!by.has(fp)) by.set(fp,[]);
+    by.get(fp).push(r);
+  });
+
+  const groups=[...by.entries()]
+    .filter(([,rows])=>rows.length>1)
+    .map(([fingerprint,rows])=>({
+      fingerprint,
+      rows,
+      extraRows:rows.length-1,
+      extraKg:Number(rows[0]?.tonnage_kg||0)*(rows.length-1)
+    }));
+
+  return {
+    groups,
+    extraRows:groups.reduce((a,g)=>a+g.extraRows,0),
+    extraKg:groups.reduce((a,g)=>a+g.extraKg,0)
+  };
+}
+
+function diffDaysIso(a,b){
+  if(!a || !b) return null;
+  const da=new Date(`${a}T00:00:00Z`);
+  const db=new Date(`${b}T00:00:00Z`);
+  if(Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return null;
+  return Math.round((da-db)/86400000);
+}
+
+function pasteSequenceQuality(transactions){
+  const seq=[...new Set((transactions||[]).map(r=>Number(r.sequence_no||0)).filter(n=>n>0))].sort((a,b)=>a-b);
+  if(!seq.length) return {min:null,max:null,distinct:0,gaps:0};
+  const min=seq[0],max=seq[seq.length-1];
+  const expected=max-min+1;
+  return {min,max,distinct:seq.length,gaps:Math.max(0,expected-seq.length)};
+}
+
+async function fetchExistingPeriodDetailRows(parsed){
+  if(!parsed?.startDate || !parsed?.kp || !parsed?.supplier) return [];
+  const all=[];
+  const pageSize=1000;
+  let offset=0;
+
+  while(true){
+    const {data,error}=await db.from("tonnage_detail_transactions")
+      .select("id,period_start,period_end,kp_code,supplier_name,stable_key,report_date,payment_status,proof_no,vehicle_plate,agent_name,tonnage_kg,sequence_no")
+      .eq("period_start",parsed.startDate)
+      .eq("kp_code",parsed.kp)
+      .eq("supplier_name",parsed.supplier)
+      .order("id",{ascending:true})
+      .range(offset,offset+pageSize-1);
+
+    if(error) throw Error("Gagal membaca detail Final lama untuk Data Quality Guard: "+error.message);
+    const rows=data||[];
+    all.push(...rows);
+    if(rows.length<pageSize) break;
+    offset+=pageSize;
+    if(offset>20000) break;
+  }
+  return all;
+}
+
+function analyzeExistingPeriodReplacement(parsed,existingRows){
+  const incomingKeys=new Set((parsed?.transactions||[]).map(r=>r.stable_key));
+  const stale=(existingRows||[]).filter(r=>!incomingKeys.has(r.stable_key));
+  const same=(existingRows||[]).filter(r=>incomingKeys.has(r.stable_key));
+
+  return {
+    existingRows:(existingRows||[]).length,
+    sameRows:same.length,
+    staleRows:stale,
+    staleCount:stale.length,
+    staleKg:stale.reduce((a,r)=>a+Number(r.tonnage_kg||0),0)
+  };
+}
+
+function buildPasteQualityAssessment({raw,parsed,reconciliation,existingPeriodRows}){
+  const hard=[];
+  const warnings=[];
+  const info=[];
+
+  const detectedKp=detectPasteDetailHeaderKp(raw);
+  const supplierHeader=detectPasteDetailHeaderSupplier(raw,detectedKp||parsed.kp);
+  const internalDup=analyzePasteBusinessDuplicates(parsed.transactions);
+  const seq=pasteSequenceQuality(parsed.transactions);
+  const replacement=analyzeExistingPeriodReplacement(parsed,existingPeriodRows);
+
+  if(detectedKp && detectedKp!==parsed.kp){
+    hard.push({
+      code:"KP_MISMATCH",
+      message:`Header report terdeteksi ${detectedKp}, tetapi KP yang dipilih ${parsed.kp}. Pilih KP sesuai report.`
+    });
+  }else if(detectedKp){
+    info.push({code:"KP_OK",message:`KP header cocok: ${detectedKp}.`});
+  }else{
+    warnings.push({
+      code:"KP_NOT_DETECTED",
+      critical:false,
+      message:"KP tidak dapat dibaca tegas dari header. Pastikan pilihan KP benar."
+    });
+  }
+
+  if(supplierHeader.raw && supplierHeader.canonical){
+    if(supplierToken(supplierHeader.canonical)!==supplierToken(parsed.supplier)){
+      hard.push({
+        code:"SUPPLIER_MISMATCH",
+        message:`Header report menyebut SPB/Supplier "${supplierHeader.raw}" → ${supplierHeader.canonical}, tetapi yang dipilih ${parsed.supplier}. Simpan diblokir.`
+      });
+    }else{
+      info.push({code:"SUPPLIER_OK",message:`SPB/Supplier header cocok: ${supplierHeader.canonical}.`});
+    }
+  }else if(supplierHeader.raw){
+    warnings.push({
+      code:"SUPPLIER_UNKNOWN",
+      critical:true,
+      message:`Header SPB "${supplierHeader.raw}" terbaca tetapi tidak cocok ke master supplier ${parsed.kp}. Periksa master/pilihan supplier.`
+    });
+  }else{
+    warnings.push({
+      code:"SUPPLIER_NOT_DETECTED",
+      critical:true,
+      message:"SPB/Supplier tidak ditemukan di header paste. Verifikasi pilihan Supplier secara manual sebelum Simpan."
+    });
+  }
+
+  if(internalDup.extraRows>0){
+    const examples=internalDup.groups.slice(0,4).map(g=>{
+      const r=g.rows[0];
+      return `${r.proof_no||"-"} • ${r.vehicle_plate} • ${kg(r.tonnage_kg)} • muncul ${g.rows.length}x`;
+    }).join("; ");
+    hard.push({
+      code:"DUPLICATE_IN_PASTE",
+      message:`Terdeteksi ${internalDup.extraRows} transaksi double berisiko (${kg(internalDup.extraKg)} ekstra). ${examples}`
+    });
+  }else{
+    info.push({code:"DUPLICATE_OK",message:"Tidak ditemukan transaksi exact-double berdasarkan No Bukti + No Polisi + Tonase."});
+  }
+
+  if(parsed.declaredTotal==null){
+    warnings.push({
+      code:"TOTAL_NOT_FOUND",
+      critical:true,
+      message:"Baris TOTAL tonase tidak ditemukan. Untuk Final bulanan, sebaiknya copy sampai footer TOTAL agar sistem bisa membuktikan paste lengkap."
+    });
+  }else if(parsed.integrityOk){
+    info.push({code:"TOTAL_OK",message:`Total transaksi cocok dengan TOTAL report: ${kg(parsed.totalKg)}.`});
+  }
+
+  if(seq.gaps>0){
+    warnings.push({
+      code:"SEQUENCE_GAP",
+      critical:true,
+      message:`Nomor urut transaksi memiliki ${seq.gaps} gap (rentang ${seq.min}–${seq.max}, terbaca ${seq.distinct}). Ini dapat menandakan baris terlewat saat copy/paste.`
+    });
+  }else if(seq.min!=null){
+    info.push({code:"SEQUENCE_OK",message:`Nomor urut terbaca konsisten ${seq.min}–${seq.max}.`});
+  }
+
+  const paidDates=(parsed.paidTransactions||[]).map(r=>r.report_date).filter(Boolean).sort();
+  const latestPaid=paidDates[paidDates.length-1]||null;
+  const lag=latestPaid && parsed.endDate ? diffDaysIso(parsed.endDate,latestPaid) : null;
+  if(lag!=null && lag>=7 && parsed.transactions.length>=30){
+    warnings.push({
+      code:"DATE_COVERAGE_LAG",
+      critical:true,
+      message:`Periode report berakhir ${parsed.endDate}, tetapi Tanggal Bayar terakhir yang terbaca ${latestPaid} (${lag} hari lebih awal). Tanggal Bayar memang bisa terlambat, namun pola ini berisiko paste terpotong dan wajib dicek.`
+    });
+  }else if(latestPaid){
+    info.push({code:"DATE_COVERAGE",message:`Tanggal Bayar terakhir terbaca ${latestPaid}; periode report sampai ${parsed.endDate}.`});
+  }
+
+  const closing=Number(reconciliation?.closingTotal||0);
+  const paste=Number(parsed.totalKg||0);
+  if(closing>paste){
+    const diff=closing-paste;
+    const pct=closing?diff/closing:0;
+    if(diff>=100000 && pct>=0.10){
+      warnings.push({
+        code:"PASTE_BELOW_CLOSING",
+        critical:true,
+        message:`Paste Final ${kg(paste)} lebih rendah ${kg(diff)} (${(pct*100).toFixed(1)}%) dari Closing periode ${kg(closing)}. Ini pola kuat data belum lengkap; cek ulang sebelum Simpan.`
+      });
+    }else{
+      warnings.push({
+        code:"PASTE_BELOW_CLOSING_SMALL",
+        critical:false,
+        message:`Paste Final lebih rendah ${kg(diff)} dari Closing periode. Periksa bila tidak sesuai ekspektasi.`
+      });
+    }
+  }
+
+  if(replacement.existingRows){
+    if(replacement.staleCount){
+      info.push({
+        code:"AUTHORITATIVE_REPLACE",
+        message:`Ada ${replacement.existingRows} detail Final lama. Setelah Simpan, ${replacement.staleCount} baris lama (${kg(replacement.staleKg)}) yang tidak ada di report baru akan dibersihkan otomatis agar paste ulang tidak menumpuk/double.`
+      });
+    }else{
+      info.push({
+        code:"AUTHORITATIVE_SAME",
+        message:`Detail Final lama ${replacement.existingRows} baris seluruhnya masih ada pada report baru; tidak ada baris stale yang perlu dibersihkan.`
+      });
+    }
+  }else{
+    info.push({code:"FIRST_FINAL",message:"Belum ada Paste Final lama untuk KP/Supplier/periode awal ini."});
+  }
+
+  const criticalWarnings=warnings.filter(x=>x.critical);
+  return {
+    hard,warnings,info,
+    blocked:hard.length>0,
+    requiresConfirm:criticalWarnings.length>0,
+    criticalWarnings,
+    detectedKp,
+    detectedSupplierRaw:supplierHeader.raw,
+    detectedSupplier:supplierHeader.canonical,
+    internalDup,
+    seq,
+    latestPaid,
+    lagDays:lag,
+    replacement
+  };
+}
+
+function renderPasteQualityGuard(q){
+  const root=$("pasteQualityGuard");
+  if(!root || !q) return;
+
+  const badge=$("pasteQualityBadge");
+  const list=$("pasteQualityList");
+  const override=$("pasteQualityOverrideWrap");
+
+  const status=q.blocked ? "DIBLOKIR"
+    : q.requiresConfirm ? "PERLU VERIFIKASI"
+    : q.warnings.length ? "ADA PERINGATAN"
+    : "AMAN";
+
+  if(badge){
+    badge.textContent=status;
+    badge.className="paste-quality-badge "+(
+      q.blocked ? "danger" :
+      q.requiresConfirm ? "warning" :
+      q.warnings.length ? "warning" : "safe"
+    );
+  }
+
+  const rows=[
+    ...q.hard.map(x=>({kind:"danger",label:"BLOKIR",message:x.message})),
+    ...q.warnings.map(x=>({kind:x.critical?"warning":"note",label:x.critical?"CEK WAJIB":"PERINGATAN",message:x.message})),
+    ...q.info.map(x=>({kind:"safe",label:"OK",message:x.message}))
+  ];
+
+  if(list){
+    list.innerHTML=rows.map(x=>
+      `<div class="paste-quality-item ${x.kind}"><b>${x.label}</b><span>${escapeHtml(x.message)}</span></div>`
+    ).join("");
+  }
+
+  if(override){
+    override.classList.toggle("hidden",!q.requiresConfirm || q.blocked);
+  }
+  if($("pasteQualityConfirm")) $("pasteQualityConfirm").checked=false;
+  if($("pasteQualityReason")) $("pasteQualityReason").value="";
+}
+
+function invalidatePasteDetailQuality(){
+  setPasteDetailSaveState(false);
+  if(MONTHLY_EXCEL_PREVIEW?.sourceMode==="paste_detail") MONTHLY_EXCEL_PREVIEW=null;
+  if($("pasteQualityBadge")){
+    $("pasteQualityBadge").textContent="PERLU PREVIEW ULANG";
+    $("pasteQualityBadge").className="paste-quality-badge idle";
+  }
+  if($("pasteQualityList")){
+    $("pasteQualityList").textContent="Input berubah. Klik Preview Audit Paste Detail lagi.";
+  }
+  if($("pasteQualityOverrideWrap")) $("pasteQualityOverrideWrap").classList.add("hidden");
+}
+
+function updatePasteQualityOverrideState(){
+  const p=MONTHLY_EXCEL_PREVIEW;
+  if(!p || p.sourceMode!=="paste_detail") return setPasteDetailSaveState(false);
+  if(p.finalBlocked || p.quality?.blocked) return setPasteDetailSaveState(false);
+
+  if(!p.quality?.requiresConfirm){
+    return setPasteDetailSaveState(true);
+  }
+
+  const checked=!!$("pasteQualityConfirm")?.checked;
+  const reason=String($("pasteQualityReason")?.value||"").trim();
+  setPasteDetailSaveState(checked && reason.length>=5);
+}
+
 function detectPasteDetailKp(text){
   const explicit=String(text||"").match(/\b(?:KP|KANTOR)\s*[.:\-]?\s*(ASMJ[\s-]*[12]|TKWL[\s-]*[12]|MSB[\s-]*2|KS[\s-]*2|[A-Z]{2,12}(?:-[A-Z0-9]+)?)\b/i);
   if(explicit) return canonKP(explicit[1]);
@@ -3543,15 +4247,25 @@ function syncPasteDetailSuppliers(){
 function detectPasteDetailMetadata(){
   const raw=$("pasteDetailText")?.value||"";
   if(!$("pasteDetailKp")) return;
-  if(!$("pasteDetailKp").value){
-    const detected=detectPasteDetailKp(raw);
-    if(detected && [...$("pasteDetailKp").options].some(o=>o.value===detected)){
-      $("pasteDetailKp").value=detected;
-      syncPasteDetailSuppliers();
+
+  const detectedKp=detectPasteDetailHeaderKp(raw);
+  if(!$("pasteDetailKp").value && detectedKp &&
+     [...$("pasteDetailKp").options].some(o=>o.value===detectedKp)){
+    $("pasteDetailKp").value=detectedKp;
+    syncPasteDetailSuppliers();
+  }
+
+  const kp=$("pasteDetailKp").value||detectedKp||"";
+  if(kp && $("pasteDetailSupplier") && !$("pasteDetailSupplier").value){
+    const detectedSupplier=detectPasteDetailHeaderSupplier(raw,kp);
+    if(detectedSupplier.canonical &&
+       [...$("pasteDetailSupplier").options].some(o=>supplierToken(o.value)===supplierToken(detectedSupplier.canonical))){
+      const opt=[...$("pasteDetailSupplier").options]
+        .find(o=>supplierToken(o.value)===supplierToken(detectedSupplier.canonical));
+      if(opt) $("pasteDetailSupplier").value=opt.value;
     }
   }
 }
-
 function parsePastedDetailTable(text,kp,supplier){
   if(!kp) throw Error("Pilih KP terlebih dahulu.");
   if(!supplier) throw Error("Pilih Supplier / SPB terlebih dahulu.");
@@ -3761,8 +4475,20 @@ async function savePastedDetailFinal(){
       "Klik 'Preview Audit Paste Detail', periksa hasil audit, lalu tombol Simpan Paste sebagai FINAL akan aktif."
     );
   }
-  if(p.finalBlocked){
-    return alert("SIMPAN FINAL DIBLOKIR.\n\nPerbaiki masalah integritas pada Preview terlebih dahulu.");
+  if(p.finalBlocked || p.quality?.blocked){
+    return alert("SIMPAN FINAL DIBLOKIR.\n\nPerbaiki item merah pada Data Quality Guard terlebih dahulu.");
+  }
+
+  if(p.quality?.requiresConfirm){
+    const checked=!!$("pasteQualityConfirm")?.checked;
+    const qualityReason=String($("pasteQualityReason")?.value||"").trim();
+    if(!checked || qualityReason.length<5){
+      return alert(
+        "VERIFIKASI DATA WAJIB.\n\n"+
+        "Ada pola yang berisiko paste tidak lengkap. Centang konfirmasi dan isi alasan verifikasi minimal 5 karakter."
+      );
+    }
+    p.qualityOverrideReason=qualityReason;
   }
 
   const parsed=p.parsedDetail;
@@ -3771,12 +4497,32 @@ async function savePastedDetailFinal(){
     return alert("SIMPAN FINAL DIBLOKIR.\n\nPeriode laporan tidak terdeteksi.");
   }
 
-  // Recheck operational Closing immediately before save.
+  // Recheck Closing + current period detail immediately before save.
   let latestRec;
+  let latestExistingPeriodRows;
+  let latestQuality;
   try{
-    latestRec=await comparePasteDetailPeriodToClosing(parsed);
+    [latestRec,latestExistingPeriodRows]=await Promise.all([
+      comparePasteDetailPeriodToClosing(parsed),
+      fetchExistingPeriodDetailRows(parsed)
+    ]);
+    latestQuality=buildPasteQualityAssessment({
+      raw:p.rawPaste,
+      parsed,
+      reconciliation:latestRec,
+      existingPeriodRows:latestExistingPeriodRows
+    });
   }catch(e){
     return alert(e.message);
+  }
+
+  if(latestQuality.blocked){
+    renderPasteQualityGuard(latestQuality);
+    setPasteDetailSaveState(false);
+    return alert(
+      "SIMPAN FINAL DIBLOKIR.\n\n"+
+      latestQuality.hard.map(x=>"• "+x.message).join("\n")
+    );
   }
 
   const purchaseWarning=(p.integrityWarnings||[]).length
@@ -3792,6 +4538,9 @@ async function savePastedDetailFinal(){
     `HOLD               : ${kg(parsed.holdKg)} / ${parsed.holdTransactions.length} trip\n`+
     `Akumulasi Closing  : ${kg(latestRec.closingTotal)}\n`+
     `Koreksi Otomatis   : ${latestRec.correctionKg>=0?"+":""}${kg(latestRec.correctionKg)}\n`+
+    `Baris Final lama   : ${latestQuality.replacement.existingRows}\n`+
+    `Akan dibersihkan   : ${latestQuality.replacement.staleCount} baris / ${kg(latestQuality.replacement.staleKg)}\n`+
+    (p.qualityOverrideReason?`Verifikasi manual   : ${p.qualityOverrideReason}\n`:"")+
     purchaseWarning+"\n"+
     "Tonase adalah data utama untuk penyimpanan Final.\n"+
     "Paste Final tidak akan mengganti tanggal Closing Harian.\n"+
@@ -3833,6 +4582,32 @@ async function savePastedDetailFinal(){
     detailWritten+=data?.length||chunk.length;
   }
 
+
+  // AUTHORITATIVE REPLACEMENT:
+  // Full Final Paste is the source of truth for this period_start + KP + Supplier.
+  // Upsert current rows first, then remove stale old rows that are not present anymore.
+  const latestBeforeCleanup=await fetchExistingPeriodDetailRows(parsed);
+  const incomingStableKeys=new Set((parsed.transactions||[]).map(r=>r.stable_key));
+  const staleRows=latestBeforeCleanup.filter(r=>!incomingStableKeys.has(r.stable_key));
+  let staleRemoved=0;
+
+  for(let i=0;i<staleRows.length;i+=200){
+    const ids=staleRows.slice(i,i+200).map(r=>r.id).filter(Boolean);
+    if(!ids.length) continue;
+    const {error:deleteError}=await db.from("tonnage_detail_transactions")
+      .delete()
+      .in("id",ids);
+    if(deleteError){
+      return alert(
+        "DATA QUALITY CLEANUP GAGAL.\\n\\n"+
+        "Data baru sudah ditulis, tetapi baris Final lama belum selesai dibersihkan. "+
+        "Jangan lanjut input supplier ini sebelum Preview ulang.\\n\\n"+
+        deleteError.message
+      );
+    }
+    staleRemoved+=ids.length;
+  }
+
   const recPayload={
     period_start:parsed.startDate,
     period_end:parsed.endDate,
@@ -3849,7 +4624,11 @@ async function savePastedDetailFinal(){
     reconciliation_kg:latestRec.correctionKg,
     reconciliation_trip_count:latestRec.correctionTrips,
     source_type:"paste_detail",
-    raw_text:p.rawPaste,
+    raw_text:
+      (p.qualityOverrideReason
+        ? `[DATA QUALITY VERIFIED: ${p.qualityOverrideReason}]\n`
+        : "[DATA QUALITY GUARD: PASS]\n")+
+      p.rawPaste,
     updated_at:new Date().toISOString()
   };
 
@@ -3870,13 +4649,21 @@ async function savePastedDetailFinal(){
     `HOLD              : ${kg(parsed.holdKg)} / ${parsed.holdTransactions.length} trip\n`+
     `Akumulasi Closing : ${kg(latestRec.closingTotal)}\n`+
     `Koreksi Otomatis  : ${latestRec.correctionKg>=0?"+":""}${kg(latestRec.correctionKg)}\n`+
-    `Detail tersimpan  : ${detailWritten}\n\n`+
-    `Closing Harian tidak diubah. Total Bulanan memakai Paste Final + rekonsiliasi periode.`
+    `Detail tersimpan  : ${detailWritten}\n`+
+    `Baris lama dibuang : ${staleRemoved}\n`+
+    `Quality Guard      : LULUS ✓\n\n`+
+    `Closing Harian tidak diubah. Paste terbaru menjadi set Final otoritatif untuk KP/Supplier/periode tersebut.`
   );
 
   MONTHLY_EXCEL_PREVIEW=null;
   if($("pasteDetailText")) $("pasteDetailText").value="";
   setPasteDetailSaveState(false);
+  if($("pasteQualityBadge")){
+    $("pasteQualityBadge").textContent="BELUM DIPERIKSA";
+    $("pasteQualityBadge").className="paste-quality-badge idle";
+  }
+  if($("pasteQualityList")) $("pasteQualityList").textContent="Paste data lalu klik Preview Audit untuk menjalankan pemeriksaan.";
+  if($("pasteQualityOverrideWrap")) $("pasteQualityOverrideWrap").classList.add("hidden");
   if($("monthlyConflictSummary")){
     $("monthlyConflictSummary").textContent="Belum ada hasil pemeriksaan.";
     $("monthlyConflictSummary").className="monthly-conflict-summary";
@@ -3905,10 +4692,18 @@ async function previewPastedDetail(){
 
     $("monthlyExcelPreview").textContent="Membaca Paste Detail dan merekonsiliasi Total Periode vs Closing Harian...";
 
-    const [existingStable,reconciliation]=await Promise.all([
+    const [existingStable,reconciliation,existingPeriodRows]=await Promise.all([
       fetchExistingDetailStableRows(parsed.transactions),
-      comparePasteDetailPeriodToClosing(parsed)
+      comparePasteDetailPeriodToClosing(parsed),
+      fetchExistingPeriodDetailRows(parsed)
     ]);
+
+    const quality=buildPasteQualityAssessment({
+      raw,
+      parsed,
+      reconciliation,
+      existingPeriodRows
+    });
 
     let exactDuplicateCount=0;
     let holdToPaidCount=0;
@@ -3925,24 +4720,29 @@ async function previewPastedDetail(){
       }
     });
 
-    const integrityBlocked=(!parsed.integrityOk || !parsed.period)
-      ? [{
-          fileName:"PASTE DETAIL",
-          integrityIssues:[
-            !parsed.period ? "Periode laporan tidak terdeteksi" : null,
-            !parsed.integrityOk
-              ? `Total transaksi ${kg(parsed.totalKg)} ≠ Total laporan ${kg(parsed.declaredTotal)} • kurang ${kg(Number(parsed.declaredTotal||0)-Number(parsed.totalKg||0))}`
-              : null
-          ].filter(Boolean)
-        }]
+    const integrityIssues=[
+      !parsed.period ? "Periode laporan tidak terdeteksi" : null,
+      !parsed.integrityOk
+        ? `Total transaksi ${kg(parsed.totalKg)} ≠ Total laporan ${kg(parsed.declaredTotal)} • kurang ${kg(Number(parsed.declaredTotal||0)-Number(parsed.totalKg||0))}`
+        : null,
+      ...quality.hard.map(x=>x.message)
+    ].filter(Boolean);
+
+    const integrityBlocked=integrityIssues.length
+      ? [{fileName:"PASTE DETAIL",integrityIssues}]
       : [];
 
-    const integrityWarnings=(!parsed.purchaseIntegrityOk)
-      ? [{
-          type:"purchase_value",
-          message:`Nilai pembelian transaksi ${rupiah(parsed.purchaseTotal)} ≠ Total laporan ${rupiah(parsed.purchaseDeclared)}`
-        }]
-      : [];
+    const integrityWarnings=[
+      ...(!parsed.purchaseIntegrityOk ? [{
+        type:"purchase_value",
+        message:`Nilai pembelian transaksi ${rupiah(parsed.purchaseTotal)} ≠ Total laporan ${rupiah(parsed.purchaseDeclared)}`
+      }] : []),
+      ...quality.warnings.map(x=>({
+        type:x.code,
+        critical:!!x.critical,
+        message:x.message
+      }))
+    ];
 
     const finalBlocked=integrityBlocked.length>0;
 
@@ -3970,7 +4770,9 @@ async function previewPastedDetail(){
       detailPurchaseDeclared:parsed.purchaseDeclared,
       parsedDetail:parsed,
       reconciliation,
-      rawPaste:raw
+      rawPaste:raw,
+      quality,
+      existingPeriodRows
     };
 
     const status=finalBlocked ? "FINAL DIBLOKIR" : "SIAP FINAL";
@@ -4002,6 +4804,15 @@ async function previewPastedDetail(){
       `Catatan: HOLD tetap dihitung dalam Total Final, tetapi tidak dialokasikan ke tanggal Closing.\n`+
       `Validasi struktur: ${parsed.ignored===0?"Semua baris transaksi terbaca ✓":`${parsed.ignored} baris non-transaksi/header diabaikan`}\n`+
       `Baris trailing-kosong dipulihkan: ${parsed.paddedHoldRows||0}\n\n`+
+
+      `DATA QUALITY GUARD\n`+
+      `KP header: ${quality.detectedKp||"tidak terdeteksi"} • dipilih ${kp}\n`+
+      `SPB header: ${quality.detectedSupplierRaw||"tidak terdeteksi"}${quality.detectedSupplier?` → ${quality.detectedSupplier}`:""} • dipilih ${supplier}\n`+
+      `Double di paste: ${quality.internalDup.extraRows} transaksi • ${kg(quality.internalDup.extraKg)}\n`+
+      `Sequence: ${quality.seq.min??"-"}–${quality.seq.max??"-"} • gap ${quality.seq.gaps}\n`+
+      `Tanggal Bayar terakhir: ${quality.latestPaid||"-"}${quality.lagDays!=null?` • lag ${quality.lagDays} hari dari akhir periode`:""}\n`+
+      `Detail Final lama: ${quality.replacement.existingRows} • stale akan dibersihkan ${quality.replacement.staleCount} (${kg(quality.replacement.staleKg)})\n`+
+      `Blokir: ${quality.hard.length} • Peringatan: ${quality.warnings.length} • Cek wajib: ${quality.criticalWarnings.length}\n\n`+
 
       `ANTI-DOUBLE DETAIL\n`+
       `Sudah sama: ${exactDuplicateCount}\n`+
@@ -4060,13 +4871,25 @@ async function previewPastedDetail(){
       $("monthlyFinalStatus").className="monthly-final-status "+(finalBlocked?"blocked":"ready");
     }
 
-    setPasteDetailSaveState(!finalBlocked);
+    renderPasteQualityGuard(quality);
+    if(finalBlocked){
+      setPasteDetailSaveState(false);
+    }else if(quality.requiresConfirm){
+      setPasteDetailSaveState(false);
+    }else{
+      setPasteDetailSaveState(true);
+    }
   }catch(e){
     MONTHLY_EXCEL_PREVIEW=null;
     $("monthlyExcelPreview").textContent="ERROR PASTE DETAIL: "+e.message;
     if($("monthlyFinalAuditBar")) $("monthlyFinalAuditBar").classList.remove("visible");
     if($("monthlyConflictResolution")) $("monthlyConflictResolution").classList.remove("visible");
     setPasteDetailSaveState(false);
+    if($("pasteQualityBadge")){
+      $("pasteQualityBadge").textContent="ERROR";
+      $("pasteQualityBadge").className="paste-quality-badge danger";
+    }
+    if($("pasteQualityList")) $("pasteQualityList").textContent=e.message;
   }
 }
 
