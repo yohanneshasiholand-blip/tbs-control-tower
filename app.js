@@ -105,7 +105,7 @@ function ensureAnalysisSidebarEntry(){
       badge.className="build-version-badge";
       sidebar.appendChild(badge);
     }
-    badge.textContent="BUILD v4.14.0";
+    badge.textContent="BUILD v4.14.1";
   }
 }
 
@@ -645,6 +645,35 @@ function parseClosingValuePart(valueText){
   return {amount,trips};
 }
 
+
+function parseTonnageSupplierLine(line){
+  const s=cleanTonnageLine(line);
+  if(!s) return null;
+
+  // Supported examples:
+  // Surya : 140.246 (14)
+  // MSP-3 10.591 (1)      <- colon omitted
+  // Gsm : -
+  // P2S -
+  //
+  // Match from the END so digits/hyphens inside supplier names (MSP-3, P2S)
+  // are preserved as part of the supplier label.
+  let m=s.match(/^(.+?)\s*:\s*([\d.,]+|-)\s*(?:\(\s*(\d+|-)\s*\))?\s*$/);
+  if(!m){
+    m=s.match(/^(.+?)\s+([\d.,]+|-)\s*(?:\(\s*(\d+|-)\s*\))?\s*$/);
+  }
+  if(!m) return null;
+
+  const label=String(m[1]||"").trim();
+  if(!label) return null;
+
+  return {
+    label,
+    amount:m[2]==="-" ? 0 : num(m[2]),
+    trips:m[3]==null ? null : (m[3]==="-" ? 0 : Number(m[3]))
+  };
+}
+
 function parseClosingBatchTonnage(text){
   const parsedHeader=parseHeader(text)||{};
   const fallback=selectedTonnageFallback();
@@ -698,16 +727,14 @@ function parseClosingBatchTonnage(text){
        && /\b20\d{2}\b/.test(line)) continue;
     if(/^(?:Selamat|Berikut)\b/i.test(line)) continue;
 
-    const colon=line.indexOf(":");
-    if(colon<0) continue;
+    const parsedLine=parseTonnageSupplierLine(line);
+    if(!parsedLine) continue;
 
-    const label=line.slice(0,colon).trim();
-    const valueText=line.slice(colon+1).trim();
-    const parsed=parseClosingValuePart(valueText);
+    const label=parsedLine.label;
 
     if(/^TOTAL\b/i.test(label)){
-      current.declared=parsed.amount;
-      current.declaredTrips=parsed.trips; // null means TOTAL did not state trip count.
+      current.declared=parsedLine.amount;
+      current.declaredTrips=parsedLine.trips; // null means TOTAL did not state trip count.
       continue;
     }
 
@@ -718,8 +745,8 @@ function parseClosingBatchTonnage(text){
     current.rows.push({
       kp_code:current.kp,
       supplier_name:supplier,
-      tonnage_kg:parsed.amount,
-      trip_count:parsed.trips==null ? 0 : parsed.trips
+      tonnage_kg:parsedLine.amount,
+      trip_count:parsedLine.trips==null ? 0 : parsedLine.trips
     });
   }
 
@@ -817,7 +844,7 @@ function parseTonnage(text){
     // TOTAL SELURUH : 1.582.407
     // *TOTAL SELURUH : 1.582.407*
     // TOTAL SELURUH: Rp? (numeric only accepted)
-    const ts=line.match(/^TOTAL\s+SELURUH\s*:\s*([\d.,]+)/i);
+    const ts=line.match(/^TOTAL\s+SELURUH\s*(?::\s*|\s+)([\d.,]+)/i);
     if(ts){
       declared=num(ts[1]);
       continue;
@@ -826,19 +853,21 @@ function parseTonnage(text){
     // KP subtotal is never a supplier/detail row.
     if(/^TOTAL\s*:/i.test(line)) continue;
 
-    // Supplier row, e.g. "Surya : 95.481 (8)"
-    const r=line.match(/^([^:]+)\s*:\s*([\d.,]+|-)\s*(?:\((\d+)\))?/);
+    // Supplier row. Colon is optional because operational WhatsApp reports
+    // sometimes contain lines like "MSP-3 10.591 (1)".
+    const r=parseTonnageSupplierLine(line);
     if(kp && r){
-      const supplier=r[1].trim();
+      const supplierRaw=r.label.trim();
 
       // Defensive block: never let any TOTAL-like label enter details.
-      if(/^TOTAL\b/i.test(supplier)) continue;
+      if(/^TOTAL\b/i.test(supplierRaw)) continue;
 
+      const supplier=canonSupplierForKP(kp,supplierRaw) || supplierRaw;
       rows.push({
         kp_code:kp,
         supplier_name:supplier,
-        tonnage_kg:r[2]==="-" ? 0 : num(r[2]),
-        trip_count:+(r[3]||0)
+        tonnage_kg:Number(r.amount||0),
+        trip_count:r.trips==null ? 0 : Number(r.trips)
       });
     }
   }
