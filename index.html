@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.12.2">
+  <link rel="stylesheet" href="style.css?v=4.14.0">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -109,7 +109,7 @@
         </div>
       </div>
       <button class="logout-btn" onclick="logout()">Log Out</button>
-          <div id="buildVersionBadge" class="build-version-badge">BUILD v4.12.2</div>
+          <div id="buildVersionBadge" class="build-version-badge">BUILD v4.14.0</div>
 </aside>
 
     <main class="main">
@@ -523,11 +523,11 @@
               <div class="daily-upload-meta">
                 <label>
                   <span>Tanggal Data</span>
-                  <input id="dailyExcelDate" type="date">
+                  <input id="dailyExcelDate" type="date" onchange="invalidateDailyPastePreview()">
                 </label>
                 <label>
                   <span>Jam Data</span>
-                  <select id="dailyExcelTime">
+                  <select id="dailyExcelTime" onchange="invalidateDailyPastePreview()">
                     <option value="00:00:00" selected>00.00 — Closing / Total Harian</option>
                     <option value="10:00:00">10.00 — Snapshot</option>
                     <option value="12:00:00">12.00 — Snapshot</option>
@@ -546,6 +546,64 @@
             </div>
             <pre id="dailyExcelPreview" class="preview compact-preview">Belum ada file harian dipilih.</pre>
           </article>
+
+          <details class="monitor-input-details daily-excel-paste-details" open>
+            <summary>Paste dari Excel — Tanpa Upload File</summary>
+            <div class="daily-excel-paste-shell">
+              <div class="daily-excel-paste-info">
+                <div>
+                  <h3>Paste Data Tonase dari Excel</h3>
+                  <p>
+                    Blok tabel di Excel → <b>Ctrl+C</b> → paste di bawah. Sistem membaca kolom
+                    <b>KP, Supplier/SPB, Tonase, Trip</b> dan <b>Tanggal</b> jika tersedia.
+                    Tanggal/Jam Data memakai kontrol pada kotak Upload Data Tonase Harian di atas.
+                  </p>
+                </div>
+                <span class="daily-excel-paste-badge">CTRL+C → CTRL+V</span>
+              </div>
+
+              <div class="daily-paste-defaults">
+                <label>
+                  <span>KP Default <em>(jika kolom KP tidak ada)</em></span>
+                  <select id="dailyPasteKp" onchange="syncDailyPasteSuppliers(); invalidateDailyPastePreview()">
+                    <option value="">Dari tabel / pilih KP default</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Supplier / SPB Default <em>(jika kolom supplier tidak ada)</em></span>
+                  <select id="dailyPasteSupplier" onchange="invalidateDailyPastePreview()">
+                    <option value="">Dari tabel / pilih Supplier</option>
+                  </select>
+                </label>
+              </div>
+
+              <textarea id="dailyPasteText"
+                class="daily-excel-paste-textarea"
+                oninput="invalidateDailyPastePreview()"
+                placeholder="Contoh tabel Excel:
+
+KP	Supplier	Tonase	Trip
+BMK	Artha	560633	36
+BMK	Mekar	212774	21
+
+Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
+
+              <div class="daily-excel-paste-actions">
+                <button class="btn btn-primary" onclick="previewDailyExcelPaste()">Preview Paste Excel</button>
+                <button id="dailyPasteSaveBtn" class="btn btn-secondary" onclick="saveDailyExcelPaste()" disabled>
+                  Preview dahulu untuk menyimpan
+                </button>
+              </div>
+
+              <div class="daily-excel-paste-rule">
+                <b>00.00</b> = Closing / Total Harian Final.
+                <b>10.00 / 12.00 / 15.00 / 17.00</b> = Snapshot.
+                Jika tanggal+jam yang sama sudah ada, sistem memperbarui data tersebut agar tidak double.
+              </div>
+
+              <pre id="dailyPastePreview" class="preview compact-preview">Belum ada data Excel yang dipaste.</pre>
+            </div>
+          </details>
 
           <details class="monitor-input-details" open>
             <summary>Paste Tonase Harian dari WhatsApp</summary>
@@ -638,23 +696,48 @@
                 <div class="paste-detail-meta">
                   <label>
                     <span>KP</span>
-                    <select id="pasteDetailKp" onchange="syncPasteDetailSuppliers(); setPasteDetailSaveState(false)">
+                    <select id="pasteDetailKp" onchange="syncPasteDetailSuppliers(); invalidatePasteDetailQuality()">
                       <option value="">Deteksi otomatis / pilih KP</option>
                     </select>
                   </label>
                   <label>
                     <span>Supplier / SPB</span>
-                    <select id="pasteDetailSupplier" onchange="setPasteDetailSaveState(false)">
+                    <select id="pasteDetailSupplier" onchange="invalidatePasteDetailQuality()">
                       <option value="">Pilih Supplier / SPB</option>
                     </select>
                   </label>
                   <div class="paste-detail-meta-note">
-                    KP boleh terdeteksi otomatis. Supplier wajib dipastikan. Paste Detail dibandingkan dengan total Closing periode, bukan dipaksa cocok per Tanggal Bayar.
+                    KP dan Supplier/SPB dibaca dari header report. Jika pilihan operator berbeda dari header, Simpan diblokir. Paste Detail dibandingkan dengan total Closing periode, bukan dipaksa cocok per Tanggal Bayar.
                   </div>
                 </div>
 
+                <section id="pasteQualityGuard" class="paste-quality-guard">
+                  <div class="paste-quality-head">
+                    <div>
+                      <span class="subpanel-kicker">DATA QUALITY GUARD</span>
+                      <strong>Deteksi Salah KP/SPB, Double & Paste Tidak Lengkap</strong>
+                    </div>
+                    <span id="pasteQualityBadge" class="paste-quality-badge idle">BELUM DIPERIKSA</span>
+                  </div>
+                  <div id="pasteQualityList" class="paste-quality-list">
+                    Paste data lalu klik Preview Audit untuk menjalankan pemeriksaan.
+                  </div>
+                  <div id="pasteQualityOverrideWrap" class="paste-quality-override hidden">
+                    <label class="paste-quality-confirm">
+                      <input id="pasteQualityConfirm" type="checkbox" onchange="updatePasteQualityOverrideState()">
+                      <span>Saya sudah membandingkan ulang dengan report sumber dan memastikan data ini memang lengkap/benar.</span>
+                    </label>
+                    <label>
+                      <span>Alasan / catatan verifikasi</span>
+                      <input id="pasteQualityReason" type="text" maxlength="180"
+                        oninput="updatePasteQualityOverrideState()"
+                        placeholder="Contoh: supplier memang tidak ada transaksi setelah tanggal 20">
+                    </label>
+                  </div>
+                </section>
+
                 <textarea id="pasteDetailText"
-                  oninput="detectPasteDetailMetadata(); setPasteDetailSaveState(false)"
+                  oninput="detectPasteDetailMetadata(); invalidatePasteDetailQuality()"
                   placeholder="Copy tabel dari sistem internal lalu Paste di sini...&#10;&#10;Contoh kolom: No | No. Bukti | No. Polisi | Nama Petani/Agen | Tonase | Harga | Nilai Pembelian | Tanggal Bayar | Keterangan"></textarea>
 
                 <div class="paste-detail-actions paste-detail-action-stack">
@@ -1044,6 +1127,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=4.12.2"></script>
+  <script src="app.js?v=4.14.0"></script>
 </body>
 </html>
