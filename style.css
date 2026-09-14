@@ -2216,3 +2216,142 @@ body.modal-open{overflow:hidden}
   .unit-form-wide{grid-column:auto}
   .unit-modal-actions .btn{flex:1}
 }
+
+
+/* =========================================================
+   CLOSING WHATSAPP INPUT v4.7.8
+   ========================================================= */
+.closing-input-details{
+  margin-top:14px;
+}
+.closing-panel{
+  border-color:rgba(244,211,94,.18);
+}
+.closing-headline{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:8px;
+}
+.closing-headline h3{
+  margin:3px 0 0;
+}
+.closing-badge{
+  display:inline-flex;
+  align-items:center;
+  min-height:30px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid rgba(244,211,94,.28);
+  background:rgba(244,211,94,.09);
+  color:#f4d35e;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.04em;
+  white-space:nowrap;
+}
+.closing-rules{
+  display:grid;
+  gap:10px;
+  margin-top:10px;
+}
+.closing-rules > div{
+  padding:12px 13px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.07);
+  background:rgba(255,255,255,.035);
+}
+.closing-rules strong,
+.closing-rules span{
+  display:block;
+}
+.closing-rules strong{
+  font-size:11px;
+  color:#f4d35e;
+  margin-bottom:3px;
+}
+.closing-rules span{
+  font-size:12px;
+  color:var(--muted);
+}
+@media (max-width:760px){
+  .closing-headline{
+    align-items:center;
+  }
+}
+
+
+/* =========================================================
+   DAILY INPUT MODE + AUGUST SUMMARY FIX v4.7.9
+   ========================================================= */
+.daily-input-switcher{
+  margin-top:14px;
+}
+.daily-input-switcher-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:12px;
+}
+.daily-input-switcher-head h3{
+  margin:3px 0 0;
+}
+.daily-input-mode-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+}
+.daily-mode-btn{
+  appearance:none;
+  text-align:left;
+  min-height:78px;
+  padding:13px 14px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.09);
+  background:rgba(255,255,255,.035);
+  color:#fff;
+  cursor:pointer;
+  transition:.18s ease;
+}
+.daily-mode-btn strong,
+.daily-mode-btn span{
+  display:block;
+}
+.daily-mode-btn strong{
+  font-size:13px;
+  margin-bottom:5px;
+}
+.daily-mode-btn span{
+  font-size:10px;
+  color:var(--muted);
+}
+.daily-mode-btn:hover,
+.daily-mode-btn.active{
+  border-color:rgba(73,222,95,.45);
+  background:rgba(73,222,95,.09);
+  box-shadow:inset 0 0 0 1px rgba(73,222,95,.06);
+}
+.daily-mode-btn.active strong{
+  color:#7aff86;
+}
+.daily-mode-hidden{
+  display:none !important;
+}
+.excel-badge{
+  color:#8edcff;
+  border-color:rgba(142,220,255,.25);
+  background:rgba(142,220,255,.07);
+}
+.daily-excel-upload{
+  align-items:center;
+}
+@media (max-width:760px){
+  .daily-input-mode-grid{
+    grid-template-columns:1fr;
+  }
+  .daily-mode-btn{
+    min-height:66px;
+  }
+}
