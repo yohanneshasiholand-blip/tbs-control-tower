@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.14.0">
+  <link rel="stylesheet" href="style.css?v=4.7.7">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -61,9 +61,6 @@
             <button class="classic-child" id="sideYearly" onclick="openMonitoringSub('yearly')">
               <span class="classic-list-icon">☷</span><b>Tahunan</b>
             </button>
-            <button class="classic-child classic-child-analysis" id="sideAnalysis" onclick="openMonitoringSub('analysis')">
-              <span class="classic-list-icon">◈</span><b>Analisa Produksi</b>
-            </button>
           </div>
         </div>
 
@@ -90,9 +87,6 @@
             <button class="classic-child" onclick="focusPageInput('expenses','expenseText')">
               <span class="classic-list-icon">☷</span><b>Paste Pengeluaran</b>
             </button>
-            <button class="classic-child" id="sideExpenseMonitor" onclick="openExpenseMonitoring()">
-              <span class="classic-list-icon">☷</span><b>Monitoring Pengeluaran</b>
-            </button>
           </div>
         </div>
 
@@ -109,8 +103,7 @@
         </div>
       </div>
       <button class="logout-btn" onclick="logout()">Log Out</button>
-          <div id="buildVersionBadge" class="build-version-badge">BUILD v4.14.1</div>
-</aside>
+    </aside>
 
     <main class="main">
       <header class="hero glass">
@@ -192,7 +185,7 @@
               <div id="expenseDonut" class="chart chart-md"></div>
               <div id="expenseLegend" class="expense-legend"></div>
             </div>
-            <button class="ghost-link" onclick="openExpenseMonitoring()">Lihat Detail Pengeluaran →</button>
+            <button class="ghost-link" onclick="goToPage('expenses')">Lihat Detail Pengeluaran →</button>
           </article>
         </div>
 
@@ -280,169 +273,6 @@
           </div>
         </article>
 
-        <!-- KP BUSINESS SUMMARY: follows Harian / Bulanan / Tahunan filter -->
-        <section class="monitor-business-summary">
-          <div id="monitorBusinessKpiGrid" class="monitor-business-kpi-grid">
-            <article class="monitor-kpi glass monitor-business-tonnage">
-              <small>TOTAL TONASE PERIODE</small>
-              <strong id="monitorPeriodTonnage">0 kg</strong>
-              <span id="monitorPeriodTonnageSub">Pilih KP dan periode</span>
-            </article>
-            <article class="monitor-kpi glass monitor-business-expense">
-              <small>TOTAL PENGELUARAN PERIODE</small>
-              <strong id="monitorPeriodExpense">Rp0</strong>
-              <span id="monitorPeriodExpenseSub">Pilih KP dan periode</span>
-            </article>
-            <article class="monitor-kpi glass">
-              <small>TOTAL TRIP PERIODE</small>
-              <strong id="monitorPeriodTrip">0</strong>
-              <span id="monitorPeriodTripSub">Pilih KP dan periode</span>
-            </article>
-            <article class="monitor-kpi glass">
-              <small>KATEGORI BIAYA</small>
-              <strong id="monitorPeriodExpenseCategories">0</strong>
-              <span id="monitorPeriodExpenseCategoriesSub">0 KP memiliki pengeluaran</span>
-            </article>
-          </div>
-
-          <article class="panel glass monitor-kp-business-table-panel">
-            <div id="monitorBusinessSummaryHead" class="panel-head row-space">
-              <h3 id="monitorKpPeriodSummaryTitle">RINGKASAN TONASE & PENGELUARAN SELURUH KP</h3>
-              <span id="monitorKpPeriodSummaryNote" class="monitor-rule-note">-</span>
-            </div>
-            <div id="monitorKpPeriodSummaryTable" class="table-wrap monitor-kp-business-table"></div>
-
-            <div id="monitorProductionAnalysisPanel" class="monitor-production-analysis hidden">
-            <div class="monitor-range-divider"></div>
-
-            <div class="monitor-range-head production-analysis-head">
-              <div>
-                <span class="subpanel-kicker">ANALISA PRODUKSI</span>
-                <h3>Evaluasi Produksi untuk Meeting</h3>
-                <p>Pilih periode evaluasi. Sistem menghitung produksi final, benchmark KP, produktivitas trip, HOLD, biaya, ranking, tren operasional, dan insight meeting secara otomatis.</p>
-              </div>
-              <span class="production-analysis-badge">MEETING INSIGHT</span>
-            </div>
-
-            <div class="monitor-range-filters production-analysis-filters">
-              <label>
-                <span>Tanggal Mulai</span>
-                <input id="monitorRangeStart" type="date">
-              </label>
-              <label>
-                <span>Tanggal Akhir</span>
-                <input id="monitorRangeEnd" type="date">
-              </label>
-              <button class="btn btn-primary production-analysis-btn" onclick="loadMonitorRangeDetail()">📊 Analisa Produksi</button>
-              <button class="btn btn-secondary" onclick="syncMonitorRangeFromActivePeriod()">Gunakan Bulan Aktif</button>
-            </div>
-
-            <div class="production-analysis-help">
-              KPI utama memakai sumber final terbaik yang tersedia. <b>Closing harian</b> dipakai untuk grafik tren operasional,
-              sedangkan <b>Paste Detail/Excel Final</b> menjadi acuan total periode bila cakupannya valid.
-            </div>
-            <div id="monitorRangeStatus" class="monitor-range-status">Pilih periode, lalu klik Analisa Produksi.</div>
-
-            <div class="monitor-range-kpi-grid production-kpi-grid">
-              <article class="monitor-kpi glass monitor-business-tonnage production-primary-kpi">
-                <small>TOTAL PRODUKSI PERIODE</small>
-                <strong id="monitorRangeTotalTonnage">0 kg</strong>
-                <span id="monitorRangeTonnageSub">Sumber final terbaik sesuai periode</span>
-              </article>
-
-              <article class="monitor-kpi glass monitor-avg-kp-kpi">
-                <small>RATA-RATA PRODUKSI / KP</small>
-                <strong id="monitorRangeClosedTonnage">0 kg</strong>
-                <span id="monitorRangeClosedSub">Benchmark KP aktif pada periode</span>
-              </article>
-
-              <article class="monitor-kpi glass">
-                <small>TOTAL TRIP</small>
-                <strong id="monitorRangeTotalTrips">0</strong>
-                <span id="monitorRangeTripSub">1 transaksi/trip = 1 mobil masuk</span>
-              </article>
-
-              <article class="monitor-kpi glass production-efficiency-kpi">
-                <small>RATA-RATA KG / TRIP</small>
-                <strong id="prodAvgTrip">0 kg</strong>
-                <span id="prodAvgTripSub">Produktivitas angkutan periode</span>
-              </article>
-
-              <article class="monitor-kpi glass production-top-kpi">
-                <small>KP PRODUKSI TERTINGGI</small>
-                <strong id="prodTopKp">—</strong>
-                <span id="prodTopKpSub">Belum ada data</span>
-              </article>
-
-              <article class="monitor-kpi glass production-bottom-kpi">
-                <small>KP PERLU PERHATIAN</small>
-                <strong id="prodBottomKp">—</strong>
-                <span id="prodBottomKpSub">Terendah dibanding KP aktif</span>
-              </article>
-
-              <article class="monitor-kpi glass">
-                <small>HOLD DALAM DATA FINAL</small>
-                <strong id="monitorRangeCoverage">0 kg</strong>
-                <span id="monitorRangeCoverageSub">Tetap termasuk produksi final</span>
-              </article>
-
-              <article class="monitor-kpi glass monitor-business-expense">
-                <small>PENGELUARAN PERIODE</small>
-                <strong id="monitorRangeTotalExpense">Rp0</strong>
-                <span id="monitorRangeExpenseSub">Termasuk biaya per kg untuk evaluasi</span>
-              </article>
-            </div>
-
-            <div class="production-analysis-grid">
-              <article class="production-analysis-card">
-                <div class="panel-head row-space">
-                  <h3>RANKING PRODUKSI KP</h3>
-                  <span class="monitor-rule-note">Final tonase • benchmark periode</span>
-                </div>
-                <div id="prodRankingChart" class="chart production-analysis-chart"></div>
-              </article>
-
-              <article class="production-analysis-card">
-                <div class="panel-head row-space">
-                  <h3>PRODUKTIVITAS KG / TRIP</h3>
-                  <span class="monitor-rule-note">Tonase ÷ trip</span>
-                </div>
-                <div id="prodProductivityChart" class="chart production-analysis-chart"></div>
-              </article>
-            </div>
-
-            <article class="production-analysis-card production-trend-card">
-              <div class="panel-head row-space">
-                <h3>TREN PRODUKSI OPERASIONAL HARIAN</h3>
-                <span class="monitor-rule-note">Berdasarkan Closing harian • bukan Tanggal Bayar</span>
-              </div>
-              <div id="prodTrendChart" class="chart production-trend-chart"></div>
-            </article>
-
-            <article class="production-insight-card">
-              <div class="production-insight-head">
-                <div>
-                  <span class="subpanel-kicker">EXECUTIVE MEETING INSIGHT</span>
-                  <h3>Ringkasan Evaluasi Otomatis</h3>
-                </div>
-                <span id="prodInsightBadge" class="production-insight-badge">MENUNGGU ANALISA</span>
-              </div>
-              <div id="prodExecutiveInsight" class="production-insight-body">
-                Pilih periode untuk menghasilkan poin evaluasi meeting.
-              </div>
-            </article>
-
-            <div class="panel-head row-space monitor-range-detail-head production-ranking-head">
-              <h3 id="monitorRangeDetailTitle">RANKING & EVALUASI KP</h3>
-              <span class="monitor-rule-note">Status benchmark: &gt;110% rata-rata = di atas • 90–110% = normal • &lt;90% = perlu perhatian</span>
-            </div>
-            <div id="monitorRangeDetailTable" class="table-wrap monitor-range-detail-table production-analysis-table">
-              <div class="master-empty">Belum ada analisa produksi.</div>
-            </div>
-            </div><!-- /monitorProductionAnalysisPanel -->
-          </article>
-        </section>
-
         <!-- HARIAN -->
         <div id="monitorDailyPanel" class="monitor-subpanel active">
           <div class="monitor-subpanel-head">
@@ -460,7 +290,7 @@
               <span id="monitorKpiPeriod">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>SNAPSHOT / ACUAN TONASE</small>
+              <small>TONASE</small>
               <strong id="monitorKpiTonnage">0 kg</strong>
               <span id="monitorKpiTonnageSub">-</span>
             </article>
@@ -470,29 +300,9 @@
               <span id="monitorKpiTripsSub">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>STATUS HARI DATA</small>
+              <small>DATA TERSEDIA</small>
               <strong id="monitorKpiCoverage">0</strong>
               <span id="monitorKpiCoverageSub">-</span>
-            </article>
-            <article class="monitor-kpi glass daily-actual-kpi">
-              <small>CLOSING TONASE 00.00</small>
-              <strong id="dailyActualTonnage">—</strong>
-              <span id="dailyActualTonnageSub">Upload closing Excel setelah pukul 00.00</span>
-            </article>
-            <article class="monitor-kpi glass daily-compare-kpi">
-              <small>SELISIH 17.00 VS CLOSING</small>
-              <strong id="dailySnapshotDiff">—</strong>
-              <span id="dailySnapshotDiffSub">Belum ada Closing 00.00</span>
-            </article>
-            <article class="monitor-kpi glass daily-mtd-system-kpi">
-              <small>MTD SISTEM S/D TANGGAL</small>
-              <strong id="dailyMtdSystem">0 kg</strong>
-              <span id="dailyMtdSystemSub">Otomatis dari Closing Harian</span>
-            </article>
-            <article class="monitor-kpi glass daily-mtd-wa-kpi">
-              <small>WA MTD PEMBANDING</small>
-              <strong id="dailyMtdWa">Belum ada</strong>
-              <span id="dailyMtdWaSub">Laporan s/d tanggal tidak menambah tonase</span>
             </article>
           </div>
 
@@ -514,132 +324,28 @@
             </article>
           </div>
 
-          <article class="panel glass period-upload-panel daily-upload-panel">
-            <div class="period-upload-info daily-upload-info">
-              <div>
-                <strong>Upload Data Tonase Harian</strong>
-                <span>Tanggal dapat dideteksi otomatis dari Excel atau dipilih manual. Jam 00.00 = Closing/Total Harian; 10.00/12.00/15.00/17.00 = Snapshot.</span>
-              </div>
-              <div class="daily-upload-meta">
-                <label>
-                  <span>Tanggal Data</span>
-                  <input id="dailyExcelDate" type="date" onchange="invalidateDailyPastePreview()">
-                </label>
-                <label>
-                  <span>Jam Data</span>
-                  <select id="dailyExcelTime" onchange="invalidateDailyPastePreview()">
-                    <option value="00:00:00" selected>00.00 — Closing / Total Harian</option>
-                    <option value="10:00:00">10.00 — Snapshot</option>
-                    <option value="12:00:00">12.00 — Snapshot</option>
-                    <option value="15:00:00">15.00 — Snapshot</option>
-                    <option value="17:00:00">17.00 — Snapshot</option>
-                  </select>
-                </label>
-              </div>
-              <div class="period-upload-actions">
-                <label class="btn btn-primary file-btn">
-                  Pilih Excel Harian
-                  <input id="dailyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewDailyExcels(this.files)">
-                </label>
-                <button class="btn btn-secondary" onclick="saveDailyExcel()">Simpan Data Harian</button>
-              </div>
-            </div>
-            <pre id="dailyExcelPreview" class="preview compact-preview">Belum ada file harian dipilih.</pre>
-          </article>
-
-          <details class="monitor-input-details daily-excel-paste-details" open>
-            <summary>Paste dari Excel — Tanpa Upload File</summary>
-            <div class="daily-excel-paste-shell">
-              <div class="daily-excel-paste-info">
-                <div>
-                  <h3>Paste Data Tonase dari Excel</h3>
-                  <p>
-                    Blok tabel di Excel → <b>Ctrl+C</b> → paste di bawah. Sistem membaca kolom
-                    <b>KP, Supplier/SPB, Tonase, Trip</b> dan <b>Tanggal</b> jika tersedia.
-                    Tanggal/Jam Data memakai kontrol pada kotak Upload Data Tonase Harian di atas.
-                  </p>
-                </div>
-                <span class="daily-excel-paste-badge">CTRL+C → CTRL+V</span>
-              </div>
-
-              <div class="daily-paste-defaults">
-                <label>
-                  <span>KP Default <em>(jika kolom KP tidak ada)</em></span>
-                  <select id="dailyPasteKp" onchange="syncDailyPasteSuppliers(); invalidateDailyPastePreview()">
-                    <option value="">Dari tabel / pilih KP default</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Supplier / SPB Default <em>(jika kolom supplier tidak ada)</em></span>
-                  <select id="dailyPasteSupplier" onchange="invalidateDailyPastePreview()">
-                    <option value="">Dari tabel / pilih Supplier</option>
-                  </select>
-                </label>
-              </div>
-
-              <textarea id="dailyPasteText"
-                class="daily-excel-paste-textarea"
-                oninput="invalidateDailyPastePreview()"
-                placeholder="Contoh tabel Excel:
-
-KP	Supplier	Tonase	Trip
-BMK	Artha	560633	36
-BMK	Mekar	212774	21
-
-Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
-
-              <div class="daily-excel-paste-actions">
-                <button class="btn btn-primary" onclick="previewDailyExcelPaste()">Preview Paste Excel</button>
-                <button id="dailyPasteSaveBtn" class="btn btn-secondary" onclick="saveDailyExcelPaste()" disabled>
-                  Preview dahulu untuk menyimpan
-                </button>
-              </div>
-
-              <div class="daily-excel-paste-rule">
-                <b>00.00</b> = Closing / Total Harian Final.
-                <b>10.00 / 12.00 / 15.00 / 17.00</b> = Snapshot.
-                Jika tanggal+jam yang sama sudah ada, sistem memperbarui data tersebut agar tidak double.
-              </div>
-
-              <pre id="dailyPastePreview" class="preview compact-preview">Belum ada data Excel yang dipaste.</pre>
-            </div>
-          </details>
-
           <details class="monitor-input-details" open>
-            <summary>Paste Tonase Harian dari WhatsApp</summary>
+            <summary>Input / Update Tonase Harian dari WhatsApp</summary>
             <div class="two-col monitor-input-grid">
               <article class="panel glass">
                 <h3>Paste Tonase WhatsApp</h3>
-                <div class="input-mode-note">
-                  Mendukung <b>00.00 Closing/Total Harian</b>, <b>Snapshot 10/12/15/17</b>, <b>Closing per KP</b>, <b>banyak KP</b>, dan <b>Tonase KP ... s/d tanggal (Audit MTD)</b> dalam satu area paste.
-                  <span id="tonnageModeBadge" class="tonnage-mode-badge">SNAPSHOT 10/12/15/17</span>
-                </div>
-              <textarea id="tonnageText" oninput="detectTonnageModeLive()" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
-                <div class="snapshot-input-meta daily-manual-meta">
+                <textarea id="tonnageText" placeholder="Paste laporan tonase WhatsApp di sini..."></textarea>
+                <div class="snapshot-input-meta">
                   <label>
-                    <span>Tanggal Data <em>(opsional)</em></span>
-                    <input id="tonnageInputDate" type="date">
-                  </label>
-                  <label>
-                    <span>Jam Data</span>
-                    <select id="tonnageSnapshotTime" onchange="detectTonnageModeLive()">
+                    <span>Jam Snapshot</span>
+                    <select id="tonnageSnapshotTime">
                       <option value="">Otomatis dari header / pilih jam</option>
-                      <option value="00:00:00">00.00 — Closing / Total Harian</option>
-                      <option value="10:00:00">10.00 — Snapshot</option>
-                      <option value="12:00:00">12.00 — Snapshot</option>
-                      <option value="15:00:00">15.00 — Snapshot</option>
-                      <option value="17:00:00">17.00 — Snapshot</option>
+                      <option value="10:00:00">10.00 WIB</option>
+                      <option value="12:00:00">12.00 WIB</option>
+                      <option value="15:00:00">15.00 WIB</option>
+                      <option value="17:00:00">17.00 WIB</option>
                     </select>
                   </label>
-                  <small>
-                    Header WhatsApp tetap dideteksi otomatis. Pilihan manual dipakai jika tanggal/jam tidak tercopy.
-                    Jika manual berbeda dengan header, Simpan diblokir. <b>00.00 = total final keseluruhan hari.</b>
-                    Format <b>"Tonase KP ... s/d tanggal"</b> otomatis dikenali sebagai Audit MTD dan tidak memerlukan jam.
-                  </small>
+                  <small>Jika header WhatsApp tidak ikut tercopy, tanggal memakai filter di atas dan jam memakai pilihan ini.</small>
                 </div>
                 <div class="actions">
                   <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
-                  <button id="tonnageSaveBtn" class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
+                  <button class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
                 </div>
                 <pre id="tonnagePreview" class="preview"></pre>
               </article>
@@ -656,186 +362,25 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
           <div class="monitor-subpanel-head">
             <div>
               <span class="subpanel-kicker">MONITORING BULANAN</span>
-              <h3>Total Bulanan — Data Final dari Excel atau Paste Detail</h3>
-              <p class="monthly-final-rule">WhatsApp Closing = sementara. Excel Bulanan atau Paste Detail yang lolos Preview Audit menjadi FINAL pada tanggal + KP + supplier yang tercakup.</p>
+              <h3>Analisis Tonase per Hari dalam Bulan</h3>
             </div>
-            <span id="monthlySourceBadge" class="monitor-source-badge temporary-source">SEMENTARA</span>
+            <span class="monitor-source-badge">Excel Bulanan</span>
           </div>
 
           <article class="panel glass period-upload-panel">
             <div class="period-upload-info">
               <div>
-                <strong>Input Data Final Bulanan</strong>
-                <span>Pilih Upload Excel atau Paste Detail langsung dari sistem internal. Keduanya memakai Preview Audit yang sama untuk double input, selisih, konflik, tanggal, dan integritas total.</span>
-              </div>
-              <div class="monthly-final-controls">
-                <div class="monthly-final-priority">
-                  <strong>ATURAN FINAL</strong>
-                  <span>Excel = final per tanggal • Paste Detail = final per periode • HOLD tetap dihitung • Tonase harus cocok • Selisih nilai pembelian = peringatan, bukan blokir</span>
-                </div>
-                <div id="monthlyConflictSummary" class="monthly-conflict-summary">Belum ada hasil pemeriksaan.</div>
+                <strong>Upload Data Excel Bulanan</strong>
+                <span>Gunakan file detail harian per KP atau rekap bulanan.</span>
               </div>
               <div class="period-upload-actions">
                 <label class="btn btn-primary file-btn">
                   Pilih Excel Bulanan
                   <input id="monthlyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewMonthlyExcels(this.files)">
                 </label>
-                <button class="btn btn-secondary monthly-final-save" onclick="saveMonthlyExcel()">Simpan Excel sebagai FINAL</button>
-              </div>
-
-              <div class="paste-detail-final-box">
-                <div class="paste-detail-head">
-                  <div>
-                    <span class="subpanel-kicker">TANPA DOWNLOAD EXCEL</span>
-                    <strong>Paste Detail Transaksi dari Sistem Internal</strong>
-                    <small>Copy seluruh tabel transaksi lalu paste di sini. Setiap baris kendaraan = 1 trip. Tanggal bayar kosong dianggap HOLD dan tonase tetap masuk Total Final.</small>
-                  </div>
-                  <span class="paste-detail-final-badge">FINAL DETAIL</span>
-                </div>
-
-                <div class="paste-detail-meta">
-                  <label>
-                    <span>KP</span>
-                    <select id="pasteDetailKp" onchange="syncPasteDetailSuppliers(); invalidatePasteDetailQuality()">
-                      <option value="">Deteksi otomatis / pilih KP</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Supplier / SPB</span>
-                    <select id="pasteDetailSupplier" onchange="invalidatePasteDetailQuality()">
-                      <option value="">Pilih Supplier / SPB</option>
-                    </select>
-                  </label>
-                  <div class="paste-detail-meta-note">
-                    KP dan Supplier/SPB dibaca dari header report. Jika pilihan operator berbeda dari header, Simpan diblokir. Paste Detail dibandingkan dengan total Closing periode, bukan dipaksa cocok per Tanggal Bayar.
-                  </div>
-                </div>
-
-                <section id="pasteQualityGuard" class="paste-quality-guard">
-                  <div class="paste-quality-head">
-                    <div>
-                      <span class="subpanel-kicker">DATA QUALITY GUARD</span>
-                      <strong>Deteksi Salah KP/SPB, Double & Paste Tidak Lengkap</strong>
-                    </div>
-                    <span id="pasteQualityBadge" class="paste-quality-badge idle">BELUM DIPERIKSA</span>
-                  </div>
-                  <div id="pasteQualityList" class="paste-quality-list">
-                    Paste data lalu klik Preview Audit untuk menjalankan pemeriksaan.
-                  </div>
-                  <div id="pasteQualityOverrideWrap" class="paste-quality-override hidden">
-                    <label class="paste-quality-confirm">
-                      <input id="pasteQualityConfirm" type="checkbox" onchange="updatePasteQualityOverrideState()">
-                      <span>Saya sudah membandingkan ulang dengan report sumber dan memastikan data ini memang lengkap/benar.</span>
-                    </label>
-                    <label>
-                      <span>Alasan / catatan verifikasi</span>
-                      <input id="pasteQualityReason" type="text" maxlength="180"
-                        oninput="updatePasteQualityOverrideState()"
-                        placeholder="Contoh: supplier memang tidak ada transaksi setelah tanggal 20">
-                    </label>
-                  </div>
-                </section>
-
-                <textarea id="pasteDetailText"
-                  oninput="detectPasteDetailMetadata(); invalidatePasteDetailQuality()"
-                  placeholder="Copy tabel dari sistem internal lalu Paste di sini...&#10;&#10;Contoh kolom: No | No. Bukti | No. Polisi | Nama Petani/Agen | Tonase | Harga | Nilai Pembelian | Tanggal Bayar | Keterangan"></textarea>
-
-                <div class="paste-detail-actions paste-detail-action-stack">
-                  <div class="paste-detail-action-buttons">
-                    <button class="btn btn-primary" onclick="previewPastedDetail()">Preview Audit Paste Detail</button>
-                    <button id="pasteDetailSaveBtn" class="btn btn-secondary paste-detail-save-btn"
-                      onclick="savePastedDetailFinal()" disabled>Preview dahulu untuk menyimpan</button>
-                  </div>
-                  <small>
-                    Urutan: <b>Paste → Preview Audit → Resolve Konflik jika ada → Simpan Paste sebagai FINAL</b>.
-                    Tombol Simpan aktif hanya setelah preview berhasil.
-                  </small>
-                </div>
+                <button class="btn btn-secondary" onclick="saveMonthlyExcel()">Simpan Bulanan</button>
               </div>
             </div>
-
-            <section id="monthlyFinalAuditBar" class="monthly-final-audit-bar">
-              <div class="monthly-audit-title-row">
-                <div>
-                  <span class="subpanel-kicker">PREVIEW AUDIT SEBELUM SIMPAN</span>
-                  <h4>Data Final — Double Input, HOLD & Rekonsiliasi Periode</h4>
-                </div>
-                <span id="monthlyFinalStatus" class="monthly-final-status">BELUM DIPERIKSA</span>
-              </div>
-
-              <div class="monthly-audit-cards">
-                <article id="monthlyAuditFinalTotal" class="monthly-audit-card">
-                  <small>TOTAL DATA FINAL</small>
-                  <strong data-value>0 kg</strong>
-                  <span data-sub>-</span>
-                </article>
-                <article id="monthlyAuditDated" class="monthly-audit-card">
-                  <small>TRANSAKSI BERTANGGAL</small>
-                  <strong data-value>0 kg</strong>
-                  <span data-sub>-</span>
-                </article>
-                <article id="monthlyAuditExisting" class="monthly-audit-card">
-                  <small>DATA OVERLAP DI SISTEM</small>
-                  <strong data-value>0 kg</strong>
-                  <span data-sub>-</span>
-                </article>
-                <article id="monthlyAuditDifference" class="monthly-audit-card">
-                  <small>SELISIH KONFLIK</small>
-                  <strong data-value>0 kg</strong>
-                  <span data-sub>-</span>
-                </article>
-                <article id="monthlyAuditDuplicate" class="monthly-audit-card">
-                  <small>DOUBLE / SAMA</small>
-                  <strong data-value>0</strong>
-                  <span data-sub>-</span>
-                </article>
-                <article id="monthlyAuditConflict" class="monthly-audit-card">
-                  <small>KONFLIK</small>
-                  <strong data-value>0</strong>
-                  <span data-sub>-</span>
-                </article>
-                <article id="monthlyAuditUnassigned" class="monthly-audit-card">
-                  <small>HOLD / BELUM DIBAYAR</small>
-                  <strong data-value>0</strong>
-                  <span data-sub>-</span>
-                </article>
-              </div>
-
-              <div class="monthly-audit-progress-wrap">
-                <div class="monthly-audit-progress">
-                  <span id="monthlyAuditBarNew" class="audit-progress-new"></span>
-                  <span id="monthlyAuditBarSame" class="audit-progress-same"></span>
-                  <span id="monthlyAuditBarConflict" class="audit-progress-conflict"></span>
-                </div>
-                <small id="monthlyAuditBarLegend">BARU 0 • SAMA 0 • KONFLIK 0</small>
-              </div>
-            </section>
-
-            <div class="paste-reconciliation-note">Conflict Resolution per tanggal hanya digunakan untuk Excel Final. Paste Detail memakai Rekonsiliasi Total Periode karena Tanggal Bayar dapat berbeda dari tanggal Closing operasional.</div>
-
-            <section id="monthlyConflictResolution" class="monthly-conflict-resolution">
-              <div class="monthly-resolution-title-row">
-                <div>
-                  <span class="subpanel-kicker">CONFLICT RESOLUTION PANEL</span>
-                  <h4>Putuskan setiap konflik sebelum data disimpan sebagai Final</h4>
-                  <p>Setiap keputusan disimpan ke Audit Trail. Edit Manual wajib memiliki alasan.</p>
-                </div>
-                <span id="monthlyResolutionStatus" class="monthly-resolution-status">Belum ada konflik</span>
-              </div>
-
-              <div class="monthly-resolution-bulk">
-                <button class="btn btn-primary" onclick="applyMonthlyConflictBulk('use_excel_final')">Gunakan Data Final untuk Semua Konflik</button>
-                <button class="btn btn-secondary" onclick="applyMonthlyConflictBulk('keep_existing')">Pertahankan Semua Data Lama</button>
-              </div>
-
-              <div id="monthlyConflictResolutionList" class="monthly-resolution-list"></div>
-
-              <details class="monthly-audit-history">
-                <summary>Riwayat Revisi / Audit Trail</summary>
-                <div id="monthlyRevisionAuditTable" class="table-wrap monthly-revision-audit-table"></div>
-              </details>
-            </section>
-
             <pre id="monthlyExcelPreview" class="preview compact-preview">Belum ada file bulanan dipilih.</pre>
           </article>
 
@@ -846,7 +391,7 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
               <span id="monthlyKpiPeriod">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>TOTAL BULANAN SAAT INI</small>
+              <small>TOTAL TONASE</small>
               <strong id="monthlyKpiTonnage">0 kg</strong>
               <span id="monthlyKpiTonnageSub">-</span>
             </article>
@@ -911,7 +456,7 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
               <span id="yearlyKpiPeriod">-</span>
             </article>
             <article class="monitor-kpi glass">
-              <small>TOTAL TONASE KP / TAHUN</small>
+              <small>TOTAL TONASE</small>
               <strong id="yearlyKpiTonnage">0 kg</strong>
               <span id="yearlyKpiTonnageSub">-</span>
             </article>
@@ -973,20 +518,7 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
         <div class="two-col">
           <article class="panel glass">
             <h3>Paste Pengeluaran</h3>
-            <div class="expense-input-meta">
-              <label>
-                <span>Tanggal Pengeluaran <em>(opsional / fallback)</em></span>
-                <input id="expenseDate" type="date">
-              </label>
-              <label>
-                <span>KP / Unit <em>(jika tidak ada di laporan)</em></span>
-                <select id="expenseKp"><option value="">Pilih KP/unit jika tidak ada di laporan</option></select>
-              </label>
-            </div>
-            <div class="input-mode-note expense-date-note">
-              Tanggal dari WhatsApp tetap diprioritaskan. Jika laporan tidak memiliki tanggal, sistem memakai tanggal pilihan di atas. Jika keduanya berbeda, Simpan diblokir untuk mencegah salah tanggal.
-              <br><b>Anti-double aktif:</b> laporan WhatsApp yang sama persis akan diblokir; transaksi yang hanya mirip akan diberi peringatan.
-            </div>
+            <select id="expenseKp"><option value="">Pilih KP/unit jika tidak ada di laporan</option></select>
             <textarea id="expenseText" placeholder="Paste laporan biaya WhatsApp di sini..."></textarea>
             <div class="actions">
               <button class="btn btn-primary" onclick="previewExpense()">Preview</button>
@@ -995,50 +527,10 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
             <pre id="expensePreview" class="preview"></pre>
           </article>
           <article class="panel glass">
-            <h3>Rekap Pengeluaran per KP</h3>
+            <h3>Rekap Pengeluaran</h3>
             <div id="expenseTable" class="table-wrap"></div>
           </article>
         </div>
-      </section>
-
-      <section id="page-expense-monitor" class="page">
-        <div class="page-head glass row-space expense-monitor-head">
-          <div>
-            <h2>Monitoring Pengeluaran</h2>
-            <p>Analisis detail biaya operasional berdasarkan tanggal, KP, kategori, transaksi, dan sumber input.</p>
-          </div>
-          <span id="expenseMonitorPeriodLabel" class="monitor-source-badge">Periode -</span>
-        </div>
-
-        <article class="panel glass expense-monitor-filter-panel">
-          <div class="expense-monitor-filters">
-            <label><span>Bulan</span><input id="expenseMonitorMonth" type="month" onchange="loadExpenseMonitoring()"></label>
-            <label><span>KP</span><select id="expenseMonitorKp" onchange="renderExpenseMonitoring()"><option value="ALL">Semua KP</option></select></label>
-            <label><span>Kategori</span><select id="expenseMonitorCategory" onchange="renderExpenseMonitoring()"><option value="ALL">Semua Kategori</option></select></label>
-            <label class="expense-search-label"><span>Cari Detail</span><input id="expenseMonitorSearch" type="search" placeholder="BBM, listrik, kendaraan..." oninput="renderExpenseMonitoring()"></label>
-            <button class="btn btn-primary" onclick="loadExpenseMonitoring()">Refresh</button>
-          </div>
-        </article>
-
-        <div class="monitor-kpi-grid expense-monitor-kpis">
-          <article class="monitor-kpi glass"><small>TOTAL PENGELUARAN</small><strong id="expenseMonitorTotal">Rp0</strong><span>sesuai filter</span></article>
-          <article class="monitor-kpi glass"><small>TRANSAKSI</small><strong id="expenseMonitorTransactions">0</strong><span>baris biaya</span></article>
-          <article class="monitor-kpi glass"><small>KP AKTIF</small><strong id="expenseMonitorKpActive">0</strong><span>unit dengan biaya</span></article>
-          <article class="monitor-kpi glass"><small>HARI DATA</small><strong id="expenseMonitorDays">0</strong><span>hari tercatat</span></article>
-          <article class="monitor-kpi glass"><small>RATA-RATA / HARI</small><strong id="expenseMonitorAvg">Rp0</strong><span>berdasarkan hari data</span></article>
-          <article class="monitor-kpi glass"><small>TRANSAKSI TERBESAR</small><strong id="expenseMonitorLargest">Rp0</strong><span id="expenseMonitorLargestSub">Belum ada data</span></article>
-        </div>
-
-        <div class="expense-monitor-chart-grid">
-          <article class="panel glass"><div class="panel-head"><h3>TREN PENGELUARAN HARIAN</h3></div><div id="expenseMonitorTrend" class="chart chart-md"></div></article>
-          <article class="panel glass"><div class="panel-head"><h3>PENGELUARAN PER KATEGORI</h3></div><div id="expenseMonitorCategoryChart" class="chart chart-md"></div></article>
-          <article class="panel glass"><div class="panel-head"><h3>TOP KP BERDASARKAN BIAYA</h3></div><div id="expenseMonitorKpChart" class="chart chart-md"></div></article>
-        </div>
-
-        <article class="panel glass expense-monitor-detail-panel">
-          <div class="panel-head row-space"><h3>DETAIL TRANSAKSI PENGELUARAN</h3><span class="monitor-rule-note">Tanggal • KP • kategori • deskripsi • nominal • sumber • koreksi</span></div>
-          <div id="expenseMonitorDetailTable" class="table-wrap expense-monitor-table"></div>
-        </article>
       </section>
 
       <section id="page-history" class="page">
@@ -1076,6 +568,7 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
             <p>Directory unit, Jenis SPB/DO, kategori buah, dan penanggung jawab operasional.</p>
           </div>
           <div class="master-head-actions">
+            <button class="btn btn-primary master-add-btn" type="button" onclick="openMasterUnitModal()">+ Tambah Kantor Unit</button>
             <input id="masterSearch" type="search" placeholder="Cari KP, unit, SPB, alamat..." oninput="renderMasterDirectory()">
             <select id="masterFilter" onchange="renderMasterDirectory()">
               <option value="ALL">Semua Unit</option>
@@ -1125,8 +618,62 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
         </article>
       </section>
     </main>
+
+      <div id="masterUnitModal" class="unit-modal hidden" aria-hidden="true">
+        <div class="unit-modal-backdrop" onclick="closeMasterUnitModal()"></div>
+        <div class="unit-modal-card glass" role="dialog" aria-modal="true" aria-labelledby="masterUnitModalTitle">
+          <div class="unit-modal-head">
+            <div>
+              <small>MASTER DATA</small>
+              <h3 id="masterUnitModalTitle">Tambah Kantor Unit</h3>
+              <p id="masterUnitModalHint">Tambahkan unit baru agar dapat digunakan pada modul operasional.</p>
+            </div>
+            <button class="unit-modal-close" type="button" onclick="closeMasterUnitModal()" aria-label="Tutup">×</button>
+          </div>
+
+          <input type="hidden" id="masterUnitId">
+
+          <div class="unit-form-grid">
+            <div>
+              <label for="masterUnitCode">Kode KP *</label>
+              <input id="masterUnitCode" maxlength="30" autocomplete="off" placeholder="Contoh: ABC atau TKWL-3">
+              <small class="field-help" id="masterUnitCodeHelp">Kode harus unik. Huruf otomatis menjadi kapital.</small>
+            </div>
+            <div>
+              <label for="masterUnitName">Nama Kantor / Perusahaan *</label>
+              <input id="masterUnitName" maxlength="150" autocomplete="off" placeholder="Nama kantor unit">
+            </div>
+            <div class="unit-form-wide">
+              <label for="masterUnitAddress">Alamat</label>
+              <input id="masterUnitAddress" maxlength="255" autocomplete="off" placeholder="Kecamatan / Kabupaten / Provinsi">
+            </div>
+            <div>
+              <label for="masterUnitHead">Pimpinan Unit</label>
+              <input id="masterUnitHead" maxlength="150" autocomplete="off" placeholder="Nama pimpinan unit">
+            </div>
+            <div>
+              <label for="masterUnitManager">Manager FFB</label>
+              <input id="masterUnitManager" maxlength="150" autocomplete="off" placeholder="Nama Manager FFB">
+            </div>
+            <div class="unit-form-wide unit-active-row">
+              <label class="unit-toggle">
+                <input id="masterUnitActive" type="checkbox" checked>
+                <span>Unit aktif</span>
+              </label>
+              <small>Unit nonaktif tidak akan muncul pada dropdown operasional.</small>
+            </div>
+          </div>
+
+          <div id="masterUnitFormMsg" class="unit-form-msg"></div>
+
+          <div class="unit-modal-actions">
+            <button class="btn btn-secondary" type="button" onclick="closeMasterUnitModal()">Batal</button>
+            <button id="masterUnitSaveBtn" class="btn btn-primary" type="button" onclick="saveMasterUnit()">Simpan Kantor Unit</button>
+          </div>
+        </div>
+      </div>
   </div>
 
-  <script src="app.js?v=4.14.0"></script>
+  <script src="app.js?v=4.7.7"></script>
 </body>
 </html>
