@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.7.7">
+  <link rel="stylesheet" href="style.css?v=4.7.9">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -324,7 +324,32 @@
             </article>
           </div>
 
-          <details class="monitor-input-details" open>
+          
+          <article class="panel glass daily-input-switcher">
+            <div class="daily-input-switcher-head">
+              <div>
+                <span class="subpanel-kicker">INPUT DATA HARIAN</span>
+                <h3>Pilih Sumber Input</h3>
+              </div>
+              <span class="monitor-source-badge">WA / Closing / Excel</span>
+            </div>
+            <div class="daily-input-mode-grid">
+              <button id="dailyModeSnapshotBtn" class="daily-mode-btn active" type="button" onclick="showDailyInputMode('snapshot')">
+                <strong>Snapshot WhatsApp</strong>
+                <span>10.00 • 12.00 • 15.00 • 17.00</span>
+              </button>
+              <button id="dailyModeClosingBtn" class="daily-mode-btn" type="button" onclick="showDailyInputMode('closing')">
+                <strong>Closing Harian</strong>
+                <span>Khusus closing 17.00 WIB</span>
+              </button>
+              <button id="dailyModeExcelBtn" class="daily-mode-btn" type="button" onclick="showDailyInputMode('excel')">
+                <strong>Excel Harian</strong>
+                <span>Upload file .xls / .xlsx</span>
+              </button>
+            </div>
+          </article>
+
+          <details id="dailySnapshotInput" class="monitor-input-details daily-input-mode-panel" open>
             <summary>Input / Update Tonase Harian dari WhatsApp</summary>
             <div class="two-col monitor-input-grid">
               <article class="panel glass">
@@ -352,6 +377,89 @@
               <article class="panel glass">
                 <h3>Snapshot Terbaru per KP</h3>
                 <div id="snapshotTable" class="table-wrap"></div>
+              </article>
+            </div>
+          </details>
+
+          <details id="dailyClosingInput" class="monitor-input-details closing-input-details daily-input-mode-panel daily-mode-hidden">
+            <summary>Input / Update Tonase Closing 17.00 dari WhatsApp</summary>
+            <div class="two-col monitor-input-grid">
+              <article class="panel glass closing-panel">
+                <div class="closing-headline">
+                  <div>
+                    <span class="subpanel-kicker">CLOSING HARIAN</span>
+                    <h3>Paste WA Tonase Closing</h3>
+                  </div>
+                  <span class="closing-badge">17.00 WIB</span>
+                </div>
+
+                <textarea id="closingTonnageText" placeholder="Paste laporan WhatsApp closing / pukul 17.00 di sini..."></textarea>
+
+                <div class="snapshot-input-meta">
+                  <label>
+                    <span>Tanggal Closing</span>
+                    <input id="closingTonnageDate" type="date">
+                  </label>
+                  <small>Jika tanggal ada di header WhatsApp, sistem memakai tanggal dari header. Jika tidak ada, pilih tanggal closing di sini.</small>
+                </div>
+
+                <div class="actions">
+                  <button class="btn btn-primary" onclick="previewClosingTonnage()">Preview Closing</button>
+                  <button class="btn btn-secondary" onclick="saveClosingTonnage()">Simpan Closing 17.00</button>
+                </div>
+
+                <pre id="closingTonnagePreview" class="preview"></pre>
+              </article>
+
+              <article class="panel glass closing-info-panel">
+                <h3>Aturan Closing</h3>
+                <div class="closing-rules">
+                  <div><strong>Jam tersimpan</strong><span>Selalu 17.00 WIB</span></div>
+                  <div><strong>Validasi</strong><span>Total detail harus sama dengan TOTAL SELURUH</span></div>
+                  <div><strong>Duplikat</strong><span>Tanggal yang sama akan diperbarui, bukan ditambah ganda</span></div>
+                  <div><strong>Dashboard</strong><span>Setelah simpan, closing langsung menjadi snapshot akhir hari</span></div>
+                </div>
+              </article>
+            </div>
+          </details>
+
+          <details id="dailyExcelInput" class="monitor-input-details daily-input-mode-panel daily-mode-hidden">
+            <summary>Input / Update Tonase Harian dari Excel</summary>
+            <div class="two-col monitor-input-grid">
+              <article class="panel glass">
+                <div class="closing-headline">
+                  <div>
+                    <span class="subpanel-kicker">EXCEL HARIAN</span>
+                    <h3>Upload Excel Tonase</h3>
+                  </div>
+                  <span class="closing-badge excel-badge">.XLS / .XLSX</span>
+                </div>
+
+                <div class="period-upload-info daily-excel-upload">
+                  <div>
+                    <strong>Pilih file detail tonase</strong>
+                    <span>Bisa pilih beberapa file sekaligus. Parser yang dipakai sama dengan Excel Bulanan agar data tetap konsisten.</span>
+                  </div>
+                  <div class="period-upload-actions">
+                    <label class="btn btn-primary file-btn">
+                      Pilih Excel Harian
+                      <input id="dailyExcelFile" type="file" accept=".xlsx,.xls" multiple onchange="previewDailyExcels(this.files)">
+                    </label>
+                    <button class="btn btn-secondary" type="button" onclick="saveDailyExcel()">Simpan Excel Harian</button>
+                  </div>
+                </div>
+
+                <pre id="dailyExcelPreview" class="preview compact-preview">Belum ada file Excel harian dipilih.</pre>
+              </article>
+
+              <article class="panel glass closing-info-panel">
+                <h3>Aturan Excel Harian</h3>
+                <div class="closing-rules">
+                  <div><strong>Sumber</strong><span>Detail transaksi per KP/supplier dari file Excel</span></div>
+                  <div><strong>Duplikat file</strong><span>Upload ulang file yang sama akan mengganti hasil import file lama</span></div>
+                  <div><strong>Validasi</strong><span>Total parser dibandingkan dengan referensi historical summary jika tersedia</span></div>
+                  <div><strong>Penyimpanan</strong><span>Masuk ke histori harian, bukan ke historical summary tahunan</span></div>
+                </div>
               </article>
             </div>
           </details>
@@ -674,6 +782,6 @@
       </div>
   </div>
 
-  <script src="app.js?v=4.7.7"></script>
+  <script src="app.js?v=4.7.9"></script>
 </body>
 </html>
