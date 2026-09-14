@@ -154,6 +154,31 @@ function goToPage(page){
   if(page==="dashboard") loadDashboard();
 }
 
+
+function showDailyInputMode(mode){
+  const map={
+    snapshot:["dailySnapshotInput","dailyModeSnapshotBtn"],
+    closing:["dailyClosingInput","dailyModeClosingBtn"],
+    excel:["dailyExcelInput","dailyModeExcelBtn"]
+  };
+  if(!map[mode]) mode="snapshot";
+
+  Object.entries(map).forEach(([key,[panelId,btnId]])=>{
+    const panel=$(panelId);
+    const btn=$(btnId);
+    if(panel){
+      panel.classList.toggle("daily-mode-hidden",key!==mode);
+      panel.open=key===mode;
+    }
+    btn?.classList.toggle("active",key===mode);
+  });
+
+  const target=$(map[mode][0]);
+  if(target){
+    setTimeout(()=>target.scrollIntoView({behavior:"smooth",block:"nearest"}),30);
+  }
+}
+
 function canonKP(k){
   return (k || "").toUpperCase().trim()
     .replace(/^KP[.\s]*/,"")
@@ -222,19 +247,110 @@ function resolveTonnageHeader(text){
     timeSource:parsed.time?"header WhatsApp":"pilihan jam"
   };
 }
-function parseTonnage(text){
-  const h=resolveTonnageHeader(text); let kp=null, rows=[], declared=null;
-  for(const raw of text.split(/\r?\n/)){
-    const line=raw.trim(); if(!line) continue;
-    if(/^KP[.\s]/i.test(line)){ kp=canonKP(line); continue; }
-    let ts=line.match(/^TOTAL\s+SELURUH\s*:\s*([\d.,]+)/i);
-    if(ts){ declared=num(ts[1]); continue; }
-    if(/^TOTAL\s*:/i.test(line)) continue;
-    let r=line.match(/^([^:]+)\s*:\s*([\d.,]+|-)\s*(?:\((\d+)\))?/);
-    if(kp && r) rows.push({kp_code:kp, supplier_name:r[1].trim(), tonnage_kg:r[2]==="-"?0:num(r[2]), trip_count:+(r[3]||0)});
+function cleanTonnageLine(raw){
+  return String(raw||"")
+    .replace(/\u00a0/g," ")
+    .replace(/[＊*]/g,"")
+    .replace(/^[\s>•●▪◦\-–—]+/,"")
+    .replace(/\s+/g," ")
+    .trim();
+}
+function tonnageKPFromLine(line){
+  const cleaned=cleanTonnageLine(line)
+    .replace(/^KP\s*[.\-:]?\s*/i,"")
+    .replace(/\s*:\s*$/,"")
+    .trim();
+
+  const m=cleaned.match(
+    /^(BMK|FAA|KIP|ASMJ[\s-]?[12]|HKBS|TKWL[\s-]?[12]|SISL|GSS|SSL|MAN|SSM|IIS|GSL(?:[\s-]INUMAN)?|SKA|KS\s*2|LBP|LPI|LSHP|PSM|BSN|MSB\s*2|BSS|KWP)$/i
+  );
+  return m ? canonKP(m[1]) : null;
+}
+function parseTonnage(text,options={}){
+  const forceTime=options.forceTime || null;
+  const forceDate=options.forceDate || null;
+
+  const parsed=parseHeader(text)||{};
+  const fallback=selectedTonnageFallback();
+
+  const date=parsed.date || forceDate || fallback.date;
+  const time=forceTime || parsed.time || fallback.time;
+
+  if(!date){
+    throw Error("Tanggal snapshot tidak ditemukan. Pilih tanggal terlebih dahulu.");
   }
-  const total=rows.reduce((a,b)=>a+b.tonnage_kg,0), trips=rows.reduce((a,b)=>a+b.trip_count,0);
-  return {...h, rows, total, trips, declared, validTotal: declared==null || declared===total};
+  if(!time){
+    throw Error("Waktu snapshot tidak ditemukan. Pilih Jam Snapshot 10.00 / 12.00 / 15.00 / 17.00.");
+  }
+
+  if(forceTime && parsed.time && parsed.time!==forceTime){
+    throw Error(`Laporan ini terbaca pukul ${parsed.time.slice(0,5)}, bukan closing 17.00. Gunakan laporan pukul 17.00.`);
+  }
+
+  let kp=null, rows=[], declared=null;
+
+  for(const raw of String(text||"").split(/\r?\n/)){
+    const line=cleanTonnageLine(raw);
+    if(!line) continue;
+
+    const kpCandidate=tonnageKPFromLine(line);
+    if(kpCandidate){
+      kp=kpCandidate;
+      continue;
+    }
+
+    let ts=line.match(/^TOTAL\s+SELURUH\s*:?\s*([\d.,]+)/i);
+    if(ts){
+      declared=num(ts[1]);
+      continue;
+    }
+
+    // TOTAL per KP is validation text only, never a supplier row.
+    if(/^TOTAL\b\s*:?\s*/i.test(line)) continue;
+
+    const r=line.match(/^([^:]+?)\s*:\s*([\d.,]+|-)\s*(?:\((\d+)\))?\s*$/);
+    if(kp && r){
+      rows.push({
+        kp_code:kp,
+        supplier_name:r[1].trim().replace(/^[-–—•]\s*/,""),
+        tonnage_kg:r[2]==="-"?0:num(r[2]),
+        trip_count:+(r[3]||0)
+      });
+    }
+  }
+
+  if(!rows.length){
+    throw Error("Tidak ada detail KP/supplier yang berhasil dibaca dari laporan.");
+  }
+
+  // Aggregate duplicate KP + supplier rows to avoid unique conflicts.
+  const map=new Map();
+  for(const r of rows){
+    const key=`${r.kp_code}|||${String(r.supplier_name).toUpperCase()}`;
+    if(!map.has(key)){
+      map.set(key,{...r});
+    }else{
+      const x=map.get(key);
+      x.tonnage_kg+=Number(r.tonnage_kg||0);
+      x.trip_count+=Number(r.trip_count||0);
+    }
+  }
+  rows=[...map.values()];
+
+  const total=rows.reduce((a,b)=>a+Number(b.tonnage_kg||0),0);
+  const trips=rows.reduce((a,b)=>a+Number(b.trip_count||0),0);
+
+  return {
+    date,
+    time,
+    dateSource:parsed.date?"header WhatsApp":forceDate?"tanggal closing":"filter tanggal",
+    timeSource:forceTime?"closing 17.00":parsed.time?"header WhatsApp":"pilihan jam",
+    rows,
+    total,
+    trips,
+    declared,
+    validTotal:declared==null || declared===total
+  };
 }
 function previewTonnage(){
   try{
@@ -264,6 +380,85 @@ async function saveTonnage(){
   alert("Snapshot tersimpan.");
   TONNAGE_PREVIEW=null;
   await loadDashboard();
+}
+
+let CLOSING_TONNAGE_PREVIEW=null;
+
+function previewClosingTonnage(){
+  try{
+    const chosenDate=$("closingTonnageDate")?.value || $("monitorDate")?.value || null;
+    CLOSING_TONNAGE_PREVIEW=parseTonnage(
+      $("closingTonnageText").value,
+      {forceTime:"17:00:00",forceDate:chosenDate}
+    );
+
+    const p=CLOSING_TONNAGE_PREVIEW;
+    $("closingTonnagePreview").textContent=
+      `CLOSING ${p.date} 17:00 WIB\n`+
+      `KP/Supplier rows: ${p.rows.length}\n`+
+      `Total parser: ${kg(p.total)}\n`+
+      `TOTAL SELURUH: ${p.declared==null ? "tidak ditemukan" : kg(p.declared)}\n`+
+      `Mobil/Trip: ${p.trips}\n`+
+      `Validasi total: ${p.validTotal ? "OK ✓" : "TIDAK COCOK ✕"}\n\n`+
+      (p.validTotal
+        ? "Siap disimpan sebagai closing 17.00."
+        : "Simpan akan diblokir sampai total detail sama dengan TOTAL SELURUH.");
+  }catch(e){
+    CLOSING_TONNAGE_PREVIEW=null;
+    $("closingTonnagePreview").textContent="ERROR: "+e.message;
+  }
+}
+
+async function saveClosingTonnage(){
+  if(!CLOSING_TONNAGE_PREVIEW) return alert("Preview Closing dahulu.");
+
+  const p=CLOSING_TONNAGE_PREVIEW;
+  if(!p.validTotal){
+    return alert(
+      "SIMPAN CLOSING DIBLOKIR.\n\n"+
+      `Total detail: ${kg(p.total)}\n`+
+      `TOTAL SELURUH: ${p.declared==null ? "tidak ditemukan" : kg(p.declared)}\n\n`+
+      "Pastikan total laporan sudah sesuai."
+    );
+  }
+
+  const rawText=$("closingTonnageText").value;
+
+  const {data:s,error}=await db.from("monitoring_snapshots").upsert({
+    report_date:p.date,
+    snapshot_time:"17:00:00",
+    total_tonnage_kg:p.declared ?? p.total,
+    total_trips:p.trips,
+    raw_text:rawText,
+    source_type:"whatsapp_paste",
+    status:"validated"
+  },{onConflict:"report_date,snapshot_time"}).select().single();
+
+  if(error) return alert(error.message);
+
+  const {error:deleteError}=await db.from("monitoring_snapshot_details")
+    .delete()
+    .eq("snapshot_id",s.id);
+  if(deleteError) return alert(deleteError.message);
+
+  const {error:detailError}=await db.from("monitoring_snapshot_details")
+    .insert(p.rows.map(r=>({...r,snapshot_id:s.id})));
+  if(detailError) return alert(detailError.message);
+
+  alert(
+    `Closing ${p.date} pukul 17.00 berhasil disimpan.\n`+
+    `Tonase: ${kg(p.declared ?? p.total)}\n`+
+    `Trip: ${p.trips}`
+  );
+
+  CLOSING_TONNAGE_PREVIEW=null;
+  $("closingTonnageText").value="";
+  $("closingTonnagePreview").textContent="Belum ada preview closing.";
+
+  await loadDashboard();
+  if(typeof loadMonitoring==="function"){
+    try{ await loadMonitoring(); }catch(_){}
+  }
 }
 
 function cleanPriceLine(raw){
@@ -2120,6 +2315,124 @@ async function saveMonthlyExcel(){
   await loadKPMonthlyPanel($("monitorKp").value || "ALL");
 }
 
+
+let DAILY_EXCEL_PREVIEW=null;
+
+async function previewDailyExcels(fileList){
+  try{
+    const files=[...(fileList||[])];
+    if(!files.length) throw Error("Pilih minimal 1 file Excel.");
+
+    const previews=[];
+    let allDaily=[];
+
+    for(const file of files){
+      const wb=await readWorkbookFile(file);
+      const parsed=parseMonthlyWorkbook(wb,file.name);
+      previews.push(parsed);
+      allDaily.push(...parsed.daily);
+    }
+
+    allDaily=combineDailyRows(allDaily);
+    const validation=await validateMonthlyAgainstAnnual(allDaily);
+    const integrityBlocked=previews.filter(p=>!p.integrityOk);
+
+    DAILY_EXCEL_PREVIEW={
+      files:files.map(f=>f.name),
+      daily:allDaily,
+      fileResults:previews,
+      validation,
+      integrityBlocked
+    };
+
+    const dates=[...new Set(allDaily.map(r=>r.report_date))].sort();
+    const kps=[...new Set(allDaily.map(r=>r.kp_code))].sort();
+    const suppliers=new Set(allDaily.map(r=>`${r.kp_code}/${r.supplier_name}`));
+    const trips=allDaily.reduce((a,r)=>a+Number(r.trip_count||0),0);
+    const tonnage=allDaily.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+
+    const validationText=validation.length
+      ? "\n\nVALIDASI vs HISTORICAL SUMMARY:\n"+
+        validation.map(v=>{
+          const ref=v.reference_kg==null?"-":kg(v.reference_kg);
+          const diff=v.diff_kg==null?"-":`${v.diff_kg>=0?"+":""}${kg(v.diff_kg)}`;
+          return `• ${v.kp_code} ${String(v.month).padStart(2,"0")}/${v.year}: ${v.status}\n`+
+                 `  Excel: ${kg(v.parsed_kg)} | Referensi: ${ref} | Selisih: ${diff}`;
+        }).join("\n")
+      : "";
+
+    $("dailyExcelPreview").textContent=
+      `FILE DIPILIH: ${files.length}\n`+
+      `File terbaca: ${previews.filter(p=>p.daily.length).length}/${files.length}\n`+
+      `Rentang tanggal: ${dates.length ? dates[0]+" s.d "+dates[dates.length-1] : "-"}\n`+
+      `KP terdeteksi: ${kps.length}\n`+
+      `Supplier terdeteksi: ${suppliers.size}\n`+
+      `Baris harian supplier: ${allDaily.length}\n`+
+      `Total trip: ${trips.toLocaleString("id-ID")}\n`+
+      `Total tonase: ${kg(tonnage)}\n\n`+
+      previews.map(p=>`• ${p.fileName}\n  ${p.notes.join("\n  ")}`).join("\n\n")+
+      validationText;
+
+  }catch(e){
+    DAILY_EXCEL_PREVIEW=null;
+    $("dailyExcelPreview").textContent="ERROR: "+e.message;
+  }
+}
+
+async function saveDailyExcel(){
+  if(!DAILY_EXCEL_PREVIEW) return alert("Pilih dan preview Excel harian dahulu.");
+
+  const p=DAILY_EXCEL_PREVIEW;
+  if(!p.daily.length) return alert("Tidak ada transaksi yang dapat disimpan.");
+
+  const badFiles=p.integrityBlocked||[];
+  if(badFiles.length){
+    return alert(
+      "SIMPAN DIBLOKIR.\n\n"+
+      badFiles.map(f=>`${f.fileName}: ${f.integrityIssues.join("; ")}`).join("\n")+
+      "\n\nTotal transaksi parser belum sama dengan Total Excel."
+    );
+  }
+
+  const blocked=(p.validation||[]).filter(v=>v.block);
+  if(blocked.length){
+    return alert(
+      "SIMPAN DIBLOKIR.\n\n"+
+      blocked.map(v=>`${v.kp_code}: hasil parser melebihi referensi bulanan.`).join("\n")+
+      "\n\nPeriksa file/preview terlebih dahulu."
+    );
+  }
+
+  try{
+    await replaceRowsFromSameFiles(p.files);
+  }catch(e){
+    return alert("Gagal membersihkan versi import lama: "+e.message);
+  }
+
+  const chunkSize=500;
+  for(let i=0;i<p.daily.length;i+=chunkSize){
+    const {error}=await db.from("kp_daily_history")
+      .upsert(p.daily.slice(i,i+chunkSize),{onConflict:"report_date,kp_code,supplier_name"});
+    if(error) return alert("Gagal simpan Excel harian: "+error.message);
+  }
+
+  const dates=[...new Set(p.daily.map(r=>r.report_date))].sort();
+
+  alert(
+    `Excel harian berhasil disimpan.\n`+
+    `File: ${p.files.length}\n`+
+    `Tanggal: ${dates.length ? dates[0]+" s.d "+dates[dates.length-1] : "-"}\n`+
+    `Baris: ${p.daily.length}`
+  );
+
+  DAILY_EXCEL_PREVIEW=null;
+  if($("dailyExcelFile")) $("dailyExcelFile").value="";
+  $("dailyExcelPreview").textContent="Belum ada file Excel harian dipilih.";
+
+  await loadKPDaily($("monitorKp").value || "ALL");
+}
+
+
 // ---------- ANNUAL ----------
 function annualMonthColumns(aoa){
   const map={};
@@ -2353,6 +2666,7 @@ function setYearlyPanelSummary({kp,period,tonnage,coverage,tonnageSub,coverageSu
 async function loadKPMonthlyPanel(kp){
   const month=$("monitorMonth").value;
   if(!month) return;
+
   const {start,end}=yearMonthBounds(month);
   const [year,monthNum]=month.split("-").map(Number);
 
@@ -2362,37 +2676,77 @@ async function loadKPMonthlyPanel(kp){
     .order("report_date",{ascending:true});
   if(kp!=="ALL") dq=dq.eq("kp_code",kp);
 
-  const {data:daily,error:de}=await dq;
+  let sq=db.from("historical_summary")
+    .select("kp_code,tonnage_kg,source_file")
+    .eq("year",year).eq("month",monthNum);
+  if(kp!=="ALL") sq=sq.eq("kp_code",kp);
+
+  const [{data:daily,error:de},{data:summary,error:se}]=await Promise.all([dq,sq]);
+
   if(de){
-    resetPlotContainer("monthlyMonitorChart"); $("monthlyMonitorChart").innerHTML=`<div class="chart-empty-state">${de.message}</div>`;
+    resetPlotContainer("monthlyMonitorChart");
+    $("monthlyMonitorChart").innerHTML=`<div class="chart-empty-state">${de.message}</div>`;
+    return;
+  }
+  if(se){
+    resetPlotContainer("monthlyMonitorChart");
+    $("monthlyMonitorChart").innerHTML=`<div class="chart-empty-state">${se.message}</div>`;
     return;
   }
 
-  if(daily?.length){
-    const byDate={};
-    daily.forEach(r=>{
-      if(!byDate[r.report_date]) byDate[r.report_date]={tonnage:0,trips:0};
-      byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
-      byDate[r.report_date].trips+=Number(r.trip_count||0);
-    });
-    const dates=Object.keys(byDate).sort();
-    const vals=dates.map(d=>byDate[d].tonnage);
-    const total=vals.reduce((a,b)=>a+b,0);
-    const trips=dates.reduce((a,d)=>a+byDate[d].trips,0);
-    const avg=dates.length?total/dates.length:0;
+  const dailyRows=daily||[];
+  const summaryRows=summary||[];
 
-    setMonthlyPanelSummary({
-      kp,period:monthLabelId(month),tonnage:total,trips,
-      coverage:`${dates.length} hari`,
-      tonnageSub:`Rata-rata ${kg(avg)} / hari data`,
-      tripsSub:"Total trip Excel bulanan",
-      coverageSub:"Hari dengan data"
-    });
+  const byDate={};
+  dailyRows.forEach(r=>{
+    if(!byDate[r.report_date]) byDate[r.report_date]={tonnage:0,trips:0};
+    byDate[r.report_date].tonnage+=Number(r.tonnage_kg||0);
+    byDate[r.report_date].trips+=Number(r.trip_count||0);
+  });
+
+  const dates=Object.keys(byDate).sort();
+  const detailTotal=dates.reduce((a,d)=>a+byDate[d].tonnage,0);
+  const detailTrips=dates.reduce((a,d)=>a+byDate[d].trips,0);
+  const summaryTotal=summaryRows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  const hasSummary=summaryRows.length>0;
+  const authoritativeTotal=hasSummary ? summaryTotal : detailTotal;
+  const diff=hasSummary ? detailTotal-summaryTotal : 0;
+
+  let tonnageSub="-";
+  if(hasSummary && dailyRows.length){
+    tonnageSub=
+      `Summary resmi ${kg(summaryTotal)} • Detail Excel ${kg(detailTotal)} • `+
+      `Selisih ${diff>=0?"+":""}${kg(diff)}`;
+  }else if(hasSummary){
+    tonnageSub="Historical summary resmi tersedia";
+  }else if(dailyRows.length){
+    tonnageSub="Total dari detail Excel harian";
+  }else{
+    tonnageSub="Belum ada data";
+  }
+
+  setMonthlyPanelSummary({
+    kp,
+    period:monthLabelId(month),
+    tonnage:authoritativeTotal,
+    trips:dailyRows.length?detailTrips:null,
+    coverage:hasSummary
+      ? `${summaryRows.length} KP summary • ${dates.length} hari detail`
+      : `${dates.length} hari detail`,
+    tonnageSub,
+    tripsSub:dailyRows.length?"Total trip dari detail Excel":"Upload Excel detail untuk trip",
+    coverageSub:hasSummary?"Summary resmi + coverage detail":"Hari dengan data detail"
+  });
+
+  // If daily detail exists, keep the day-by-day chart because it is useful operationally.
+  if(dailyRows.length){
+    const vals=dates.map(d=>byDate[d].tonnage);
 
     resetPlotContainer("monthlyMonitorChart");
     Plotly.newPlot("monthlyMonitorChart",[{
       x:dates.map(d=>d.slice(8,10)),
-      y:vals,type:"bar",
+      y:vals,
+      type:"bar",
       text:vals.map(v=>compactKg(v)),
       textposition:"outside",
       cliponaxis:false,
@@ -2406,57 +2760,62 @@ async function loadKPMonthlyPanel(kp){
       showlegend:false
     },plotConfig);
 
+    const auditRow=hasSummary
+      ? [[
+          "SUMMARY RESMI",
+          kg(summaryTotal),
+          `Detail Excel ${kg(detailTotal)} | Selisih ${diff>=0?"+":""}${kg(diff)}`
+        ]]
+      : [];
+
     $("monthlyMonitorTable").innerHTML=table(
-      ["Tanggal","Tonase","Trip"],
-      dates.map(d=>[d,kg(byDate[d].tonnage),byDate[d].trips])
+      ["Tanggal","Tonase","Trip / Keterangan"],
+      [
+        ...auditRow,
+        ...dates.map(d=>[d,kg(byDate[d].tonnage),byDate[d].trips])
+      ]
     );
     return;
   }
 
-  let sq=db.from("historical_summary")
-    .select("kp_code,tonnage_kg")
-    .eq("year",year).eq("month",monthNum);
-  if(kp!=="ALL") sq=sq.eq("kp_code",kp);
-  const {data:summary}=await sq;
-  const rows=summary||[];
-  const total=rows.reduce((a,r)=>a+Number(r.tonnage_kg||0),0);
+  // No detail rows: show summary per KP.
+  if(summaryRows.length){
+    const pairs=summaryRows
+      .map(r=>[r.kp_code,Number(r.tonnage_kg||0)])
+      .sort((a,b)=>b[1]-a[1]);
 
-  setMonthlyPanelSummary({
-    kp,period:monthLabelId(month),tonnage:total,trips:null,
-    coverage:`${rows.length} KP`,
-    tonnageSub:rows.length?"Summary bulanan tersedia":"Belum ada data",
-    tripsSub:"Upload Excel detail untuk trip",
-    coverageSub:rows.length?"Data summary":"Belum ada data"
-  });
-
-  if(!rows.length){
     resetPlotContainer("monthlyMonitorChart");
-    $("monthlyMonitorChart").innerHTML="<div class='chart-empty-state'>Belum ada data. Upload Excel Bulanan di panel ini.</div>";
-    $("monthlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data bulanan"]]);
+    Plotly.newPlot("monthlyMonitorChart",[{
+      x:pairs.map(x=>x[1]),
+      y:pairs.map(x=>x[0]),
+      type:"bar",
+      orientation:"h",
+      marker:{color:"#49de5f"},
+      hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
+    }],{
+      ...darkLayout,
+      margin:{t:18,l:74,r:18,b:38},
+      xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
+      yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
+      showlegend:false
+    },plotConfig);
+
+    $("monthlyMonitorTable").innerHTML=table(
+      ["KP","Tonase","Sumber"],
+      summaryRows
+        .slice()
+        .sort((a,b)=>Number(b.tonnage_kg||0)-Number(a.tonnage_kg||0))
+        .map(r=>[r.kp_code,kg(Number(r.tonnage_kg||0)),r.source_file||"Historical Summary"])
+    );
     return;
   }
 
-  const pairs=rows.map(r=>[r.kp_code,Number(r.tonnage_kg||0)]).sort((a,b)=>b[1]-a[1]);
   resetPlotContainer("monthlyMonitorChart");
-    Plotly.newPlot("monthlyMonitorChart",[{
-    x:pairs.map(x=>x[1]),
-    y:pairs.map(x=>x[0]),
-    type:"bar",orientation:"h",
-    marker:{color:"#49de5f"},
-    hovertemplate:"<b>%{y}</b><br>%{x:,.0f} kg<extra></extra>"
-  }],{
-    ...darkLayout,
-    margin:{t:18,l:74,r:18,b:38},
-    xaxis:{...darkLayout.xaxis,tickformat:"~s",fixedrange:true},
-    yaxis:{...darkLayout.yaxis,autorange:"reversed",fixedrange:true},
-    showlegend:false
-  },plotConfig);
-
-  $("monthlyMonitorTable").innerHTML=table(
-    ["KP","Tonase","Sumber"],
-    pairs.map(([code,val])=>[code,kg(val),"Summary Bulanan"])
-  );
+  $("monthlyMonitorChart").innerHTML=
+    "<div class='chart-empty-state'>Belum ada data. Gunakan Excel Harian/Bulanan atau Historical Summary.</div>";
+  $("monthlyMonitorTable").innerHTML=table(["Keterangan"],[["Belum ada data bulanan"]]);
 }
+
 async function loadKPYearlyPanel(kp){
   const year=Number($("monitorYear").value);
   let q=db.from("historical_summary")
@@ -2780,3 +3139,10 @@ async function loadKPYearly(kp){
 
 
 boot();
+
+
+document.addEventListener("change",e=>{
+  if(e.target?.id==="monitorDate" && $("closingTonnageDate") && !$("closingTonnageDate").value){
+    $("closingTonnageDate").value=e.target.value;
+  }
+});
