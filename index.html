@@ -1059,8 +1059,14 @@
           .tbs-input-status button{min-height:38px;padding:7px 13px;border:0;border-radius:9px;background:#247fae;color:white;font-weight:700;cursor:pointer}
           .tbs-input-status-list{margin:12px 0 0;padding-top:11px;border-top:1px solid rgba(130,168,194,.18);display:grid;gap:6px}
           .tbs-input-status-list[hidden]{display:none}
-          .tbs-input-status-item{font-size:13px;line-height:1.45;color:#c9d9e5}
-          .tbs-input-status-item strong{color:#fff}
+          .tbs-input-status-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid rgba(130,168,194,.18);border-radius:10px;background:rgba(9,29,42,.52);font:inherit;font-size:13px;line-height:1.45;color:#c9d9e5;text-align:left;cursor:pointer;transition:.18s ease}
+          .tbs-input-status-item:hover,.tbs-input-status-item:focus-visible{transform:translateX(2px);border-color:rgba(74,185,240,.55);background:rgba(23,70,93,.62);outline:none}
+          .tbs-input-status-item strong{display:block;color:#fff;margin-bottom:2px}
+          .tbs-input-status-item-copy{min-width:0;flex:1}
+          .tbs-input-status-item-suppliers{display:block;color:#aac0cf;overflow-wrap:anywhere}
+          .tbs-input-status-item-arrow{color:#6ed3ff;font-size:18px;font-weight:800;flex:0 0 auto}
+          .tbs-target-flash{animation:tbsTargetPulse 1.4s ease 2}
+          @keyframes tbsTargetPulse{0%,100%{box-shadow:inherit}50%{box-shadow:0 0 0 3px rgba(54,210,255,.42),0 18px 42px rgba(0,0,0,.26)}}
           .tbs-notification-shell{position:relative;display:flex;align-items:center;z-index:120}
           .tbs-notification-button{position:relative;width:42px;height:42px;min-width:42px;border:1px solid rgba(125,174,204,.34);border-radius:50%;display:grid;place-items:center;background:rgba(8,25,37,.72);color:#eaf4fb;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.18);transition:.2s ease}
           .tbs-notification-button:hover,.tbs-notification-button:focus-visible{transform:translateY(-1px);border-color:rgba(74,185,240,.72);background:rgba(21,65,87,.88);outline:none}
@@ -1130,7 +1136,12 @@
           button.setAttribute("aria-expanded", String(open));
           if (open) refreshCompleteness(dateInput.value);
         });
-        panel.addEventListener("click", (event) => event.stopPropagation());
+        panel.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const destination = event.target.closest("[data-tbs-target-kp]");
+          if (!destination) return;
+          goToMissingInput(destination.dataset.tbsTargetKp, destination.dataset.tbsTargetDate);
+        });
         document.addEventListener("click", () => {
           panel.classList.remove("is-open");
           button.setAttribute("aria-expanded", "false");
@@ -1162,6 +1173,55 @@
           (groups[row.kp_code] ||= []).push(row.supplier_name);
           return groups;
         }, {});
+      }
+
+      function escapeHtml(value) {
+        return String(value == null ? "" : value).replace(/[&<>"']/g, (char) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+        })[char]);
+      }
+
+      function setSelectValueLoose(select, value) {
+        if (!select) return false;
+        const normalize = (text) => String(text || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const wanted = normalize(value);
+        const option = Array.from(select.options).find((item) => normalize(item.value) === wanted || normalize(item.textContent) === wanted);
+        if (!option) return false;
+        select.value = option.value;
+        return true;
+      }
+
+      function goToMissingInput(kpCode, date) {
+        const panel = document.getElementById("tbs-notification-popover");
+        const bell = document.querySelector("[data-tbs-bell]");
+        if (panel) panel.classList.remove("is-open");
+        if (bell) bell.setAttribute("aria-expanded", "false");
+
+        if (typeof window.openMonitoringSub === "function") window.openMonitoringSub("daily");
+        else if (typeof window.goToPage === "function") window.goToPage("monitoring");
+        else document.getElementById("sideDaily")?.click();
+
+        const monitorKp = document.getElementById("monitorKp");
+        const monitorDate = document.getElementById("monitorDate");
+        const tonnageDate = document.getElementById("tonnageInputDate");
+        const excelDate = document.getElementById("dailyExcelDate");
+        setSelectValueLoose(monitorKp, kpCode);
+        [monitorDate, tonnageDate, excelDate].forEach((input) => {
+          if (input && date) input.value = date;
+        });
+        if (monitorDate) monitorDate.dispatchEvent(new Event("change", { bubbles: true }));
+        else if (typeof window.loadKPMonitoring === "function") window.loadKPMonitoring();
+
+        const target = document.querySelector(".monitor-input-details");
+        if (target) target.open = true;
+        window.setTimeout(() => {
+          if (!target) return;
+          target.classList.remove("tbs-target-flash");
+          void target.offsetWidth;
+          target.classList.add("tbs-target-flash");
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+          document.getElementById("tonnageText")?.focus({ preventScroll: true });
+        }, 180);
       }
     
       function renderStatus(rows, date) {
@@ -1195,7 +1255,14 @@
           }
           list.hidden = false;
           list.innerHTML = Object.entries(missingGroups)
-            .map(([kp, suppliers]) => `<div class="tbs-input-status-item"><strong>${kp}</strong>: ${suppliers.join(", ")}</div>`)
+            .map(([kp, suppliers]) => `
+              <button type="button" class="tbs-input-status-item" data-tbs-target-kp="${escapeHtml(kp)}" data-tbs-target-date="${escapeHtml(date)}">
+                <span class="tbs-input-status-item-copy">
+                  <strong>${escapeHtml(kp)}</strong>
+                  <span class="tbs-input-status-item-suppliers">${suppliers.map(escapeHtml).join(", ")}</span>
+                </span>
+                <span class="tbs-input-status-item-arrow" aria-hidden="true">→</span>
+              </button>`)
             .join("");
         });
       }
