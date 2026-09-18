@@ -1061,7 +1061,16 @@
           .tbs-input-status-list[hidden]{display:none}
           .tbs-input-status-item{font-size:13px;line-height:1.45;color:#c9d9e5}
           .tbs-input-status-item strong{color:#fff}
-          @media(max-width:700px){.tbs-input-status{padding:14px}.tbs-input-status-actions{width:100%}.tbs-input-status input{flex:1}.tbs-input-status button{flex:0 0 auto}}
+          .tbs-notification-shell{position:relative;display:flex;align-items:center;z-index:120}
+          .tbs-notification-button{position:relative;width:42px;height:42px;min-width:42px;border:1px solid rgba(125,174,204,.34);border-radius:50%;display:grid;place-items:center;background:rgba(8,25,37,.72);color:#eaf4fb;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.18);transition:.2s ease}
+          .tbs-notification-button:hover,.tbs-notification-button:focus-visible{transform:translateY(-1px);border-color:rgba(74,185,240,.72);background:rgba(21,65,87,.88);outline:none}
+          .tbs-notification-button svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+          .tbs-notification-button.has-alert{color:#ffd37a;border-color:rgba(255,185,67,.58)}
+          .tbs-notification-badge{position:absolute;top:-5px;right:-5px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;display:grid;place-items:center;background:#ff5b62;color:#fff;border:2px solid #0b1a27;font-size:10px;font-weight:800;line-height:1}
+          .tbs-notification-badge[hidden]{display:none}
+          .tbs-input-status.tbs-notification-popover{position:absolute;top:calc(100% + 12px);right:0;width:min(430px,calc(100vw - 36px));max-height:min(620px,calc(100vh - 110px));overflow:auto;margin:0;display:none;z-index:150;box-shadow:0 24px 60px rgba(0,0,0,.42);backdrop-filter:blur(18px)}
+          .tbs-notification-shell.is-open .tbs-notification-popover{display:block}
+          @media(max-width:700px){.tbs-input-status{padding:14px}.tbs-input-status-actions{width:100%}.tbs-input-status input{flex:1}.tbs-input-status button{flex:0 0 auto}.tbs-notification-button{width:38px;height:38px;min-width:38px}.tbs-input-status.tbs-notification-popover{position:fixed;top:74px;right:12px;left:12px;width:auto;max-height:calc(100vh - 92px)}}
         `;
         document.head.appendChild(style);
       }
@@ -1086,12 +1095,23 @@
         `;
       }
     
-      function createPanel(parent, before, scope) {
-        if (!parent || parent.querySelector(`[data-tbs-panel="${scope}"]`)) return;
-        const panel = document.createElement("section");
-        panel.className = "tbs-input-status glass";
-        panel.dataset.tbsPanel = scope;
-        panel.innerHTML = panelMarkup(scope);
+      function createNotificationBell() {
+        const heroMeta = document.querySelector("#appView .hero .hero-meta");
+        if (!heroMeta || document.getElementById("tbs-notification-shell")) return;
+        const shell = document.createElement("div");
+        shell.id = "tbs-notification-shell";
+        shell.className = "tbs-notification-shell";
+        shell.innerHTML = `
+          <button type="button" class="tbs-notification-button" data-tbs-bell aria-label="Notifikasi kelengkapan closing" aria-expanded="false" title="Notifikasi data closing">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg>
+            <span class="tbs-notification-badge" data-tbs-badge hidden>0</span>
+          </button>
+          <section class="tbs-input-status tbs-notification-popover glass" data-tbs-panel="notification" aria-label="Rincian notifikasi closing">
+            ${panelMarkup("notification")}
+          </section>
+        `;
+        heroMeta.prepend(shell);
+        const panel = shell.querySelector("[data-tbs-panel]");
         const dateInput = panel.querySelector("[data-tbs-date]");
         dateInput.value = localIsoDate();
         dateInput.addEventListener("change", () => {
@@ -1099,18 +1119,31 @@
           refreshCompleteness(dateInput.value);
         });
         panel.querySelector("[data-tbs-refresh]").addEventListener("click", () => refreshCompleteness(dateInput.value));
-        parent.insertBefore(panel, before || parent.firstChild);
+        const button = shell.querySelector("[data-tbs-bell]");
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const open = !shell.classList.contains("is-open");
+          shell.classList.toggle("is-open", open);
+          button.setAttribute("aria-expanded", String(open));
+          if (open) refreshCompleteness(dateInput.value);
+        });
+        panel.addEventListener("click", (event) => event.stopPropagation());
+        document.addEventListener("click", () => {
+          shell.classList.remove("is-open");
+          button.setAttribute("aria-expanded", "false");
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") return;
+          shell.classList.remove("is-open");
+          button.setAttribute("aria-expanded", "false");
+          button.focus();
+        });
       }
     
       function ensurePanels() {
         addStyles();
-        const dashboard = document.getElementById("page-dashboard");
-        const dashboardKpi = dashboard && dashboard.querySelector(".kpi-row");
-        createPanel(dashboard, dashboardKpi, "dashboard");
-    
-        const monitoring = document.getElementById("page-monitoring");
-        const monitorHead = monitoring && monitoring.querySelector(".page-head");
-        createPanel(monitoring, monitorHead ? monitorHead.nextSibling : null, "monitoring");
+        document.querySelectorAll('[data-tbs-panel="dashboard"],[data-tbs-panel="monitoring"]').forEach((panel) => panel.remove());
+        createNotificationBell();
       }
     
       function getDbClient() {
@@ -1133,6 +1166,13 @@
         const inputCount = rows.length - missing.length;
         const missingGroups = groupMissing(rows);
         const missingKp = Object.keys(missingGroups).length;
+        const badge = document.querySelector("[data-tbs-badge]");
+        const bell = document.querySelector("[data-tbs-bell]");
+        if (badge) {
+          badge.hidden = missing.length === 0;
+          badge.textContent = missing.length > 99 ? "99+" : String(missing.length);
+        }
+        if (bell) bell.classList.toggle("has-alert", missing.length > 0);
         document.querySelectorAll("[data-tbs-panel]").forEach((panel) => {
           const title = panel.querySelector("[data-tbs-title]");
           const summary = panel.querySelector("[data-tbs-summary]");
@@ -1158,6 +1198,13 @@
       }
     
       function renderError(message) {
+        const badge = document.querySelector("[data-tbs-badge]");
+        const bell = document.querySelector("[data-tbs-bell]");
+        if (badge) {
+          badge.hidden = false;
+          badge.textContent = "!";
+        }
+        if (bell) bell.classList.add("has-alert");
         document.querySelectorAll("[data-tbs-panel]").forEach((panel) => {
           panel.classList.remove("is-complete");
           panel.classList.add("is-error");
