@@ -973,6 +973,59 @@
           </div>
           <div id="masterSupplierTable" class="table-wrap"></div>
         </article>
+
+        <article class="panel glass master-agent-import-panel">
+          <div class="panel-head row-space master-agent-head">
+            <div>
+              <h3>INPUT AGEN VIA COPY–PASTE</h3>
+              <p>Tempel tabel dari Excel, website, WhatsApp, atau format tabel Markdown.</p>
+            </div>
+            <span class="monitor-source-badge">Harga Diabaikan</span>
+          </div>
+          <div class="master-agent-import-grid">
+            <div class="master-agent-paste-field">
+              <label for="agentPasteInput">Data agen</label>
+              <textarea id="agentPasteInput" rows="9" placeholder="Contoh:\nNama Agen | No HP | Penerima Fee | SPB\nMISRAN | - | - | Mekar\nDEDI SUSANDI SINAGA | 081234567890 | DEDI | Mekar, Artha"></textarea>
+              <small>Sistem membaca Nama Agen, No HP, Penerima Fee, dan SPB. Teks harga seperti “Rp 4.150/Kg” otomatis dibuang.</small>
+            </div>
+            <div class="master-agent-import-actions">
+              <label for="agentPasteKp">Kantor tujuan</label>
+              <select id="agentPasteKp">
+                <option value="BMK">KP BMK — CV. Dian Putra Kencana</option>
+              </select>
+              <button type="button" class="btn btn-secondary" onclick="previewAgentPaste()">Baca &amp; Pratinjau</button>
+              <button id="agentPasteSave" type="button" class="btn btn-primary" onclick="saveAgentPaste()" disabled>Simpan ke Database</button>
+              <button type="button" class="btn btn-ghost" onclick="clearAgentPaste()">Bersihkan</button>
+            </div>
+          </div>
+          <div id="agentPasteStatus" class="master-agent-paste-status">Belum ada data yang dibaca.</div>
+          <div id="agentPastePreview" class="table-wrap master-agent-paste-preview"></div>
+        </article>
+
+        <article id="masterAgentPanel" class="panel glass master-agent-panel">
+          <div class="panel-head row-space master-agent-head">
+            <div>
+              <h3>DATABASE AGEN BMK</h3>
+              <p>Daftar agen dan hubungan SPB • harga tidak ditampilkan</p>
+            </div>
+            <span class="monitor-source-badge">Data Agen Aktif</span>
+          </div>
+          <div class="master-agent-summary">
+            <div><small>TOTAL AGEN</small><strong id="masterAgentCount">0</strong></div>
+            <div><small>DENGAN NOMOR HP</small><strong id="masterAgentPhoneCount">0</strong></div>
+            <div><small>HP BELUM TERSEDIA</small><strong id="masterAgentMissingPhoneCount">0</strong></div>
+            <div><small>JENIS SPB</small><strong id="masterAgentSpbCount">0</strong></div>
+          </div>
+          <div class="master-agent-toolbar">
+            <input id="masterAgentSearch" type="search" placeholder="Cari nama agen, alias, atau nomor HP..." oninput="renderAgentDirectory()">
+            <select id="masterAgentSpbFilter" onchange="renderAgentDirectory()">
+              <option value="ALL">Semua SPB</option>
+            </select>
+            <button type="button" class="btn btn-secondary" onclick="loadAgentDirectory(true)">Refresh</button>
+          </div>
+          <div id="masterAgentStatus" class="master-agent-status">Memuat database agen...</div>
+          <div id="masterAgentTable" class="table-wrap master-agent-table"></div>
+        </article>
       </section>
     </main>
   </div>
@@ -1067,6 +1120,59 @@
           .tbs-input-status-item-arrow{color:#6ed3ff;font-size:18px;font-weight:800;flex:0 0 auto}
           .tbs-target-flash{animation:tbsTargetPulse 1.4s ease 2}
           @keyframes tbsTargetPulse{0%,100%{box-shadow:inherit}50%{box-shadow:0 0 0 3px rgba(54,210,255,.42),0 18px 42px rgba(0,0,0,.26)}}
+          .master-agent-import-panel{margin-top:16px}
+          .master-agent-import-grid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;margin-top:14px}
+          .master-agent-paste-field label,.master-agent-import-actions label{display:block;margin:0 0 7px;color:#c9d9e5;font-size:12px;font-weight:800}
+          .master-agent-paste-field textarea{width:100%;min-height:190px;resize:vertical;padding:13px 14px;border:1px solid rgba(115,160,190,.30);border-radius:12px;background:#0b1a27;color:#eef8ff;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;box-sizing:border-box;outline:none}
+          .master-agent-paste-field textarea:focus{border-color:rgba(64,184,239,.72);box-shadow:0 0 0 3px rgba(39,154,211,.13)}
+          .master-agent-paste-field small{display:block;margin-top:7px;color:#8fa8b8;font-size:11px;line-height:1.5}
+          .master-agent-import-actions{display:flex;flex-direction:column;gap:9px}
+          .master-agent-import-actions select{min-height:42px;padding:9px 11px;border:1px solid rgba(115,160,190,.30);border-radius:10px;background:#0b1a27;color:#eaf4fb;font:inherit}
+          .master-agent-import-actions .btn{width:100%;min-height:42px}
+          .master-agent-import-actions .btn:disabled{opacity:.45;cursor:not-allowed;filter:saturate(.45)}
+          .master-agent-import-actions .btn-ghost{border:1px solid rgba(130,168,194,.22);background:transparent;color:#a9bdca}
+          .master-agent-paste-status{margin:14px 0 10px;padding:10px 12px;border-radius:10px;background:rgba(8,27,39,.46);color:#9fb6c8;font-size:12px;line-height:1.5}
+          .master-agent-paste-status.is-ready{border:1px solid rgba(70,205,144,.26);color:#a6e8c5}
+          .master-agent-paste-status.is-error{border:1px solid rgba(255,100,100,.30);color:#ffb2b2}
+          .master-agent-paste-status.is-success{border:1px solid rgba(70,205,144,.42);background:rgba(32,148,101,.12);color:#baf1d3}
+          .master-agent-paste-preview{max-height:390px;overflow:auto;border-radius:12px}
+          .master-agent-paste-preview:empty{display:none}
+          .master-agent-paste-preview table{width:100%;border-collapse:separate;border-spacing:0;min-width:800px}
+          .master-agent-paste-preview th{position:sticky;top:0;z-index:2;padding:10px 12px;background:#17374a;color:#bcd1df;font-size:11px;text-align:left}
+          .master-agent-paste-preview td{padding:10px 12px;border-top:1px solid rgba(124,163,187,.12);color:#d4e2ea;font-size:12px;vertical-align:top}
+          .master-agent-import-badge{display:inline-flex;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:800;white-space:nowrap}
+          .master-agent-import-badge.is-new{background:rgba(64,203,135,.14);color:#8ee4b8}
+          .master-agent-import-badge.is-update{background:rgba(61,167,230,.15);color:#89d8ff}
+          .master-agent-import-badge.is-invalid{background:rgba(255,92,92,.14);color:#ffaaaa}
+          .master-agent-panel{margin-top:16px}
+          .master-agent-head p{margin:4px 0 0;color:#a9bdca;font-size:13px}
+          .master-agent-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}
+          .master-agent-summary>div{padding:12px 14px;border:1px solid rgba(120,166,194,.18);border-radius:12px;background:rgba(8,27,39,.46)}
+          .master-agent-summary small{display:block;color:#95adbd;font-size:10px;font-weight:800;letter-spacing:.07em}
+          .master-agent-summary strong{display:block;margin-top:5px;color:#f4fbff;font-size:22px}
+          .master-agent-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(150px,220px) auto;gap:10px;margin:0 0 12px}
+          .master-agent-toolbar input,.master-agent-toolbar select{min-height:42px;padding:9px 11px;border:1px solid rgba(115,160,190,.30);border-radius:10px;background:#0b1a27;color:#eaf4fb;font:inherit}
+          .master-agent-status{margin:8px 0 10px;color:#9fb6c8;font-size:12px}
+          .master-agent-table{max-height:620px;overflow:auto;border:1px solid rgba(64,160,226,.22);border-radius:12px}
+          .master-agent-table table{width:100%;border-collapse:separate;border-spacing:0;min-width:960px}
+          .master-agent-table th{position:sticky;top:0;z-index:2;padding:13px 16px;background:#218fd9;color:#fff;font-size:12px;text-align:left;letter-spacing:.02em;border-right:1px solid rgba(255,255,255,.55)}
+          .master-agent-table th:first-child{width:62px}
+          .master-agent-table th:nth-child(2){width:255px}
+          .master-agent-table th:nth-child(3){width:255px}
+          .master-agent-table th:nth-child(4){width:190px}
+          .master-agent-table th:nth-child(5){width:250px}
+          .master-agent-table th:last-child{min-width:230px;border-right:0}
+          .master-agent-table td{padding:14px 16px;border-top:1px solid rgba(124,163,187,.14);border-right:1px solid rgba(124,163,187,.10);color:#d4e2ea;font-size:13px;vertical-align:middle}
+          .master-agent-table td:last-child{border-right:0}
+          .master-agent-table tr:hover td{background:rgba(46,122,157,.12)}
+          .master-agent-name{color:#fff;font-weight:800}
+          .master-agent-unit{display:block;color:#fff;font-weight:700}
+          .master-agent-company{display:block;margin-top:5px;color:#49c9f5;font-size:11px;font-weight:700}
+          .master-agent-phone{color:#7ddcff;text-decoration:none;white-space:nowrap}
+          .master-agent-phone.missing{color:#8095a3;font-style:italic}
+          .master-agent-spbs{display:flex;gap:7px;flex-wrap:wrap}
+          .master-agent-spb-chip{display:inline-flex;padding:4px 9px;border:1px solid rgba(70,205,144,.28);border-radius:999px;background:rgba(32,148,101,.12);color:#8ee4b8;font-size:11px;font-weight:700;white-space:nowrap}
+          .master-agent-empty{padding:26px;text-align:center;color:#9bb0bd}
           .tbs-notification-shell{position:relative;display:flex;align-items:center;z-index:120}
           .tbs-notification-button{position:relative;width:42px;height:42px;min-width:42px;border:1px solid rgba(125,174,204,.34);border-radius:50%;display:grid;place-items:center;background:rgba(8,25,37,.72);color:#eaf4fb;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.18);transition:.2s ease}
           .tbs-notification-button:hover,.tbs-notification-button:focus-visible{transform:translateY(-1px);border-color:rgba(74,185,240,.72);background:rgba(21,65,87,.88);outline:none}
@@ -1076,7 +1182,7 @@
           .tbs-notification-badge[hidden]{display:none}
           .tbs-input-status.tbs-notification-popover{position:fixed;top:76px;right:24px;width:min(430px,calc(100vw - 36px));max-height:min(620px,calc(100vh - 96px));overflow:auto;margin:0;display:none;z-index:99999;box-shadow:0 24px 60px rgba(0,0,0,.52);backdrop-filter:blur(18px)}
           .tbs-input-status.tbs-notification-popover.is-open{display:block}
-          @media(max-width:700px){.tbs-input-status{padding:14px}.tbs-input-status-actions{width:100%}.tbs-input-status input{flex:1}.tbs-input-status button{flex:0 0 auto}.tbs-notification-button{width:38px;height:38px;min-width:38px}.tbs-input-status.tbs-notification-popover{position:fixed;top:74px;right:12px;left:12px;width:auto;max-height:calc(100vh - 92px)}}
+          @media(max-width:700px){.tbs-input-status{padding:14px}.tbs-input-status-actions{width:100%}.tbs-input-status input{flex:1}.tbs-input-status button{flex:0 0 auto}.tbs-notification-button{width:38px;height:38px;min-width:38px}.tbs-input-status.tbs-notification-popover{position:fixed;top:74px;right:12px;left:12px;width:auto;max-height:calc(100vh - 92px)}.master-agent-import-grid{grid-template-columns:1fr}.master-agent-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.master-agent-toolbar{grid-template-columns:1fr}.master-agent-toolbar .btn{width:100%}}
         `;
         document.head.appendChild(style);
       }
@@ -1165,6 +1271,486 @@
           if (typeof db !== "undefined" && db && typeof db.rpc === "function") return db;
         } catch (_) {}
         return null;
+      }
+
+      let agentDirectoryRows = [];
+      let agentDirectoryLoaded = false;
+      let agentPastePreviewRows = [];
+      let agentPasteInvalidRows = [];
+
+      function cleanAgentPasteCell(value) {
+        return String(value == null ? "" : value)
+          .replace(/\u00a0/g, " ")
+          .replace(/[ \t]+/g, " ")
+          .replace(/\s*\n\s*/g, " ")
+          .trim();
+      }
+
+      function normalizeAgentKey(value) {
+        return String(value || "")
+          .toUpperCase()
+          .replace(/\(\s*BMK\s*\)/g, "")
+          .replace(/[^A-Z0-9]/g, "");
+      }
+
+      function canonicalSpb(value) {
+        let name = cleanAgentPasteCell(value)
+          .replace(/^\s*#\s*/, "")
+          .replace(/^SPB(?:\s*&\s*HARGA\s*SAWIT)?\s*:?\s*/i, "")
+          .replace(/\(\s*RP[\s\S]*$/i, "")
+          .replace(/\bRP\s*[\d.,]+\s*\/?\s*KG\b/gi, "")
+          .replace(/[|;,]+$/g, "")
+          .trim();
+        const key = name.toUpperCase().replace(/\s+/g, " ");
+        const known = {
+          ARTHA: "Artha",
+          MEKAR: "Mekar",
+          MAHKOTA: "Mahkota",
+          "JOYS GRADE B": "Joys Grade B"
+        };
+        if (known[key]) return known[key];
+        if (!/[A-Z]/i.test(name) || /^[-—]$/.test(name)) return "";
+        return name.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+      }
+
+      function extractSpbsFromText(value, allowPlain) {
+        const text = String(value || "").replace(/\u00a0/g, " ");
+        const found = [];
+        const tagged = [...text.matchAll(/#\s*([^#|;,\n(]+?)(?=\s*\(|\s*(?:#|[|;,\n]|$))/gi)];
+        tagged.forEach((match) => {
+          const spb = canonicalSpb(match[1]);
+          if (spb) found.push(spb);
+        });
+        if (!found.length && allowPlain) {
+          text
+            .replace(/\(\s*RP[^)]*\)/gi, "")
+            .replace(/\bRP\s*[\d.,]+\s*\/?\s*KG\b/gi, "")
+            .replace(/\s+\/\s+(?!KG\b)/gi, ",")
+            .split(/[,;\n]+/)
+            .forEach((part) => {
+              const spb = canonicalSpb(part);
+              if (spb) found.push(spb);
+            });
+        }
+        return [...new Set(found)];
+      }
+
+      function extractFeeRecipient(value) {
+        const text = cleanAgentPasteCell(value).split("#")[0].trim();
+        if (!text || /^[-—]$/.test(text) || /^RP\b/i.test(text)) return null;
+        return text;
+      }
+
+      function normalizePasteHeader(value) {
+        return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      }
+
+      function findPasteHeaderIndex(headers, patterns) {
+        if (!headers) return -1;
+        return headers.findIndex((header) => patterns.some((pattern) => pattern.test(normalizePasteHeader(header))));
+      }
+
+      function parseAgentPasteRow(rawCells, headers, sourceLine, kpCode) {
+        const cells = rawCells.map(cleanAgentPasteCell);
+        if (!cells.some(Boolean)) return null;
+        if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) return null;
+
+        const normalizedRow = cells.join(" ").toUpperCase();
+        if (/NAMA\s*AGEN/.test(normalizedRow) && /(?:NO\s*HP|SPB)/.test(normalizedRow)) return null;
+
+        const headerAgent = findPasteHeaderIndex(headers, [/^NAMAAGEN$/, /^AGEN$/]);
+        const headerPhone = findPasteHeaderIndex(headers, [/^NOHP$/, /^NOMORHP$/, /^HP$/]);
+        const headerFee = findPasteHeaderIndex(headers, [/^PENERIMAFEE$/, /^NAMAAKUN$/, /^ALIAS$/]);
+        const headerSpb = findPasteHeaderIndex(headers, [/^SPB/, /JENISSPB/]);
+        const headerOffice = findPasteHeaderIndex(headers, [/^KANTORUNIT$/, /^KANTOR/, /^KP$/]);
+
+        let agentIndex = headerAgent >= 0 && cells[headerAgent] ? headerAgent : -1;
+        let phoneIndex = headerPhone >= 0 ? headerPhone : -1;
+        let feeIndex = headerFee >= 0 ? headerFee : -1;
+        let spbIndex = headerSpb >= 0 ? headerSpb : -1;
+        const officeIndex = cells.findIndex((cell) => /KANTOR\s+PENCAIRAN|^KP\.?\s+/i.test(cell));
+        const companyIndex = cells.findIndex((cell) => /^CV[\s.]/i.test(cell));
+        const startsWithNumber = /^\d+\.?$/.test(cells[0] || "");
+        const startIndex = startsWithNumber ? 1 : 0;
+
+        if (agentIndex < 0) {
+          if (officeIndex >= 0) {
+            agentIndex = companyIndex === officeIndex + 1 ? companyIndex + 1 : officeIndex + 1;
+          } else {
+            agentIndex = startIndex;
+          }
+        }
+        if (phoneIndex < 0) phoneIndex = agentIndex + 1;
+
+        const agentName = cleanAgentPasteCell(cells[agentIndex]);
+        if (!agentName || /^[-—]$/.test(agentName) || /^(KANTOR|CV\.?\b|NAMA\s*AGEN)/i.test(agentName)) {
+          return { valid: false, sourceLine, agent_name: agentName || "-", error: "Nama agen tidak terbaca" };
+        }
+
+        const phoneCell = cleanAgentPasteCell(cells[phoneIndex]);
+        const phoneDigits = phoneCell.replace(/\D/g, "");
+        const phone = phoneDigits.length >= 7 ? phoneCell : null;
+
+        let accountName = feeIndex >= 0 ? extractFeeRecipient(cells[feeIndex]) : null;
+        const tailStart = Math.max(phoneIndex + 1, 0);
+        const tailCells = cells.slice(tailStart);
+        if (!accountName) {
+          const plainFee = tailCells.find((cell, index) => {
+            if (!cell || /^[-—]$/.test(cell) || cell.includes("#") || /^RP\b/i.test(cell)) return false;
+            if (tailCells.length <= 2 && index === tailCells.length - 1) return false;
+            return true;
+          });
+          accountName = plainFee ? extractFeeRecipient(plainFee) : null;
+        }
+
+        let spbs = [];
+        tailCells.forEach((cell) => { spbs.push(...extractSpbsFromText(cell, false)); });
+        if (!spbs.length && spbIndex >= 0) spbs = extractSpbsFromText(cells[spbIndex], true);
+        if (!spbs.length) {
+          const plainSpbCells = tailCells.slice(tailCells.length > 1 ? 1 : 0);
+          plainSpbCells.forEach((cell) => { spbs.push(...extractSpbsFromText(cell, true)); });
+        }
+        spbs = [...new Set(spbs)];
+
+        const officeCell = officeIndex >= 0 ? cells[officeIndex] : (headerOffice >= 0 ? cells[headerOffice] : "");
+        const officeMatch = officeCell.match(/KANTOR\s+PENCAIRAN\s+PT\.?\s*[A-Z0-9-]+/i);
+        const companyCell = companyIndex >= 0 ? cells[companyIndex] : "";
+
+        if (!spbs.length) {
+          return { valid: false, sourceLine, agent_name: agentName, phone, account_name: accountName, error: "SPB tidak terbaca" };
+        }
+
+        return {
+          valid: true,
+          sourceLine,
+          kp_code: kpCode,
+          kp_name: officeMatch ? officeMatch[0].toUpperCase() : `KANTOR PENCAIRAN PT. ${kpCode}`,
+          company_name: companyCell || (kpCode === "BMK" ? "CV. DIAN PUTRA KENCANA" : null),
+          agent_name: agentName,
+          phone,
+          phone_normalized: phone ? phone.replace(/[^0-9/]/g, "") : null,
+          account_name: accountName,
+          spbs
+        };
+      }
+
+      function parseLabeledAgentBlocks(raw, kpCode) {
+        return String(raw || "").split(/\n\s*\n+/).map((block, index) => {
+          const name = block.match(/(?:NAMA\s*AGEN|AGEN)\s*:\s*([^\n]+)/i)?.[1];
+          if (!name) return null;
+          const phone = block.match(/(?:NO\.?\s*HP|NOMOR\s*HP|HP)\s*:\s*([^\n]+)/i)?.[1] || "-";
+          const fee = block.match(/PENERIMA\s*FEE\s*:\s*([^\n]+)/i)?.[1] || "-";
+          const spb = block.match(/SPB(?:\s*&\s*HARGA\s*SAWIT)?\s*:\s*([\s\S]+)/i)?.[1] || "";
+          return parseAgentPasteRow([name, phone, fee, spb], ["Nama Agen", "No HP", "Penerima Fee", "SPB"], index + 1, kpCode);
+        }).filter(Boolean);
+      }
+
+      function parseAgentPasteInput(raw, kpCode) {
+        const lines = String(raw || "").replace(/\r/g, "").split("\n");
+        const structured = [];
+        let headers = null;
+
+        lines.forEach((line, index) => {
+          if (!line.trim()) return;
+          let cells = null;
+          if (line.includes("\t")) {
+            cells = line.split("\t");
+          } else if ((line.match(/\|/g) || []).length >= 2) {
+            cells = line.split("|");
+            if (!cells[0].trim()) cells.shift();
+            if (cells.length && !cells[cells.length - 1].trim()) cells.pop();
+          } else if ((line.match(/;/g) || []).length >= 3) {
+            cells = line.split(";");
+          }
+          if (!cells) return;
+
+          const joined = cells.join(" ").toUpperCase();
+          if (/NAMA\s*AGEN/.test(joined) && /(?:NO\s*HP|SPB)/.test(joined)) {
+            headers = cells.map(cleanAgentPasteCell);
+            return;
+          }
+          const parsed = parseAgentPasteRow(cells, headers, index + 1, kpCode);
+          if (parsed) structured.push(parsed);
+        });
+
+        return structured.length ? structured : parseLabeledAgentBlocks(raw, kpCode);
+      }
+
+      function invalidateAgentPastePreview() {
+        if (!agentPastePreviewRows.length && !agentPasteInvalidRows.length) return;
+        agentPastePreviewRows = [];
+        agentPasteInvalidRows = [];
+        const save = document.getElementById("agentPasteSave");
+        const preview = document.getElementById("agentPastePreview");
+        const status = document.getElementById("agentPasteStatus");
+        if (save) save.disabled = true;
+        if (preview) preview.innerHTML = "";
+        if (status) {
+          status.className = "master-agent-paste-status";
+          status.textContent = "Data berubah. Klik Baca & Pratinjau kembali sebelum menyimpan.";
+        }
+      }
+
+      function renderAgentPastePreview() {
+        const preview = document.getElementById("agentPastePreview");
+        if (!preview) return;
+        const rows = [...agentPastePreviewRows, ...agentPasteInvalidRows];
+        if (!rows.length) {
+          preview.innerHTML = "";
+          return;
+        }
+        preview.innerHTML = `
+          <table>
+            <thead><tr><th>No</th><th>Nama Agen</th><th>No HP</th><th>Penerima Fee</th><th>SPB</th><th>Status</th></tr></thead>
+            <tbody>${rows.map((row, index) => {
+              const statusClass = row.valid ? (row.import_status === "Baru" ? "is-new" : "is-update") : "is-invalid";
+              const statusText = row.valid ? row.import_status : row.error;
+              const spbs = row.valid ? row.spbs.map((spb) => `# ${escapeHtml(spb)}`).join("<br>") : "-";
+              return `<tr>
+                <td>${index + 1}</td>
+                <td><strong>${escapeHtml(row.agent_name || "-")}</strong></td>
+                <td>${escapeHtml(row.phone || "-")}</td>
+                <td>${escapeHtml(row.account_name || "-")}</td>
+                <td>${spbs}</td>
+                <td><span class="master-agent-import-badge ${statusClass}">${escapeHtml(statusText || "-")}</span></td>
+              </tr>`;
+            }).join("")}</tbody>
+          </table>`;
+      }
+
+      async function previewAgentPaste() {
+        const input = document.getElementById("agentPasteInput");
+        const status = document.getElementById("agentPasteStatus");
+        const save = document.getElementById("agentPasteSave");
+        const kpCode = document.getElementById("agentPasteKp")?.value || "BMK";
+        const raw = input?.value || "";
+        if (!raw.trim()) {
+          if (status) {
+            status.className = "master-agent-paste-status is-error";
+            status.textContent = "Tempel data agen terlebih dahulu.";
+          }
+          if (save) save.disabled = true;
+          return;
+        }
+
+        if (!agentDirectoryLoaded) await loadAgentDirectory();
+        const parsed = parseAgentPasteInput(raw, kpCode);
+        const existing = new Map(agentDirectoryRows
+          .filter((agent) => agent.kp_code === kpCode)
+          .map((agent) => [normalizeAgentKey(agent.agent_name), agent]));
+        const seen = new Set();
+        agentPastePreviewRows = [];
+        agentPasteInvalidRows = [];
+
+        parsed.forEach((row) => {
+          if (!row.valid) {
+            agentPasteInvalidRows.push(row);
+            return;
+          }
+          const key = normalizeAgentKey(row.agent_name);
+          if (!key || seen.has(key)) {
+            agentPasteInvalidRows.push({ ...row, valid: false, error: "Duplikat dalam data tempelan" });
+            return;
+          }
+          seen.add(key);
+          agentPastePreviewRows.push({
+            ...row,
+            import_status: existing.has(key) ? "Perbarui" : "Baru"
+          });
+        });
+
+        const newCount = agentPastePreviewRows.filter((row) => row.import_status === "Baru").length;
+        const updateCount = agentPastePreviewRows.length - newCount;
+        if (status) {
+          status.className = `master-agent-paste-status ${agentPastePreviewRows.length ? "is-ready" : "is-error"}`;
+          status.textContent = agentPastePreviewRows.length
+            ? `Terbaca ${agentPastePreviewRows.length} agen: ${newCount} baru, ${updateCount} akan diperbarui${agentPasteInvalidRows.length ? `, ${agentPasteInvalidRows.length} baris dilewati` : ""}. Periksa pratinjau sebelum menyimpan.`
+            : "Tidak ada data agen yang valid. Gunakan kolom Nama Agen, No HP, Penerima Fee, dan SPB.";
+        }
+        if (save) save.disabled = agentPastePreviewRows.length === 0;
+        renderAgentPastePreview();
+      }
+
+      async function saveAgentPaste() {
+        const status = document.getElementById("agentPasteStatus");
+        const save = document.getElementById("agentPasteSave");
+        const kpCode = document.getElementById("agentPasteKp")?.value || "BMK";
+        if (!agentPastePreviewRows.length) {
+          await previewAgentPaste();
+          if (!agentPastePreviewRows.length) return;
+        }
+        const client = getDbClient();
+        if (!client) {
+          if (status) {
+            status.className = "master-agent-paste-status is-error";
+            status.textContent = "Koneksi database belum siap. Silakan login kembali.";
+          }
+          return;
+        }
+
+        if (save) {
+          save.disabled = true;
+          save.textContent = "Menyimpan...";
+        }
+        const rows = agentPastePreviewRows.map(({ import_status, valid, sourceLine, ...row }) => row);
+        const { data, error } = await client.rpc("import_master_agents", {
+          p_kp_code: kpCode,
+          p_rows: rows
+        });
+        if (save) save.textContent = "Simpan ke Database";
+        if (error) {
+          if (save) save.disabled = false;
+          if (status) {
+            status.className = "master-agent-paste-status is-error";
+            status.textContent = `Data belum tersimpan: ${error.message}`;
+          }
+          return;
+        }
+
+        agentDirectoryLoaded = false;
+        await loadAgentDirectory(true);
+        const result = data || {};
+        if (status) {
+          status.className = "master-agent-paste-status is-success";
+          status.textContent = `Berhasil disimpan: ${result.new_agents || 0} agen baru, ${result.updated_agents || 0} agen diperbarui, dan ${result.spb_added || 0} hubungan SPB ditambahkan. Harga tidak disimpan.`;
+        }
+      }
+
+      function clearAgentPaste() {
+        const input = document.getElementById("agentPasteInput");
+        const preview = document.getElementById("agentPastePreview");
+        const status = document.getElementById("agentPasteStatus");
+        const save = document.getElementById("agentPasteSave");
+        if (input) input.value = "";
+        if (preview) preview.innerHTML = "";
+        if (status) {
+          status.className = "master-agent-paste-status";
+          status.textContent = "Belum ada data yang dibaca.";
+        }
+        if (save) {
+          save.disabled = true;
+          save.textContent = "Simpan ke Database";
+        }
+        agentPastePreviewRows = [];
+        agentPasteInvalidRows = [];
+      }
+
+      function renderAgentDirectory() {
+        const table = document.getElementById("masterAgentTable");
+        const status = document.getElementById("masterAgentStatus");
+        if (!table || !status) return;
+        const search = String(document.getElementById("masterAgentSearch")?.value || "").trim().toLowerCase();
+        const selectedSpb = document.getElementById("masterAgentSpbFilter")?.value || "ALL";
+        const filtered = agentDirectoryRows.filter((agent) => {
+          const matchesSpb = selectedSpb === "ALL" || agent.spbs.includes(selectedSpb);
+          const haystack = [agent.agent_name, agent.account_name, agent.phone, agent.phone_normalized, agent.company_name, agent.kp_code, ...agent.spbs]
+            .filter(Boolean).join(" ").toLowerCase();
+          return matchesSpb && (!search || haystack.includes(search));
+        });
+
+        status.textContent = `Menampilkan ${filtered.length} dari ${agentDirectoryRows.length} agen aktif`;
+        if (!filtered.length) {
+          table.innerHTML = '<div class="master-agent-empty">Agen tidak ditemukan untuk pencarian atau SPB tersebut.</div>';
+          return;
+        }
+
+        table.innerHTML = `
+          <table>
+            <thead><tr><th>No</th><th>Kantor Unit</th><th>Nama Agen</th><th>No HP</th><th>Penerima Fee</th><th>SPB</th></tr></thead>
+            <tbody>${filtered.map((agent) => {
+              const phoneDigits = String(agent.phone_normalized || "").split("/")[0].replace(/\D/g, "");
+              const phone = agent.phone
+                ? `<a class="master-agent-phone" href="tel:${escapeHtml(phoneDigits)}">${escapeHtml(agent.phone)}</a>`
+                : '<span class="master-agent-phone missing">-</span>';
+              const spbs = agent.spbs.map((spb) => `<span class="master-agent-spb-chip"># ${escapeHtml(spb)}</span>`).join("");
+              return `<tr>
+                <td>${agent.source_no}.</td>
+                <td><span class="master-agent-unit">${escapeHtml(agent.kp_name || agent.kp_code || "-")}</span><span class="master-agent-company">${escapeHtml(agent.company_name || "-")}</span></td>
+                <td><span class="master-agent-name">${escapeHtml(agent.agent_name)}</span></td>
+                <td>${phone}</td>
+                <td>${escapeHtml(agent.account_name || "-")}</td>
+                <td><div class="master-agent-spbs">${spbs}</div></td>
+              </tr>`;
+            }).join("")}</tbody>
+          </table>`;
+      }
+
+      async function loadAgentDirectory(force) {
+        if (agentDirectoryLoaded && !force) {
+          renderAgentDirectory();
+          return;
+        }
+        const status = document.getElementById("masterAgentStatus");
+        if (status) status.textContent = "Memuat database agen BMK...";
+        const client = getDbClient();
+        if (!client) {
+          if (status) status.textContent = "Database agen akan dimuat setelah login.";
+          return;
+        }
+        const [agentResult, spbResult] = await Promise.all([
+          client.from("master_agents")
+            .select("id,source_no,kp_code,kp_name,company_name,agent_name,phone,phone_normalized,account_name,active")
+            .eq("active", true)
+            .order("kp_code", { ascending: true })
+            .order("source_no", { ascending: true }),
+          client.from("master_agent_spb")
+            .select("agent_id,spb_name,active")
+            .eq("active", true)
+        ]);
+        const error = agentResult.error || spbResult.error;
+        if (error) {
+          if (status) status.textContent = `Database agen belum dapat dimuat: ${error.message}`;
+          return;
+        }
+        const spbMap = (spbResult.data || []).reduce((map, row) => {
+          (map[row.agent_id] ||= []).push(row.spb_name);
+          return map;
+        }, {});
+        agentDirectoryRows = (agentResult.data || []).map((agent) => ({
+          ...agent,
+          spbs: (spbMap[agent.id] || []).sort((a, b) => a.localeCompare(b, "id"))
+        }));
+        agentDirectoryLoaded = true;
+
+        const filter = document.getElementById("masterAgentSpbFilter");
+        if (filter) {
+          const selected = filter.value;
+          const spbs = [...new Set(agentDirectoryRows.flatMap((agent) => agent.spbs))].sort((a, b) => a.localeCompare(b, "id"));
+          filter.innerHTML = '<option value="ALL">Semua SPB</option>' + spbs.map((spb) => `<option value="${escapeHtml(spb)}">${escapeHtml(spb)}</option>`).join("");
+          if ([...filter.options].some((option) => option.value === selected)) filter.value = selected;
+        }
+        const total = agentDirectoryRows.length;
+        const withPhone = agentDirectoryRows.filter((agent) => agent.phone).length;
+        const spbCount = new Set(agentDirectoryRows.flatMap((agent) => agent.spbs)).size;
+        const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+        setText("masterAgentCount", total);
+        setText("masterAgentPhoneCount", withPhone);
+        setText("masterAgentMissingPhoneCount", total - withPhone);
+        setText("masterAgentSpbCount", spbCount);
+        renderAgentDirectory();
+      }
+
+      function installAgentDirectoryHooks() {
+        const original = window.loadMaster;
+        if (typeof original === "function" && !original.__tbsAgentDirectoryHook) {
+          const hooked = async function (...args) {
+            const result = await original.apply(this, args);
+            await loadAgentDirectory();
+            return result;
+          };
+          hooked.__tbsAgentDirectoryHook = true;
+          window.loadMaster = hooked;
+        }
+        const masterNav = document.querySelector('[data-page="master"]');
+        if (masterNav && !masterNav.dataset.tbsAgentHook) {
+          masterNav.dataset.tbsAgentHook = "true";
+          masterNav.addEventListener("click", () => window.setTimeout(() => loadAgentDirectory(), 120));
+        }
+        const pasteInput = document.getElementById("agentPasteInput");
+        if (pasteInput && !pasteInput.dataset.tbsPasteHook) {
+          pasteInput.dataset.tbsPasteHook = "true";
+          pasteInput.addEventListener("input", invalidateAgentPastePreview);
+        }
       }
     
       function groupMissing(rows) {
@@ -1314,7 +1900,9 @@
         ensurePanels();
         installParserGuards();
         installRefreshHooks();
+        installAgentDirectoryHooks();
         refreshCompleteness();
+        window.setTimeout(() => loadAgentDirectory(), 700);
         window.setInterval(() => refreshCompleteness(), 60000);
       }
     
@@ -1323,6 +1911,11 @@
         sanitizeParsedResult,
         refreshCompleteness
       };
+      window.renderAgentDirectory = renderAgentDirectory;
+      window.loadAgentDirectory = loadAgentDirectory;
+      window.previewAgentPaste = previewAgentPaste;
+      window.saveAgentPaste = saveAgentPaste;
+      window.clearAgentPaste = clearAgentPaste;
     
       if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", bootGuard, { once: true });
