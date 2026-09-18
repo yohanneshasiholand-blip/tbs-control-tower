@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#10140f">
   <title>TBS Supply Control Tower</title>
-  <link rel="stylesheet" href="style.css?v=4.14.0"><link rel="stylesheet" href="patch-v4.14.2.css?v=4.14.2">
+  <link rel="stylesheet" href="style.css?v=4.10.4">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -61,9 +61,6 @@
             <button class="classic-child" id="sideYearly" onclick="openMonitoringSub('yearly')">
               <span class="classic-list-icon">☷</span><b>Tahunan</b>
             </button>
-            <button class="classic-child classic-child-analysis" id="sideAnalysis" onclick="openMonitoringSub('analysis')">
-              <span class="classic-list-icon">◈</span><b>Analisa Produksi</b>
-            </button>
           </div>
         </div>
 
@@ -109,8 +106,7 @@
         </div>
       </div>
       <button class="logout-btn" onclick="logout()">Log Out</button>
-          <div id="buildVersionBadge" class="build-version-badge">BUILD v4.14.1</div>
-</aside>
+    </aside>
 
     <main class="main">
       <header class="hero glass">
@@ -282,7 +278,7 @@
 
         <!-- KP BUSINESS SUMMARY: follows Harian / Bulanan / Tahunan filter -->
         <section class="monitor-business-summary">
-          <div id="monitorBusinessKpiGrid" class="monitor-business-kpi-grid">
+          <div class="monitor-business-kpi-grid">
             <article class="monitor-kpi glass monitor-business-tonnage">
               <small>TOTAL TONASE PERIODE</small>
               <strong id="monitorPeriodTonnage">0 kg</strong>
@@ -306,25 +302,23 @@
           </div>
 
           <article class="panel glass monitor-kp-business-table-panel">
-            <div id="monitorBusinessSummaryHead" class="panel-head row-space">
+            <div class="panel-head row-space">
               <h3 id="monitorKpPeriodSummaryTitle">RINGKASAN TONASE & PENGELUARAN SELURUH KP</h3>
               <span id="monitorKpPeriodSummaryNote" class="monitor-rule-note">-</span>
             </div>
             <div id="monitorKpPeriodSummaryTable" class="table-wrap monitor-kp-business-table"></div>
 
-            <div id="monitorProductionAnalysisPanel" class="monitor-production-analysis hidden">
             <div class="monitor-range-divider"></div>
 
-            <div class="monitor-range-head production-analysis-head">
+            <div class="monitor-range-head">
               <div>
-                <span class="subpanel-kicker">ANALISA PRODUKSI</span>
-                <h3>Evaluasi Produksi untuk Meeting</h3>
-                <p>Pilih periode evaluasi. Sistem menghitung produksi final, benchmark KP, produktivitas trip, HOLD, biaya, ranking, tren operasional, dan insight meeting secara otomatis.</p>
+                <span class="subpanel-kicker">DETAIL RANGE TANGGAL</span>
+                <h3>Total Tonase & Pengeluaran berdasarkan Tanggal Mulai–Tanggal Akhir</h3>
+                <p>Range audit memisahkan Closing final dengan snapshot LIVE hari ini. Total s/d saat ini = Closing final + LIVE terbaru hanya jika hari ini belum closing.</p>
               </div>
-              <span class="production-analysis-badge">MEETING INSIGHT</span>
             </div>
 
-            <div class="monitor-range-filters production-analysis-filters">
+            <div class="monitor-range-filters">
               <label>
                 <span>Tanggal Mulai</span>
                 <input id="monitorRangeStart" type="date">
@@ -333,113 +327,52 @@
                 <span>Tanggal Akhir</span>
                 <input id="monitorRangeEnd" type="date">
               </label>
-              <button class="btn btn-primary production-analysis-btn" onclick="loadMonitorRangeDetail()">📊 Analisa Produksi</button>
-              <button class="btn btn-secondary" onclick="syncMonitorRangeFromActivePeriod()">Gunakan Bulan Aktif</button>
+              <button class="btn btn-primary" onclick="loadMonitorRangeDetail()">Tampilkan Range</button>
+              <button class="btn btn-secondary" onclick="syncMonitorRangeFromActivePeriod()">Gunakan Periode Aktif</button>
             </div>
 
-            <div class="production-analysis-help">
-              KPI utama memakai sumber final terbaik yang tersedia. <b>Closing harian</b> dipakai untuk grafik tren operasional,
-              sedangkan <b>Paste Detail/Excel Final</b> menjadi acuan total periode bila cakupannya valid.
-            </div>
-            <div id="monitorRangeStatus" class="monitor-range-status">Pilih periode, lalu klik Analisa Produksi.</div>
+            <div id="monitorRangeStatus" class="monitor-range-status">Pilih range tanggal untuk melihat total detail.</div>
 
-            <div class="monitor-range-kpi-grid production-kpi-grid">
-              <article class="monitor-kpi glass monitor-business-tonnage production-primary-kpi">
-                <small>TOTAL PRODUKSI PERIODE</small>
+            <div class="monitor-range-kpi-grid monitor-range-audit-grid">
+              <article class="monitor-kpi glass monitor-business-tonnage monitor-running-total">
+                <small>TOTAL S/D SAAT INI</small>
                 <strong id="monitorRangeTotalTonnage">0 kg</strong>
-                <span id="monitorRangeTonnageSub">Sumber final terbaik sesuai periode</span>
+                <span id="monitorRangeTonnageSub">Closing final + LIVE jika hari ini belum closing</span>
               </article>
-
-              <article class="monitor-kpi glass monitor-avg-kp-kpi">
-                <small>RATA-RATA PRODUKSI / KP</small>
+              <article class="monitor-kpi glass">
+                <small>CLOSING FINAL RANGE</small>
                 <strong id="monitorRangeClosedTonnage">0 kg</strong>
-                <span id="monitorRangeClosedSub">Benchmark KP aktif pada periode</span>
+                <span id="monitorRangeClosedSub">Akumulasi data final</span>
               </article>
-
-              <article class="monitor-kpi glass">
-                <small>TOTAL TRIP</small>
-                <strong id="monitorRangeTotalTrips">0</strong>
-                <span id="monitorRangeTripSub">1 transaksi/trip = 1 mobil masuk</span>
+              <article class="monitor-kpi glass monitor-live-kpi">
+                <small>LIVE HARI INI</small>
+                <strong id="monitorRangeLiveTonnage">0 kg</strong>
+                <span id="monitorRangeLiveSub">Snapshot terbaru jika belum Closing</span>
               </article>
-
-              <article class="monitor-kpi glass production-efficiency-kpi">
-                <small>RATA-RATA KG / TRIP</small>
-                <strong id="prodAvgTrip">0 kg</strong>
-                <span id="prodAvgTripSub">Produktivitas angkutan periode</span>
-              </article>
-
-              <article class="monitor-kpi glass production-top-kpi">
-                <small>KP PRODUKSI TERTINGGI</small>
-                <strong id="prodTopKp">—</strong>
-                <span id="prodTopKpSub">Belum ada data</span>
-              </article>
-
-              <article class="monitor-kpi glass production-bottom-kpi">
-                <small>KP PERLU PERHATIAN</small>
-                <strong id="prodBottomKp">—</strong>
-                <span id="prodBottomKpSub">Terendah dibanding KP aktif</span>
-              </article>
-
-              <article class="monitor-kpi glass">
-                <small>HOLD DALAM DATA FINAL</small>
-                <strong id="monitorRangeCoverage">0 kg</strong>
-                <span id="monitorRangeCoverageSub">Tetap termasuk produksi final</span>
-              </article>
-
               <article class="monitor-kpi glass monitor-business-expense">
-                <small>PENGELUARAN PERIODE</small>
+                <small>TOTAL PENGELUARAN RANGE</small>
                 <strong id="monitorRangeTotalExpense">Rp0</strong>
-                <span id="monitorRangeExpenseSub">Termasuk biaya per kg untuk evaluasi</span>
+                <span id="monitorRangeExpenseSub">Transaksi biaya pada range</span>
+              </article>
+              <article class="monitor-kpi glass">
+                <small>TOTAL TRIP S/D SAAT INI</small>
+                <strong id="monitorRangeTotalTrips">0</strong>
+                <span id="monitorRangeTripSub">Closing + LIVE tanpa double count</span>
+              </article>
+              <article class="monitor-kpi glass">
+                <small>COVERAGE FINAL</small>
+                <strong id="monitorRangeCoverage">0 / 0</strong>
+                <span id="monitorRangeCoverageSub">Hari final tersedia</span>
               </article>
             </div>
 
-            <div class="production-analysis-grid">
-              <article class="production-analysis-card">
-                <div class="panel-head row-space">
-                  <h3>RANKING PRODUKSI KP</h3>
-                  <span class="monitor-rule-note">Final tonase • benchmark periode</span>
-                </div>
-                <div id="prodRankingChart" class="chart production-analysis-chart"></div>
-              </article>
-
-              <article class="production-analysis-card">
-                <div class="panel-head row-space">
-                  <h3>PRODUKTIVITAS KG / TRIP</h3>
-                  <span class="monitor-rule-note">Tonase ÷ trip</span>
-                </div>
-                <div id="prodProductivityChart" class="chart production-analysis-chart"></div>
-              </article>
+            <div class="panel-head row-space monitor-range-detail-head">
+              <h3 id="monitorRangeDetailTitle">DETAIL TOTAL PER KP — RANGE TANGGAL</h3>
+              <span class="monitor-rule-note">Prioritas sumber: Audit Resmi → Closing Excel → Closing WhatsApp → Excel Bulanan (derived)</span>
             </div>
-
-            <article class="production-analysis-card production-trend-card">
-              <div class="panel-head row-space">
-                <h3>TREN PRODUKSI OPERASIONAL HARIAN</h3>
-                <span class="monitor-rule-note">Berdasarkan Closing harian • bukan Tanggal Bayar</span>
-              </div>
-              <div id="prodTrendChart" class="chart production-trend-chart"></div>
-            </article>
-
-            <article class="production-insight-card">
-              <div class="production-insight-head">
-                <div>
-                  <span class="subpanel-kicker">EXECUTIVE MEETING INSIGHT</span>
-                  <h3>Ringkasan Evaluasi Otomatis</h3>
-                </div>
-                <span id="prodInsightBadge" class="production-insight-badge">MENUNGGU ANALISA</span>
-              </div>
-              <div id="prodExecutiveInsight" class="production-insight-body">
-                Pilih periode untuk menghasilkan poin evaluasi meeting.
-              </div>
-            </article>
-
-            <div class="panel-head row-space monitor-range-detail-head production-ranking-head">
-              <h3 id="monitorRangeDetailTitle">RANKING & EVALUASI KP</h3>
-              <span class="monitor-rule-note">Status benchmark: &gt;110% rata-rata = di atas • 90–110% = normal • &lt;90% = perlu perhatian</span>
+            <div id="monitorRangeDetailTable" class="table-wrap monitor-range-detail-table">
+              <div class="master-empty">Belum ada range tanggal dipilih.</div>
             </div>
-            <div id="monitorRangeDetailTable" class="table-wrap monitor-range-detail-table production-analysis-table">
-              <div class="master-empty">Belum ada analisa produksi.</div>
-            </div>
-            </div><!-- /monitorProductionAnalysisPanel -->
           </article>
         </section>
 
@@ -523,11 +456,11 @@
               <div class="daily-upload-meta">
                 <label>
                   <span>Tanggal Data</span>
-                  <input id="dailyExcelDate" type="date" onchange="invalidateDailyPastePreview()">
+                  <input id="dailyExcelDate" type="date">
                 </label>
                 <label>
                   <span>Jam Data</span>
-                  <select id="dailyExcelTime" onchange="invalidateDailyPastePreview()">
+                  <select id="dailyExcelTime">
                     <option value="00:00:00" selected>00.00 — Closing / Total Harian</option>
                     <option value="10:00:00">10.00 — Snapshot</option>
                     <option value="12:00:00">12.00 — Snapshot</option>
@@ -546,64 +479,6 @@
             </div>
             <pre id="dailyExcelPreview" class="preview compact-preview">Belum ada file harian dipilih.</pre>
           </article>
-
-          <details class="monitor-input-details daily-excel-paste-details" open>
-            <summary>Paste dari Excel — Tanpa Upload File</summary>
-            <div class="daily-excel-paste-shell">
-              <div class="daily-excel-paste-info">
-                <div>
-                  <h3>Paste Data Tonase dari Excel</h3>
-                  <p>
-                    Blok tabel di Excel → <b>Ctrl+C</b> → paste di bawah. Sistem membaca kolom
-                    <b>KP, Supplier/SPB, Tonase, Trip</b> dan <b>Tanggal</b> jika tersedia.
-                    Tanggal/Jam Data memakai kontrol pada kotak Upload Data Tonase Harian di atas.
-                  </p>
-                </div>
-                <span class="daily-excel-paste-badge">CTRL+C → CTRL+V</span>
-              </div>
-
-              <div class="daily-paste-defaults">
-                <label>
-                  <span>KP Default <em>(jika kolom KP tidak ada)</em></span>
-                  <select id="dailyPasteKp" onchange="syncDailyPasteSuppliers(); invalidateDailyPastePreview()">
-                    <option value="">Dari tabel / pilih KP default</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Supplier / SPB Default <em>(jika kolom supplier tidak ada)</em></span>
-                  <select id="dailyPasteSupplier" onchange="invalidateDailyPastePreview()">
-                    <option value="">Dari tabel / pilih Supplier</option>
-                  </select>
-                </label>
-              </div>
-
-              <textarea id="dailyPasteText"
-                class="daily-excel-paste-textarea"
-                oninput="invalidateDailyPastePreview()"
-                placeholder="Contoh tabel Excel:
-
-KP	Supplier	Tonase	Trip
-BMK	Artha	560633	36
-BMK	Mekar	212774	21
-
-Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
-
-              <div class="daily-excel-paste-actions">
-                <button class="btn btn-primary" onclick="previewDailyExcelPaste()">Preview Paste Excel</button>
-                <button id="dailyPasteSaveBtn" class="btn btn-secondary" onclick="saveDailyExcelPaste()" disabled>
-                  Preview dahulu untuk menyimpan
-                </button>
-              </div>
-
-              <div class="daily-excel-paste-rule">
-                <b>00.00</b> = Closing / Total Harian Final.
-                <b>10.00 / 12.00 / 15.00 / 17.00</b> = Snapshot.
-                Jika tanggal+jam yang sama sudah ada, sistem memperbarui data tersebut agar tidak double.
-              </div>
-
-              <pre id="dailyPastePreview" class="preview compact-preview">Belum ada data Excel yang dipaste.</pre>
-            </div>
-          </details>
 
           <details class="monitor-input-details" open>
             <summary>Paste Tonase Harian dari WhatsApp</summary>
@@ -671,7 +546,7 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
               <div class="monthly-final-controls">
                 <div class="monthly-final-priority">
                   <strong>ATURAN FINAL</strong>
-                  <span>Excel = final per tanggal • Paste Detail = final per periode • HOLD tetap dihitung • Tonase harus cocok • Selisih nilai pembelian = peringatan, bukan blokir</span>
+                  <span>Excel = final per tanggal • Paste Detail = final per periode • Tanggal bayar kosong = HOLD dan tetap dihitung • Selisih vs Closing = Koreksi Otomatis periode</span>
                 </div>
                 <div id="monthlyConflictSummary" class="monthly-conflict-summary">Belum ada hasil pemeriksaan.</div>
               </div>
@@ -696,48 +571,23 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
                 <div class="paste-detail-meta">
                   <label>
                     <span>KP</span>
-                    <select id="pasteDetailKp" onchange="syncPasteDetailSuppliers(); invalidatePasteDetailQuality()">
+                    <select id="pasteDetailKp" onchange="syncPasteDetailSuppliers(); setPasteDetailSaveState(false)">
                       <option value="">Deteksi otomatis / pilih KP</option>
                     </select>
                   </label>
                   <label>
                     <span>Supplier / SPB</span>
-                    <select id="pasteDetailSupplier" onchange="invalidatePasteDetailQuality()">
+                    <select id="pasteDetailSupplier" onchange="setPasteDetailSaveState(false)">
                       <option value="">Pilih Supplier / SPB</option>
                     </select>
                   </label>
                   <div class="paste-detail-meta-note">
-                    KP dan Supplier/SPB dibaca dari header report. Jika pilihan operator berbeda dari header, Simpan diblokir. Paste Detail dibandingkan dengan total Closing periode, bukan dipaksa cocok per Tanggal Bayar.
+                    KP boleh terdeteksi otomatis. Supplier wajib dipastikan. Paste Detail dibandingkan dengan total Closing periode, bukan dipaksa cocok per Tanggal Bayar.
                   </div>
                 </div>
 
-                <section id="pasteQualityGuard" class="paste-quality-guard">
-                  <div class="paste-quality-head">
-                    <div>
-                      <span class="subpanel-kicker">DATA QUALITY GUARD</span>
-                      <strong>Deteksi Salah KP/SPB, Double & Paste Tidak Lengkap</strong>
-                    </div>
-                    <span id="pasteQualityBadge" class="paste-quality-badge idle">BELUM DIPERIKSA</span>
-                  </div>
-                  <div id="pasteQualityList" class="paste-quality-list">
-                    Paste data lalu klik Preview Audit untuk menjalankan pemeriksaan.
-                  </div>
-                  <div id="pasteQualityOverrideWrap" class="paste-quality-override hidden">
-                    <label class="paste-quality-confirm">
-                      <input id="pasteQualityConfirm" type="checkbox" onchange="updatePasteQualityOverrideState()">
-                      <span>Saya sudah membandingkan ulang dengan report sumber dan memastikan data ini memang lengkap/benar.</span>
-                    </label>
-                    <label>
-                      <span>Alasan / catatan verifikasi</span>
-                      <input id="pasteQualityReason" type="text" maxlength="180"
-                        oninput="updatePasteQualityOverrideState()"
-                        placeholder="Contoh: supplier memang tidak ada transaksi setelah tanggal 20">
-                    </label>
-                  </div>
-                </section>
-
                 <textarea id="pasteDetailText"
-                  oninput="detectPasteDetailMetadata(); invalidatePasteDetailQuality()"
+                  oninput="detectPasteDetailMetadata(); setPasteDetailSaveState(false)"
                   placeholder="Copy tabel dari sistem internal lalu Paste di sini...&#10;&#10;Contoh kolom: No | No. Bukti | No. Polisi | Nama Petani/Agen | Tonase | Harga | Nilai Pembelian | Tanggal Bayar | Keterangan"></textarea>
 
                 <div class="paste-detail-actions paste-detail-action-stack">
@@ -1127,6 +977,242 @@ Atau tabel transaksi yang memiliki kolom No Polisi + Tonase."></textarea>
     </main>
   </div>
 
-  <script src="app.js?v=4.14.0"></script><script src="patch-v4.14.2.js?v=4.14.2"></script>
+  <script src="app.js?v=4.10.4"></script>
+  <script>
+    (function () {
+      "use strict";
+    
+      const DATE_WORDS = /(^|[^a-z])(senin|selasa|rabu|kamis|jumat|jum'at|sabtu|minggu|januari|februari|maret|april|mei|juni|juli|agustus|sept|september|oktober|november|desember)([^a-z]|$)/i;
+      const YEAR_TOKEN = /(^|[^0-9])(19\d{2}|20\d{2}|21\d{2})([^0-9]|$)/;
+      const EXPECTED_KP = 20;
+      const EXPECTED_SUPPLIERS = 38;
+    
+      function localIsoDate() {
+        try {
+          return new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Jakarta",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+          }).format(new Date());
+        } catch (_) {
+          const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
+          return now.toISOString().slice(0, 10);
+        }
+      }
+    
+      function isDateLikeSupplier(value) {
+        const name = String(value || "").trim();
+        return !name || DATE_WORDS.test(name) || YEAR_TOKEN.test(name);
+      }
+    
+      function sanitizeParsedResult(result) {
+        if (!result || !Array.isArray(result.rows)) return result;
+        const rejected = [];
+        const rows = result.rows.filter((row) => {
+          const invalid = isDateLikeSupplier(row && row.supplier_name);
+          if (invalid) rejected.push(row);
+          return !invalid;
+        });
+        const total = rows.reduce((sum, row) => sum + Number(row.tonnage_kg || 0), 0);
+        const trips = rows.reduce((sum, row) => sum + Number(row.trip_count || 0), 0);
+        return {
+          ...result,
+          rows,
+          total,
+          trips,
+          rejectedDateRows: rejected,
+          validTotal: result.declared == null || Number(result.declared) === total
+        };
+      }
+    
+      function patchParser(name) {
+        const original = window[name];
+        if (typeof original !== "function" || original.__tbsDateGuard) return;
+        const guarded = function (...args) {
+          return sanitizeParsedResult(original.apply(this, args));
+        };
+        guarded.__tbsDateGuard = true;
+        window[name] = guarded;
+      }
+    
+      function installParserGuards() {
+        ["parseTonnage", "parseTonnageText", "parseWhatsAppTonnage"].forEach(patchParser);
+      }
+    
+      function addStyles() {
+        if (document.getElementById("tbs-input-status-style")) return;
+        const style = document.createElement("style");
+        style.id = "tbs-input-status-style";
+        style.textContent = `
+          .tbs-input-status{margin:0 0 16px;padding:16px 18px;border:1px solid rgba(255,185,67,.34);border-radius:16px;background:linear-gradient(135deg,rgba(255,174,50,.10),rgba(10,24,36,.90));color:#eaf4fb}
+          .tbs-input-status.is-complete{border-color:rgba(70,211,146,.40);background:linear-gradient(135deg,rgba(39,184,120,.12),rgba(10,24,36,.90))}
+          .tbs-input-status.is-error{border-color:rgba(255,99,99,.45);background:linear-gradient(135deg,rgba(255,78,78,.12),rgba(10,24,36,.90))}
+          .tbs-input-status-head{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+          .tbs-input-status-copy{display:flex;gap:12px;align-items:flex-start;min-width:260px;flex:1}
+          .tbs-input-status-icon{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:rgba(255,185,67,.18);font-size:18px;flex:0 0 auto}
+          .tbs-input-status.is-complete .tbs-input-status-icon{background:rgba(70,211,146,.18)}
+          .tbs-input-status h3{font-size:15px;line-height:1.35;margin:0 0 3px;color:#f4f9fc}
+          .tbs-input-status p{font-size:13px;line-height:1.45;margin:0;color:#9fb6c8}
+          .tbs-input-status-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+          .tbs-input-status input{min-height:38px;padding:7px 10px;border-radius:9px;border:1px solid rgba(115,160,190,.36);background:#0b1a27;color:#eaf4fb;font:inherit}
+          .tbs-input-status button{min-height:38px;padding:7px 13px;border:0;border-radius:9px;background:#247fae;color:white;font-weight:700;cursor:pointer}
+          .tbs-input-status-list{margin:12px 0 0;padding-top:11px;border-top:1px solid rgba(130,168,194,.18);display:grid;gap:6px}
+          .tbs-input-status-list[hidden]{display:none}
+          .tbs-input-status-item{font-size:13px;line-height:1.45;color:#c9d9e5}
+          .tbs-input-status-item strong{color:#fff}
+          @media(max-width:700px){.tbs-input-status{padding:14px}.tbs-input-status-actions{width:100%}.tbs-input-status input{flex:1}.tbs-input-status button{flex:0 0 auto}}
+        `;
+        document.head.appendChild(style);
+      }
+    
+      function panelMarkup(scope) {
+        return `
+          <div class="tbs-input-status-head">
+            <div class="tbs-input-status-copy">
+              <div class="tbs-input-status-icon" data-tbs-icon>!</div>
+              <div>
+                <h3 data-tbs-title>Memeriksa kelengkapan closing...</h3>
+                <p data-tbs-summary>Target: ${EXPECTED_KP} KP dan ${EXPECTED_SUPPLIERS} supplier wajib.</p>
+              </div>
+            </div>
+            <div class="tbs-input-status-actions">
+              <input type="date" data-tbs-date aria-label="Tanggal pemeriksaan closing">
+              <button type="button" data-tbs-refresh>Periksa</button>
+            </div>
+          </div>
+          <div class="tbs-input-status-list" data-tbs-list hidden></div>
+          <input type="hidden" value="${scope}">
+        `;
+      }
+    
+      function createPanel(parent, before, scope) {
+        if (!parent || parent.querySelector(`[data-tbs-panel="${scope}"]`)) return;
+        const panel = document.createElement("section");
+        panel.className = "tbs-input-status glass";
+        panel.dataset.tbsPanel = scope;
+        panel.innerHTML = panelMarkup(scope);
+        const dateInput = panel.querySelector("[data-tbs-date]");
+        dateInput.value = localIsoDate();
+        dateInput.addEventListener("change", () => {
+          document.querySelectorAll("[data-tbs-date]").forEach((el) => { el.value = dateInput.value; });
+          refreshCompleteness(dateInput.value);
+        });
+        panel.querySelector("[data-tbs-refresh]").addEventListener("click", () => refreshCompleteness(dateInput.value));
+        parent.insertBefore(panel, before || parent.firstChild);
+      }
+    
+      function ensurePanels() {
+        addStyles();
+        const dashboard = document.getElementById("page-dashboard");
+        const dashboardKpi = dashboard && dashboard.querySelector(".kpi-row");
+        createPanel(dashboard, dashboardKpi, "dashboard");
+    
+        const monitoring = document.getElementById("page-monitoring");
+        const monitorHead = monitoring && monitoring.querySelector(".page-head");
+        createPanel(monitoring, monitorHead ? monitorHead.nextSibling : null, "monitoring");
+      }
+    
+      function getDbClient() {
+        try {
+          if (typeof db !== "undefined" && db && typeof db.rpc === "function") return db;
+        } catch (_) {}
+        return null;
+      }
+    
+      function groupMissing(rows) {
+        return rows.reduce((groups, row) => {
+          if (row.is_input) return groups;
+          (groups[row.kp_code] ||= []).push(row.supplier_name);
+          return groups;
+        }, {});
+      }
+    
+      function renderStatus(rows, date) {
+        const missing = rows.filter((row) => !row.is_input);
+        const inputCount = rows.length - missing.length;
+        const missingGroups = groupMissing(rows);
+        const missingKp = Object.keys(missingGroups).length;
+        document.querySelectorAll("[data-tbs-panel]").forEach((panel) => {
+          const title = panel.querySelector("[data-tbs-title]");
+          const summary = panel.querySelector("[data-tbs-summary]");
+          const icon = panel.querySelector("[data-tbs-icon]");
+          const list = panel.querySelector("[data-tbs-list]");
+          panel.classList.toggle("is-complete", missing.length === 0);
+          panel.classList.remove("is-error");
+          icon.textContent = missing.length === 0 ? "✓" : "!";
+          title.textContent = missing.length === 0
+            ? `Closing ${date} lengkap`
+            : `${missing.length} data belum diinput pada ${missingKp} KP`;
+          summary.textContent = `${inputCount}/${EXPECTED_SUPPLIERS} supplier • ${EXPECTED_KP} KP wajib`;
+          if (!missing.length) {
+            list.hidden = true;
+            list.innerHTML = "";
+            return;
+          }
+          list.hidden = false;
+          list.innerHTML = Object.entries(missingGroups)
+            .map(([kp, suppliers]) => `<div class="tbs-input-status-item"><strong>${kp}</strong>: ${suppliers.join(", ")}</div>`)
+            .join("");
+        });
+      }
+    
+      function renderError(message) {
+        document.querySelectorAll("[data-tbs-panel]").forEach((panel) => {
+          panel.classList.remove("is-complete");
+          panel.classList.add("is-error");
+          panel.querySelector("[data-tbs-icon]").textContent = "×";
+          panel.querySelector("[data-tbs-title]").textContent = "Status kelengkapan belum dapat dimuat";
+          panel.querySelector("[data-tbs-summary]").textContent = message || "Silakan login atau coba kembali.";
+          panel.querySelector("[data-tbs-list]").hidden = true;
+        });
+      }
+    
+      async function refreshCompleteness(date) {
+        ensurePanels();
+        const selectedDate = date || document.querySelector("[data-tbs-date]")?.value || localIsoDate();
+        document.querySelectorAll("[data-tbs-date]").forEach((el) => { el.value = selectedDate; });
+        const client = getDbClient();
+        if (!client) return renderError("Koneksi data belum siap.");
+        const { data, error } = await client.rpc("get_closing_input_status", { p_report_date: selectedDate });
+        if (error) return renderError(error.message);
+        renderStatus(Array.isArray(data) ? data : [], selectedDate);
+      }
+    
+      function installRefreshHooks() {
+        ["saveTonnage", "saveDailyExcel"].forEach((name) => {
+          const original = window[name];
+          if (typeof original !== "function" || original.__tbsCompletenessHook) return;
+          const hooked = async function (...args) {
+            const result = await original.apply(this, args);
+            await refreshCompleteness();
+            return result;
+          };
+          hooked.__tbsCompletenessHook = true;
+          window[name] = hooked;
+        });
+      }
+    
+      function bootGuard() {
+        ensurePanels();
+        installParserGuards();
+        installRefreshHooks();
+        refreshCompleteness();
+        window.setInterval(() => refreshCompleteness(), 60000);
+      }
+    
+      window.TBSInputGuard = {
+        isDateLikeSupplier,
+        sanitizeParsedResult,
+        refreshCompleteness
+      };
+    
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", bootGuard, { once: true });
+      } else {
+        bootGuard();
+      }
+    })();
+  </script>
 </body>
 </html>
