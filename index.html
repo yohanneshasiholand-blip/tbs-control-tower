@@ -1058,6 +1058,38 @@
         const name = String(value || "").trim();
         return !name || DATE_WORDS.test(name) || YEAR_TOKEN.test(name);
       }
+
+      const TBS_MONTH_PATTERN = "januari|februari|maret|april|mei|juni|juli|agustus|sept(?:ember)?|oktober|november|desember";
+      const TBS_DAY_PATTERN = "senin|selasa|rabu|kamis|jum(?:at|\\'at|ar)|sabtu|minggu";
+      const TBS_FULL_DATE_FRAGMENT = new RegExp(`\\b(?:${TBS_DAY_PATTERN})\\s*,?\\s*\\d{1,2}\\s+(?:${TBS_MONTH_PATTERN})\\s+(?:19|20|21)\\d{2}\\b`, "gi");
+      const TBS_DATE_FRAGMENT = new RegExp(`\\b\\d{1,2}\\s+(?:${TBS_MONTH_PATTERN})\\s+(?:19|20|21)\\d{2}\\b`, "gi");
+      const TBS_DATE_ONLY_LINE = new RegExp(`^\\s*(?:(?:${TBS_DAY_PATTERN})\\s*,?\\s*)?\\d{1,2}\\s+(?:${TBS_MONTH_PATTERN})(?:\\s+(?:19|20|21)\\d{2})?\\s*$`, "i");
+
+      function sanitizeTonnageInputText(value) {
+        if (typeof value !== "string") return { text: value, removed: [] };
+        const removed = [];
+        const lines = value.replace(/\r/g, "").split("\n");
+        const cleaned = lines.map((line) => {
+          const plain = line.replace(/[>*_`]/g, " ").replace(/\s+/g, " ").trim();
+          if (TBS_DATE_ONLY_LINE.test(plain)) {
+            removed.push(plain);
+            return "";
+          }
+          let next = line.replace(TBS_FULL_DATE_FRAGMENT, (match) => {
+            removed.push(match.trim());
+            return " ";
+          });
+          next = next.replace(TBS_DATE_FRAGMENT, (match) => {
+            removed.push(match.trim());
+            return " ";
+          });
+          return next.replace(/[ \t]{2,}/g, " ").trimEnd();
+        });
+        return {
+          text: cleaned.filter((line, index) => line.trim() || (index > 0 && cleaned[index - 1]?.trim())).join("\n").trim(),
+          removed
+        };
+      }
     
       function sanitizeParsedResult(result) {
         if (!result || !Array.isArray(result.rows)) return result;
@@ -1083,7 +1115,8 @@
         const original = window[name];
         if (typeof original !== "function" || original.__tbsDateGuard) return;
         const guarded = function (...args) {
-          return sanitizeParsedResult(original.apply(this, args));
+          const safeArgs = args.map((arg) => typeof arg === "string" ? sanitizeTonnageInputText(arg).text : arg);
+          return sanitizeParsedResult(original.apply(this, safeArgs));
         };
         guarded.__tbsDateGuard = true;
         window[name] = guarded;
@@ -1887,7 +1920,16 @@
           const original = window[name];
           if (typeof original !== "function" || original.__tbsCompletenessHook) return;
           const hooked = async function (...args) {
-            const result = await original.apply(this, args);
+            const safeArgs = args.map((arg) => typeof arg === "string" ? sanitizeTonnageInputText(arg).text : arg);
+            if (name === "saveTonnage") {
+              ["tonnageText", "tonnageInput", "whatsappTonnage"].forEach((id) => {
+                const field = document.getElementById(id);
+                if (!field || typeof field.value !== "string") return;
+                const sanitized = sanitizeTonnageInputText(field.value);
+                if (sanitized.removed.length) field.value = sanitized.text;
+              });
+            }
+            const result = await original.apply(this, safeArgs);
             await refreshCompleteness();
             return result;
           };
