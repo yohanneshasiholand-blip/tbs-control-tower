@@ -1125,6 +1125,32 @@
       function installParserGuards() {
         ["parseTonnage", "parseTonnageText", "parseWhatsAppTonnage"].forEach(patchParser);
       }
+
+      let tonnageClickGuardInstalled = false;
+
+      function sanitizeTonnageFieldBeforeSave() {
+        const field = document.getElementById("tonnageText");
+        if (!field || typeof field.value !== "string") return [];
+        const sanitized = sanitizeTonnageInputText(field.value);
+        if (!sanitized.removed.length) return [];
+        field.value = sanitized.text;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+        return sanitized.removed;
+      }
+
+      function installTonnageClickGuard() {
+        if (tonnageClickGuardInstalled) return;
+        tonnageClickGuardInstalled = true;
+        document.addEventListener("click", (event) => {
+          const button = event.target && typeof event.target.closest === "function"
+            ? event.target.closest("#tonnageSaveBtn")
+            : null;
+          if (!button) return;
+          sanitizeTonnageFieldBeforeSave();
+          window.setTimeout(() => refreshCompleteness(), 1200);
+        }, true);
+      }
     
       function addStyles() {
         if (document.getElementById("tbs-input-status-style")) return;
@@ -1942,14 +1968,22 @@
         ensurePanels();
         installParserGuards();
         installRefreshHooks();
+        installTonnageClickGuard();
         installAgentDirectoryHooks();
         refreshCompleteness();
         window.setTimeout(() => loadAgentDirectory(), 700);
+        [250, 1000, 3000].forEach((delay) => window.setTimeout(() => {
+          installParserGuards();
+          installRefreshHooks();
+          installTonnageClickGuard();
+        }, delay));
         window.setInterval(() => refreshCompleteness(), 60000);
       }
     
       window.TBSInputGuard = {
         isDateLikeSupplier,
+        sanitizeTonnageInputText,
+        sanitizeTonnageFieldBeforeSave,
         sanitizeParsedResult,
         refreshCompleteness
       };
