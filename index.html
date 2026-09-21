@@ -513,7 +513,7 @@
                   </small>
                 </div>
                 <div class="actions">
-                  <button class="btn btn-primary" onclick="previewTonnage()">Preview</button>
+                  <button id="tonnagePreviewBtn" class="btn btn-primary" onclick="previewTonnage()">Preview</button>
                   <button id="tonnageSaveBtn" class="btn btn-secondary" onclick="saveTonnage()">Simpan Snapshot</button>
                 </div>
                 <pre id="tonnagePreview" class="preview"></pre>
@@ -985,13 +985,13 @@
           <div class="master-agent-import-grid">
             <div class="master-agent-paste-field">
               <label for="agentPasteInput">Data agen</label>
-              <textarea id="agentPasteInput" rows="9" placeholder="Contoh:\nNama Agen | No HP | Penerima Fee | SPB\nMISRAN | - | - | Mekar\nDEDI SUSANDI SINAGA | 081234567890 | DEDI | Mekar, Artha"></textarea>
-              <small>Sistem membaca Nama Agen, No HP, Penerima Fee, dan SPB. Teks harga seperti “Rp 4.150/Kg” otomatis dibuang.</small>
+              <textarea id="agentPasteInput" rows="9" placeholder="Contoh:\nKantor Unit | Nama Agen | No HP | Penerima Fee | SPB\nKANTOR PENCAIRAN PT. BMK | MISRAN | - | - | Mekar\nKANTOR PENCAIRAN PT. FAA | ANTON | 082388854888 | - | Anggun, Citra"></textarea>
+              <small>Sistem membaca KP, Nama Agen, No HP, Penerima Fee, dan SPB. Teks harga seperti “Rp 4.150/Kg” otomatis dibuang. Untuk data tanpa kolom KP, pilih kantor tujuan secara manual.</small>
             </div>
             <div class="master-agent-import-actions">
               <label for="agentPasteKp">Kantor tujuan</label>
               <select id="agentPasteKp">
-                <option value="BMK">KP BMK — CV. Dian Putra Kencana</option>
+                <option value="AUTO">Otomatis dari data — semua KP</option>
               </select>
               <button type="button" class="btn btn-secondary" onclick="previewAgentPaste()">Baca &amp; Pratinjau</button>
               <button id="agentPasteSave" type="button" class="btn btn-primary" onclick="saveAgentPaste()" disabled>Simpan ke Database</button>
@@ -1005,8 +1005,8 @@
         <article id="masterAgentPanel" class="panel glass master-agent-panel">
           <div class="panel-head row-space master-agent-head">
             <div>
-              <h3>DATABASE AGEN BMK</h3>
-              <p>Daftar agen dan hubungan SPB • harga tidak ditampilkan</p>
+              <h3>DATABASE AGEN SEMUA KP</h3>
+              <p>Daftar agen dan hubungan SPB per kantor • harga tidak ditampilkan</p>
             </div>
             <span class="monitor-source-badge">Data Agen Aktif</span>
           </div>
@@ -1059,35 +1059,50 @@
         return !name || DATE_WORDS.test(name) || YEAR_TOKEN.test(name);
       }
 
-      const TBS_MONTH_PATTERN = "januari|februari|maret|april|mei|juni|juli|agustus|sept(?:ember)?|oktober|november|desember";
+      const TBS_MONTH_PATTERN = "jan(?:uari)?|feb(?:ruari)?|mar(?:et)?|apr(?:il)?|mei|jun(?:i)?|jul(?:i)?|agu(?:stus)?|ags|sep(?:t(?:ember)?)?|okt(?:ober)?|nov(?:ember)?|des(?:ember)?";
       const TBS_DAY_PATTERN = "senin|selasa|rabu|kamis|jum(?:at|\\'at|ar)|sabtu|minggu";
-      const TBS_FULL_DATE_FRAGMENT = new RegExp(`\\b(?:${TBS_DAY_PATTERN})\\s*,?\\s*\\d{1,2}\\s+(?:${TBS_MONTH_PATTERN})\\s+(?:19|20|21)\\d{2}\\b`, "gi");
-      const TBS_DATE_FRAGMENT = new RegExp(`\\b\\d{1,2}\\s+(?:${TBS_MONTH_PATTERN})\\s+(?:19|20|21)\\d{2}\\b`, "gi");
+      const TBS_DATE_WITH_YEAR = new RegExp(`\\b(\\d{1,2})\\s+(${TBS_MONTH_PATTERN})\\.?\\s+((?:19|20|21)\\d{2})\\b`, "gi");
       const TBS_DATE_ONLY_LINE = new RegExp(`^\\s*(?:(?:${TBS_DAY_PATTERN})\\s*,?\\s*)?\\d{1,2}\\s+(?:${TBS_MONTH_PATTERN})(?:\\s+(?:19|20|21)\\d{2})?\\s*$`, "i");
 
+      function fullIndonesianMonth(value) {
+        const key = String(value || "").toLowerCase().replace(/\./g, "");
+        if (key.startsWith("jan")) return "Januari";
+        if (key.startsWith("feb")) return "Februari";
+        if (key.startsWith("mar")) return "Maret";
+        if (key.startsWith("apr")) return "April";
+        if (key === "mei") return "Mei";
+        if (key.startsWith("jun")) return "Juni";
+        if (key.startsWith("jul")) return "Juli";
+        if (key.startsWith("agu") || key === "ags") return "Agustus";
+        if (key.startsWith("sep")) return "September";
+        if (key.startsWith("okt")) return "Oktober";
+        if (key.startsWith("nov")) return "November";
+        if (key.startsWith("des")) return "Desember";
+        return value;
+      }
+
       function sanitizeTonnageInputText(value) {
-        if (typeof value !== "string") return { text: value, removed: [] };
+        if (typeof value !== "string") return { text: value, removed: [], normalized: [] };
         const removed = [];
+        const normalized = [];
         const lines = value.replace(/\r/g, "").split("\n");
         const cleaned = lines.map((line) => {
-          const plain = line.replace(/[>*_`]/g, " ").replace(/\s+/g, " ").trim();
-          if (TBS_DATE_ONLY_LINE.test(plain)) {
+          let next = line.replace(TBS_DATE_WITH_YEAR, (match, day, month, year) => {
+            const replacement = `${day} ${fullIndonesianMonth(month)} ${year}`;
+            if (replacement.toLowerCase() !== match.toLowerCase()) normalized.push(match.trim());
+            return replacement;
+          });
+          const plain = next.replace(/[>*_`]/g, " ").replace(/\s+/g, " ").trim();
+          if (TBS_DATE_ONLY_LINE.test(plain) && !YEAR_TOKEN.test(plain)) {
             removed.push(plain);
             return "";
           }
-          let next = line.replace(TBS_FULL_DATE_FRAGMENT, (match) => {
-            removed.push(match.trim());
-            return " ";
-          });
-          next = next.replace(TBS_DATE_FRAGMENT, (match) => {
-            removed.push(match.trim());
-            return " ";
-          });
           return next.replace(/[ \t]{2,}/g, " ").trimEnd();
         });
         return {
           text: cleaned.filter((line, index) => line.trim() || (index > 0 && cleaned[index - 1]?.trim())).join("\n").trim(),
-          removed
+          removed,
+          normalized
         };
       }
     
@@ -1127,28 +1142,94 @@
       }
 
       let tonnageClickGuardInstalled = false;
+      let lastTonnagePreviewFingerprint = "";
+      let replayingTonnageSave = false;
+
+      function tonnagePreviewFingerprint() {
+        const text = document.getElementById("tonnageText")?.value || "";
+        const date = document.getElementById("tonnageInputDate")?.value || "";
+        const time = document.getElementById("tonnageSnapshotTime")?.value || "";
+        return `${date}|${time}|${text}`;
+      }
 
       function sanitizeTonnageFieldBeforeSave() {
         const field = document.getElementById("tonnageText");
-        if (!field || typeof field.value !== "string") return [];
+        if (!field || typeof field.value !== "string") {
+          return { changed: false, text: "", removed: [], normalized: [] };
+        }
         const sanitized = sanitizeTonnageInputText(field.value);
-        if (!sanitized.removed.length) return [];
+        if (sanitized.text === field.value) return { ...sanitized, changed: false };
         field.value = sanitized.text;
         field.dispatchEvent(new Event("input", { bubbles: true }));
         field.dispatchEvent(new Event("change", { bubbles: true }));
-        return sanitized.removed;
+        return { ...sanitized, changed: true };
       }
 
       function installTonnageClickGuard() {
         if (tonnageClickGuardInstalled) return;
         tonnageClickGuardInstalled = true;
         document.addEventListener("click", (event) => {
-          const button = event.target && typeof event.target.closest === "function"
-            ? event.target.closest("#tonnageSaveBtn")
-            : null;
-          if (!button) return;
-          sanitizeTonnageFieldBeforeSave();
-          window.setTimeout(() => refreshCompleteness(), 1200);
+          if (!event.target || typeof event.target.closest !== "function") return;
+          const previewButton = event.target.closest("#tonnagePreviewBtn");
+          const saveButton = event.target.closest("#tonnageSaveBtn");
+
+          if (previewButton) {
+            sanitizeTonnageFieldBeforeSave();
+            window.setTimeout(() => {
+              const previewText = document.getElementById("tonnagePreview")?.textContent || "";
+              if (previewText.trim() && !/^ERROR\s*:/i.test(previewText.trim())) {
+                lastTonnagePreviewFingerprint = tonnagePreviewFingerprint();
+              }
+            }, 120);
+            return;
+          }
+
+          if (!saveButton) return;
+          if (replayingTonnageSave) {
+            window.setTimeout(() => refreshCompleteness(), 1200);
+            return;
+          }
+
+          const sanitized = sanitizeTonnageFieldBeforeSave();
+          const currentFingerprint = tonnagePreviewFingerprint();
+          const previewIsCurrent = lastTonnagePreviewFingerprint === currentFingerprint;
+          if (!sanitized.changed && previewIsCurrent) {
+            window.setTimeout(() => refreshCompleteness(), 1200);
+            return;
+          }
+
+          event.preventDefault();
+          event.stopImmediatePropagation();
+
+          const button = document.getElementById("tonnagePreviewBtn");
+          const output = document.getElementById("tonnagePreview");
+          if (!button || !output) {
+            window.alert("Preview tidak dapat diperbarui otomatis. Klik Preview, lalu klik Simpan kembali.");
+            return;
+          }
+
+          const marker = "Memperbarui preview otomatis...";
+          output.textContent = marker;
+          button.click();
+
+          let attempt = 0;
+          const continueSave = () => {
+            const previewText = output.textContent || "";
+            if (previewText === marker && attempt < 20) {
+              attempt += 1;
+              window.setTimeout(continueSave, 100);
+              return;
+            }
+            if (!previewText.trim() || /^ERROR\s*:/i.test(previewText.trim())) {
+              window.alert("Preview belum valid. Periksa pesan pada kotak Preview sebelum menyimpan.");
+              return;
+            }
+            lastTonnagePreviewFingerprint = tonnagePreviewFingerprint();
+            replayingTonnageSave = true;
+            saveButton.click();
+            replayingTonnageSave = false;
+          };
+          window.setTimeout(continueSave, 100);
         }, true);
       }
     
@@ -1334,6 +1415,8 @@
 
       let agentDirectoryRows = [];
       let agentDirectoryLoaded = false;
+      let agentImportKpRows = [];
+      let agentImportKpLoaded = false;
       let agentPastePreviewRows = [];
       let agentPasteInvalidRows = [];
 
@@ -1350,6 +1433,62 @@
           .toUpperCase()
           .replace(/\(\s*BMK\s*\)/g, "")
           .replace(/[^A-Z0-9]/g, "");
+      }
+
+      function compactKpKey(value) {
+        return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      }
+
+      function detectAgentKpCode(value, selectedKp) {
+        const forced = String(selectedKp || "").toUpperCase();
+        if (forced && forced !== "AUTO") return forced;
+
+        const textKey = compactKpKey(value);
+        if (!textKey) return "";
+        const knownRows = agentImportKpRows.length ? agentImportKpRows : [
+          { code: "ASMJ-1" }, { code: "ASMJ-2" }, { code: "BMK" }, { code: "BSN" },
+          { code: "BSS" }, { code: "FAA" }, { code: "GSL" }, { code: "GSL-INUMAN" },
+          { code: "GSS" }, { code: "HKBS" }, { code: "KIP" }, { code: "KS2" },
+          { code: "KWP" }, { code: "LBP" }, { code: "LSHP" }, { code: "MAN" },
+          { code: "MSB-2" }, { code: "PSM" }, { code: "SISL" }, { code: "SKA" },
+          { code: "SSL" }, { code: "SSM" }, { code: "SSM-S" }, { code: "TKWL-1" },
+          { code: "TKWL-2" }
+        ];
+        const aliases = {
+          ASMJ2: "ASMJ-2",
+          ASMJ1: "ASMJ-1",
+          MSB: "MSB-2",
+          TKWL1: "TKWL-1",
+          TKWL2: "TKWL-2",
+          SSMS: "SSM-S"
+        };
+        const alias = Object.keys(aliases)
+          .sort((a, b) => b.length - a.length)
+          .find((key) => textKey.includes(key));
+        if (alias) return aliases[alias];
+
+        const exact = [...knownRows]
+          .sort((a, b) => compactKpKey(b.code).length - compactKpKey(a.code).length)
+          .find((row) => textKey.includes(compactKpKey(row.code)));
+        return exact?.code || "";
+      }
+
+      async function loadAgentImportKpOptions(force) {
+        if (agentImportKpLoaded && !force) return;
+        const select = document.getElementById("agentPasteKp");
+        const client = getDbClient();
+        if (!select || !client) return;
+        const selected = select.value || "AUTO";
+        const { data, error } = await client.from("master_kp")
+          .select("code,name,address,active")
+          .eq("active", true)
+          .order("code", { ascending: true });
+        if (error) return;
+        agentImportKpRows = data || [];
+        agentImportKpLoaded = true;
+        select.innerHTML = '<option value="AUTO">Otomatis dari data — semua KP</option>'
+          + agentImportKpRows.map((kp) => `<option value="${escapeHtml(kp.code)}">KP ${escapeHtml(kp.code)} — ${escapeHtml(kp.name || kp.code)}</option>`).join("");
+        if ([...select.options].some((option) => option.value === selected)) select.value = selected;
       }
 
       function canonicalSpb(value) {
@@ -1429,6 +1568,7 @@
         let spbIndex = headerSpb >= 0 ? headerSpb : -1;
         const officeIndex = cells.findIndex((cell) => /KANTOR\s+PENCAIRAN|^KP\.?\s+/i.test(cell));
         const companyIndex = cells.findIndex((cell) => /^CV[\s.]/i.test(cell));
+        const resolvedKp = detectAgentKpCode(cells.join(" "), kpCode);
         const startsWithNumber = /^\d+\.?$/.test(cells[0] || "");
         const startIndex = startsWithNumber ? 1 : 0;
 
@@ -1443,7 +1583,7 @@
 
         const agentName = cleanAgentPasteCell(cells[agentIndex]);
         if (!agentName || /^[-—]$/.test(agentName) || /^(KANTOR|CV\.?\b|NAMA\s*AGEN)/i.test(agentName)) {
-          return { valid: false, sourceLine, agent_name: agentName || "-", error: "Nama agen tidak terbaca" };
+          return { valid: false, sourceLine, kp_code: resolvedKp, agent_name: agentName || "-", error: "Nama agen tidak terbaca" };
         }
 
         const phoneCell = cleanAgentPasteCell(cells[phoneIndex]);
@@ -1475,16 +1615,20 @@
         const officeMatch = officeCell.match(/KANTOR\s+PENCAIRAN\s+PT\.?\s*[A-Z0-9-]+/i);
         const companyCell = companyIndex >= 0 ? cells[companyIndex] : "";
 
+        if (!resolvedKp) {
+          return { valid: false, sourceLine, agent_name: agentName, phone, account_name: accountName, error: "KP tidak terbaca" };
+        }
+
         if (!spbs.length) {
-          return { valid: false, sourceLine, agent_name: agentName, phone, account_name: accountName, error: "SPB tidak terbaca" };
+          return { valid: false, sourceLine, kp_code: resolvedKp, agent_name: agentName, phone, account_name: accountName, error: "SPB tidak terbaca" };
         }
 
         return {
           valid: true,
           sourceLine,
-          kp_code: kpCode,
-          kp_name: officeMatch ? officeMatch[0].toUpperCase() : `KANTOR PENCAIRAN PT. ${kpCode}`,
-          company_name: companyCell || (kpCode === "BMK" ? "CV. DIAN PUTRA KENCANA" : null),
+          kp_code: resolvedKp,
+          kp_name: officeMatch ? officeMatch[0].toUpperCase() : `KANTOR PENCAIRAN PT. ${resolvedKp}`,
+          company_name: companyCell || (resolvedKp === "BMK" ? "CV. DIAN PUTRA KENCANA" : null),
           agent_name: agentName,
           phone,
           phone_normalized: phone ? phone.replace(/[^0-9/]/g, "") : null,
@@ -1502,6 +1646,88 @@
           const spb = block.match(/SPB(?:\s*&\s*HARGA\s*SAWIT)?\s*:\s*([\s\S]+)/i)?.[1] || "";
           return parseAgentPasteRow([name, phone, fee, spb], ["Nama Agen", "No HP", "Penerima Fee", "SPB"], index + 1, kpCode);
         }).filter(Boolean);
+      }
+
+      function parseDatatableAgentBlocks(raw, kpCode) {
+        const lines = String(raw || "").replace(/\r/g, "").split("\n");
+        const starts = [];
+        lines.forEach((line, index) => {
+          const match = line.match(/^\s*(\d+)\.?\s+(KANTOR\s+PENCAIRAN\s+PT\.?\s+.+?)\s*$/i);
+          if (match) starts.push({ index, sourceNo: Number(match[1]), office: cleanAgentPasteCell(match[2]) });
+        });
+        if (!starts.length) return [];
+
+        const ignored = /^(?:SHOWING\b|SEARCH\b|PREVIOUS\b|NEXT\b|NO\b|KANTOR\s+UNIT\b|NAMA\s+AGEN\b|NO\s*HP\b|PENERIMA\s+FEE\b|SPB\s*&)/i;
+        return starts.map((start, blockIndex) => {
+          const end = starts[blockIndex + 1]?.index ?? lines.length;
+          const blockLines = lines.slice(start.index + 1, end).filter((line) => line.trim());
+          const blockText = [start.office, ...blockLines].join("\n");
+          const resolvedKp = detectAgentKpCode(start.office, kpCode);
+          const spbs = extractSpbsFromText(blockText, false);
+          let companyName = "";
+          let phone = null;
+          const candidates = [];
+
+          blockLines.forEach((originalLine) => {
+            if (/^\s*#/.test(originalLine) || ignored.test(originalLine.trim())) return;
+            let parts = originalLine.split(/\t+|\s{2,}/).map(cleanAgentPasteCell).filter(Boolean);
+
+            if (parts.length === 1 && /^CV\.?\s+/i.test(parts[0])) {
+              let merged = parts[0];
+              const phoneMatch = merged.match(/(?:\+?62|0)?\d(?:[\d\s/-]*\d){6,}\s*$/);
+              if (phoneMatch) {
+                phone = cleanAgentPasteCell(phoneMatch[0]);
+                merged = merged.slice(0, phoneMatch.index).trim();
+              }
+              const knownCompany = merged.match(/^CV\.?\s+DIAN\s+PUTRA\s+KENCANA\b/i)?.[0];
+              if (knownCompany) {
+                companyName = cleanAgentPasteCell(knownCompany);
+                const remainder = merged.slice(knownCompany.length).trim();
+                if (remainder && !/^[-—]$/.test(remainder)) candidates.push(remainder);
+                return;
+              }
+            }
+
+            parts.forEach((part) => {
+              if (/^CV[\s.]/i.test(part)) {
+                companyName = part;
+                return;
+              }
+              const digits = part.replace(/\D/g, "");
+              if (digits.length >= 7 && /^['+\d\s()/-]+$/.test(part)) {
+                phone = part.replace(/^'+/, "");
+                return;
+              }
+              if (!part || /^[-—]$/.test(part) || ignored.test(part) || /KANTOR\s+PENCAIRAN/i.test(part)) return;
+              candidates.push(part);
+            });
+          });
+
+          const agentName = cleanAgentPasteCell(candidates[0]);
+          const accountName = extractFeeRecipient(candidates[1]);
+          if (!resolvedKp) {
+            return { valid: false, sourceLine: start.index + 1, agent_name: agentName || "-", error: "KP tidak terbaca" };
+          }
+          if (!agentName || /^(?:CV\.?|KANTOR\b)/i.test(agentName)) {
+            return { valid: false, sourceLine: start.index + 1, kp_code: resolvedKp, agent_name: agentName || "-", error: "Nama agen tidak terbaca" };
+          }
+          if (!spbs.length) {
+            return { valid: false, sourceLine: start.index + 1, kp_code: resolvedKp, agent_name: agentName, phone, account_name: accountName, error: "SPB tidak terbaca" };
+          }
+          return {
+            valid: true,
+            sourceLine: start.index + 1,
+            source_no: start.sourceNo,
+            kp_code: resolvedKp,
+            kp_name: start.office.toUpperCase(),
+            company_name: companyName || (resolvedKp === "BMK" ? "CV. DIAN PUTRA KENCANA" : null),
+            agent_name: agentName,
+            phone,
+            phone_normalized: phone ? phone.replace(/[^0-9/]/g, "") : null,
+            account_name: accountName,
+            spbs: [...new Set(spbs)]
+          };
+        });
       }
 
       function parseAgentPasteInput(raw, kpCode) {
@@ -1532,7 +1758,17 @@
           if (parsed) structured.push(parsed);
         });
 
-        return structured.length ? structured : parseLabeledAgentBlocks(raw, kpCode);
+        const candidates = [
+          structured,
+          parseDatatableAgentBlocks(raw, kpCode),
+          parseLabeledAgentBlocks(raw, kpCode)
+        ].filter((rows) => rows.length);
+        if (!candidates.length) return [];
+        return candidates.sort((left, right) => {
+          const validDifference = right.filter((row) => row.valid).length - left.filter((row) => row.valid).length;
+          if (validDifference) return validDifference;
+          return left.filter((row) => !row.valid).length - right.filter((row) => !row.valid).length;
+        })[0];
       }
 
       function invalidateAgentPastePreview() {
@@ -1560,13 +1796,14 @@
         }
         preview.innerHTML = `
           <table>
-            <thead><tr><th>No</th><th>Nama Agen</th><th>No HP</th><th>Penerima Fee</th><th>SPB</th><th>Status</th></tr></thead>
+            <thead><tr><th>No</th><th>KP</th><th>Nama Agen</th><th>No HP</th><th>Penerima Fee</th><th>SPB</th><th>Status</th></tr></thead>
             <tbody>${rows.map((row, index) => {
               const statusClass = row.valid ? (row.import_status === "Baru" ? "is-new" : "is-update") : "is-invalid";
               const statusText = row.valid ? row.import_status : row.error;
               const spbs = row.valid ? row.spbs.map((spb) => `# ${escapeHtml(spb)}`).join("<br>") : "-";
               return `<tr>
                 <td>${index + 1}</td>
+                <td><strong>${escapeHtml(row.kp_code || "-")}</strong></td>
                 <td><strong>${escapeHtml(row.agent_name || "-")}</strong></td>
                 <td>${escapeHtml(row.phone || "-")}</td>
                 <td>${escapeHtml(row.account_name || "-")}</td>
@@ -1581,7 +1818,7 @@
         const input = document.getElementById("agentPasteInput");
         const status = document.getElementById("agentPasteStatus");
         const save = document.getElementById("agentPasteSave");
-        const kpCode = document.getElementById("agentPasteKp")?.value || "BMK";
+        const kpCode = document.getElementById("agentPasteKp")?.value || "AUTO";
         const raw = input?.value || "";
         if (!raw.trim()) {
           if (status) {
@@ -1592,11 +1829,13 @@
           return;
         }
 
+        await loadAgentImportKpOptions();
         if (!agentDirectoryLoaded) await loadAgentDirectory();
         const parsed = parseAgentPasteInput(raw, kpCode);
-        const existing = new Map(agentDirectoryRows
-          .filter((agent) => agent.kp_code === kpCode)
-          .map((agent) => [normalizeAgentKey(agent.agent_name), agent]));
+        const existing = new Map(agentDirectoryRows.map((agent) => [
+          `${agent.kp_code}|${normalizeAgentKey(agent.agent_name)}`,
+          agent
+        ]));
         const seen = new Set();
         agentPastePreviewRows = [];
         agentPasteInvalidRows = [];
@@ -1606,7 +1845,7 @@
             agentPasteInvalidRows.push(row);
             return;
           }
-          const key = normalizeAgentKey(row.agent_name);
+          const key = `${row.kp_code}|${normalizeAgentKey(row.agent_name)}`;
           if (!key || seen.has(key)) {
             agentPasteInvalidRows.push({ ...row, valid: false, error: "Duplikat dalam data tempelan" });
             return;
@@ -1620,11 +1859,12 @@
 
         const newCount = agentPastePreviewRows.filter((row) => row.import_status === "Baru").length;
         const updateCount = agentPastePreviewRows.length - newCount;
+        const kpCount = new Set(agentPastePreviewRows.map((row) => row.kp_code)).size;
         if (status) {
           status.className = `master-agent-paste-status ${agentPastePreviewRows.length ? "is-ready" : "is-error"}`;
           status.textContent = agentPastePreviewRows.length
-            ? `Terbaca ${agentPastePreviewRows.length} agen: ${newCount} baru, ${updateCount} akan diperbarui${agentPasteInvalidRows.length ? `, ${agentPasteInvalidRows.length} baris dilewati` : ""}. Periksa pratinjau sebelum menyimpan.`
-            : "Tidak ada data agen yang valid. Gunakan kolom Nama Agen, No HP, Penerima Fee, dan SPB.";
+            ? `Terbaca ${agentPastePreviewRows.length} agen dari ${kpCount} KP: ${newCount} baru, ${updateCount} akan diperbarui${agentPasteInvalidRows.length ? `, ${agentPasteInvalidRows.length} baris dilewati` : ""}. Periksa pratinjau sebelum menyimpan.`
+            : "Tidak ada data agen yang valid. Pastikan ada Kantor Unit/KP, Nama Agen, No HP, Penerima Fee, dan SPB.";
         }
         if (save) save.disabled = agentPastePreviewRows.length === 0;
         renderAgentPastePreview();
@@ -1633,7 +1873,6 @@
       async function saveAgentPaste() {
         const status = document.getElementById("agentPasteStatus");
         const save = document.getElementById("agentPasteSave");
-        const kpCode = document.getElementById("agentPasteKp")?.value || "BMK";
         if (!agentPastePreviewRows.length) {
           await previewAgentPaste();
           if (!agentPastePreviewRows.length) return;
@@ -1652,10 +1891,7 @@
           save.textContent = "Menyimpan...";
         }
         const rows = agentPastePreviewRows.map(({ import_status, valid, sourceLine, ...row }) => row);
-        const { data, error } = await client.rpc("import_master_agents", {
-          p_kp_code: kpCode,
-          p_rows: rows
-        });
+        const { data, error } = await client.rpc("import_master_agents_batch", { p_rows: rows });
         if (save) save.textContent = "Simpan ke Database";
         if (error) {
           if (save) save.disabled = false;
@@ -1671,7 +1907,7 @@
         const result = data || {};
         if (status) {
           status.className = "master-agent-paste-status is-success";
-          status.textContent = `Berhasil disimpan: ${result.new_agents || 0} agen baru, ${result.updated_agents || 0} agen diperbarui, dan ${result.spb_added || 0} hubungan SPB ditambahkan. Harga tidak disimpan.`;
+          status.textContent = `Berhasil disimpan untuk ${result.kp_processed || 0} KP: ${result.new_agents || 0} agen baru, ${result.updated_agents || 0} agen diperbarui, dan ${result.spb_added || 0} hubungan SPB ditambahkan. Harga tidak disimpan.`;
         }
       }
 
@@ -1740,7 +1976,7 @@
           return;
         }
         const status = document.getElementById("masterAgentStatus");
-        if (status) status.textContent = "Memuat database agen BMK...";
+        if (status) status.textContent = "Memuat database agen semua KP...";
         const client = getDbClient();
         if (!client) {
           if (status) status.textContent = "Database agen akan dimuat setelah login.";
@@ -1794,7 +2030,7 @@
         if (typeof original === "function" && !original.__tbsAgentDirectoryHook) {
           const hooked = async function (...args) {
             const result = await original.apply(this, args);
-            await loadAgentDirectory();
+            await Promise.all([loadAgentDirectory(), loadAgentImportKpOptions()]);
             return result;
           };
           hooked.__tbsAgentDirectoryHook = true;
@@ -1803,12 +2039,20 @@
         const masterNav = document.querySelector('[data-page="master"]');
         if (masterNav && !masterNav.dataset.tbsAgentHook) {
           masterNav.dataset.tbsAgentHook = "true";
-          masterNav.addEventListener("click", () => window.setTimeout(() => loadAgentDirectory(), 120));
+          masterNav.addEventListener("click", () => window.setTimeout(() => {
+            loadAgentDirectory();
+            loadAgentImportKpOptions();
+          }, 120));
         }
         const pasteInput = document.getElementById("agentPasteInput");
         if (pasteInput && !pasteInput.dataset.tbsPasteHook) {
           pasteInput.dataset.tbsPasteHook = "true";
           pasteInput.addEventListener("input", invalidateAgentPastePreview);
+        }
+        const kpSelect = document.getElementById("agentPasteKp");
+        if (kpSelect && !kpSelect.dataset.tbsPasteHook) {
+          kpSelect.dataset.tbsPasteHook = "true";
+          kpSelect.addEventListener("change", invalidateAgentPastePreview);
         }
       }
     
@@ -1971,7 +2215,10 @@
         installTonnageClickGuard();
         installAgentDirectoryHooks();
         refreshCompleteness();
-        window.setTimeout(() => loadAgentDirectory(), 700);
+        window.setTimeout(() => {
+          loadAgentDirectory();
+          loadAgentImportKpOptions();
+        }, 700);
         [250, 1000, 3000].forEach((delay) => window.setTimeout(() => {
           installParserGuards();
           installRefreshHooks();
@@ -1989,6 +2236,7 @@
       };
       window.renderAgentDirectory = renderAgentDirectory;
       window.loadAgentDirectory = loadAgentDirectory;
+      window.loadAgentImportKpOptions = loadAgentImportKpOptions;
       window.previewAgentPaste = previewAgentPaste;
       window.saveAgentPaste = saveAgentPaste;
       window.clearAgentPaste = clearAgentPaste;
