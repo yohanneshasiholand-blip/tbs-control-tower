@@ -1092,6 +1092,7 @@
             if (replacement.toLowerCase() !== match.toLowerCase()) normalized.push(match.trim());
             return replacement;
           });
+          next = next.replace(/\bkg\b/gi, " ");
           const plain = next.replace(/[>*_`]/g, " ").replace(/\s+/g, " ").trim();
           if (TBS_DATE_ONLY_LINE.test(plain) && !YEAR_TOKEN.test(plain)) {
             removed.push(plain);
