@@ -1126,6 +1126,41 @@
           validTotal: result.declared == null || Number(result.declared) === total
         };
       }
+
+      function isSsmSouthKpValue(value) {
+        return /^SSM(?:\s*-\s*|\s+)S(?:\b|$)/i.test(String(value || "").trim()) ||
+          /^SSMS(?:\b|$)/i.test(String(value || "").trim());
+      }
+
+      function installClosingKpHeadingGuard() {
+        const originalAlias = window.normalizeClosingKpAlias;
+        if (typeof originalAlias === "function" && !originalAlias.__tbsSsmSouthGuard) {
+          const guardedAlias = function (raw) {
+            if (isSsmSouthKpValue(raw)) return "SSM-S";
+            return originalAlias.apply(this, arguments);
+          };
+          guardedAlias.__tbsSsmSouthGuard = true;
+          window.normalizeClosingKpAlias = guardedAlias;
+        }
+
+        const originalHeading = window.closingKpFromHeading;
+        if (typeof originalHeading !== "function" || originalHeading.__tbsSsmSouthGuard) return;
+        const guardedHeading = function (raw) {
+          const line = String(raw || "")
+            .replace(/\u00a0/g, " ")
+            .replace(/[＊*_`~]/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (line && !/:/.test(line)) {
+            let match = line.match(/\b(?:tonase\s+(?:di\s+)?)KP\s*[.\-]?\s*(.+)$/i);
+            if (!match) match = line.match(/^KP\s*[.\-]?\s*(.+)$/i);
+            if (match && isSsmSouthKpValue(match[1])) return "SSM-S";
+          }
+          return originalHeading.apply(this, arguments);
+        };
+        guardedHeading.__tbsSsmSouthGuard = true;
+        window.closingKpFromHeading = guardedHeading;
+      }
     
       function patchParser(name) {
         const original = window[name];
@@ -2211,6 +2246,7 @@
     
       function bootGuard() {
         ensurePanels();
+        installClosingKpHeadingGuard();
         installParserGuards();
         installRefreshHooks();
         installTonnageClickGuard();
@@ -2221,6 +2257,7 @@
           loadAgentImportKpOptions();
         }, 700);
         [250, 1000, 3000].forEach((delay) => window.setTimeout(() => {
+          installClosingKpHeadingGuard();
           installParserGuards();
           installRefreshHooks();
           installTonnageClickGuard();
