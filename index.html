@@ -1092,9 +1092,16 @@
             if (replacement.toLowerCase() !== match.toLowerCase()) normalized.push(match.trim());
             return replacement;
           });
-          // Remove the kg unit whether it is spaced ("104.350 kg") or
-          // attached to the amount ("104.350kg"). Preserve supplier names.
-          next = next.replace(/(\d|-)\s*kg\b/gi, "$1 ");
+          // Remove the kg unit in every WhatsApp position we receive:
+          // "104.350kg", "104.350 kg (13)", "67.899 (10) kg",
+          // and even the legacy double-unit form "0 Kg (-) Kg".
+          next = next.replace(/(\d[\d.,]*|-)\s*kg\b/gi, "$1");
+          next = next.replace(/(\(\s*(?:\d+|-)\s*\))\s*kg\b/gi, "$1");
+
+          // Repair accidental spaces inside Indonesian thousands values,
+          // for example "158. 736" or "158 736".
+          next = next.replace(/(\d)[.,]\s+(?=\d{3}\b)/g, "$1.");
+          next = next.replace(/\b(\d{1,3})\s+(?=\d{3}\b)/g, "$1.");
           const plain = next.replace(/[>*_`]/g, " ").replace(/\s+/g, " ").trim();
           if (TBS_DATE_ONLY_LINE.test(plain) && !YEAR_TOKEN.test(plain)) {
             removed.push(plain);
