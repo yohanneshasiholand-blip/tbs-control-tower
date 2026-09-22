@@ -1092,7 +1092,9 @@
             if (replacement.toLowerCase() !== match.toLowerCase()) normalized.push(match.trim());
             return replacement;
           });
-          next = next.replace(/\bkg\b/gi, " ");
+          // Remove the kg unit whether it is spaced ("104.350 kg") or
+          // attached to the amount ("104.350kg"). Preserve supplier names.
+          next = next.replace(/(\d|-)\s*kg\b/gi, "$1 ");
           const plain = next.replace(/[>*_`]/g, " ").replace(/\s+/g, " ").trim();
           if (TBS_DATE_ONLY_LINE.test(plain) && !YEAR_TOKEN.test(plain)) {
             removed.push(plain);
